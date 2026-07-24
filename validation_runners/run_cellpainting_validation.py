@@ -99,6 +99,7 @@ def main():
     print("=" * 100)
 
     t0 = time.time()
+    t_import = time.time()
     try:
         d = load_cellpainting(device=device, per_class=args.per_class, sites_per_well=args.sites,
                               hw=args.hw, classes=classes)
@@ -108,10 +109,12 @@ def main():
     except Exception as e:
         print(f"ERROR (data) -- {type(e).__name__}: {str(e)[:70]}")
         return
+    import_dt = time.time() - t_import
     names = d["class_names"]
     ntr = len(d["train"].dense)
     nte = len(d["test"].dense)
-    print(f"loaded: train fields={ntr}  test fields={nte}  K={len(names)} classes  ({time.time()-t0:.0f}s)")
+    print(f"loaded: train fields={ntr}  test fields={nte}  K={len(names)} classes  "
+          f"(data import {import_dt:.1f}s)")
 
     # spatial-contract budget, scaled by --epochs_scale like the standard suite
     bud = BUDGET["spatial"]
@@ -137,7 +140,8 @@ def main():
     params = sum(p.numel() for p in mg.net.parameters())
     print("=" * 100)
     print(f"[{mg.contract:11}] CellPainting  retrieval_mAP={mapv:.4f}  (random ~{chance:.3f})   acc={acc:.4f}")
-    print(f"{'':13} arch=[{arch}]  params={params}  train_fields={ntr}  test_fields={nte}  {dt:.0f}s")
+    print(f"{'':13} arch=[{arch}]  params={params}  train_fields={ntr}  test_fields={nte}  "
+          f"{dt:.0f}s total ({import_dt:.1f}s data import)")
     print(f"{'':13} field={d['field']}")
     print("=" * 100)
 
