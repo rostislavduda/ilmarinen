@@ -1,6 +1,7 @@
 # Ilmarinen — a physics-principled neural-architecture meta-optimizer
 
 [![CI](https://github.com/rostislavduda/ilmarinen/actions/workflows/ci.yml/badge.svg)](https://github.com/rostislavduda/ilmarinen/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/rostislavduda/ilmarinen/branch/main/graph/badge.svg)](https://codecov.io/gh/rostislavduda/ilmarinen)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 `ilmarinen` selects a neural architecture — its computational *contract* (arena), its primitive
@@ -192,6 +193,12 @@ Nothing is written to hard-coded system paths. Downloads are cached under a sing
 as `$ILMARINEN_DATA_DIR` if set, else `<os-temp>/ilmarinen_data`. For offline use, drop pre-downloaded
 dataset files into `$ILMARINEN_UPLOADS_DIR` (defaults to `<base>/uploads`); loaders fall back to those.
 See `ilmarinen/core/paths.py`; set `ILMARINEN_DATA_VERBOSE=1` to log data provenance.
+
+## Citation
+
+If you use `ilmarinen` in academic work, please cite it — see [`CITATION.cff`](CITATION.cff)
+(GitHub's "Cite this repository" button exports BibTeX). A versioned DOI is minted for each
+GitHub Release once the repository is enabled on Zenodo.
 
 ## License
 

@@ -16,12 +16,14 @@ permissions:
 
 jobs:
   unit-tests:
+    # Fast per-interpreter check on every push/PR: the slower @pytest.mark.smoke
+    # end-to-end fits are deferred to the nightly workflow. NOTE: the job name is a
+    # required status check in branch protection — keep it stable.
     name: unit tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        # Supported interpreters (README: "Python 3.11 or 3.12 recommended").
         python-version: ["3.11", "3.12"]
 
     steps:
@@ -42,9 +44,6 @@ jobs:
           python -m pip install --upgrade pip
           # CPU-only torch keeps the install small and fast (no CUDA payload).
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          # Core runtime the unit suite imports (numpy, scipy) plus the guarded
-          # progress-bar dep (tqdm). Heavy dataset extras are lazily imported and
-          # not exercised by tests_unit/, so they are intentionally omitted.
           pip install "numpy>=1.26,<3" "scipy>=1.11" "tqdm>=4.60"
           pip install -r requirements-dev.txt
 
@@ -53,11 +52,54 @@ jobs:
           python --version
           python -c "import numpy, scipy, torch; print('numpy', numpy.__version__); print('scipy', scipy.__version__); print('torch', torch.__version__)"
 
-      - name: Run unit tests
-        # `python -m pytest` (not the bare `pytest` console script) puts the repo
-        # root on sys.path, so the in-place `ilmarinen` package imports without an
-        # install. Matches the documented invocation in the README.
-        run: python -m pytest tests_unit/ -v
+      - name: Run unit tests (fast subset)
+        run: python -m pytest tests_unit/ -m "not smoke" -v
+
+  coverage:
+    # Full suite (incl. smoke) on the primary interpreter, with coverage measured
+    # and uploaded to Codecov. Not a required check (report/threshold-free for now).
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install "numpy>=1.26,<3" "scipy>=1.11" "tqdm>=4.60"
+          pip install -r requirements-dev.txt pytest-cov
+
+      - name: Run full suite with coverage
+        run: python -m pytest tests_unit/ --cov=ilmarinen --cov-report=xml --cov-report=term-missing | tee coverage.txt
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          {
+            echo '### Coverage (ilmarinen)'
+            echo '```'
+            tail -n 25 coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        continue-on-error: true   # never fail CI on an upload hiccup
+        with:
+          files: ./coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}  # optional; tokenless works for public repos
+          fail_ci_if_error: false
 
   lint:
     name: lint (ruff)

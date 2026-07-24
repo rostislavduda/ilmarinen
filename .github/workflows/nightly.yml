@@ -1,0 +1,90 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 4 * * *"  # daily, 04:00 UTC
+  workflow_dispatch:       # allow manual runs
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  full-suite:
+    # The complete suite, including the slower @pytest.mark.smoke end-to-end fits
+    # that the per-PR CI skips — across both interpreters and on macOS (exercises
+    # the Apple-Silicon / CPU device-routing paths that Linux never hits).
+    name: full suite (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: macos-latest
+            python-version: "3.12"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            pip install torch --index-url https://download.pytorch.org/whl/cpu
+          else
+            pip install torch   # PyPI default is CPU-only on macOS
+          fi
+          pip install "numpy>=1.26,<3" "scipy>=1.11" "tqdm>=4.60"
+          pip install -r requirements-dev.txt
+
+      - name: Run full suite (incl. smoke)
+        run: python -m pytest tests_unit/ -v
+
+  docker-build:
+    # Validate the Dockerfile builds and the image passes its integrity check.
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t ilmarinen:ci .
+
+      - name: Integrity check inside image
+        run: docker run --rm ilmarinen:ci
+
+  lockfile-install:
+    # Ensure requirements.lock still resolves and installs cleanly (CPU torch),
+    # and that the package imports under the pinned set.
+    name: lockfile install check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install from lockfile
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.lock
+          pip install --no-deps .
+
+      - name: Integrity check
+        run: python -m ilmarinen._selfcheck
