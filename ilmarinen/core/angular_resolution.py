@@ -22,6 +22,7 @@ These invariant p_l are exactly the Steinhardt bond-orientational order paramete
 moments underlying SOAP and the ACE/MACE body-order expansion, so "how much angular order is in the
 data" is measured with the same objects the equivariant model uses internally.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -33,11 +34,9 @@ def _real_sph_l(rhat):
     matching the equivariant module's l=2 representation."""
     x, y, z = rhat[:, 0], rhat[:, 1], rhat[:, 2]
     Y0 = np.ones((len(rhat), 1))
-    Y1 = rhat                                            # (M,3)
+    Y1 = rhat  # (M,3)
     # l=2: 5 independent components of symtraceless(r outer r)
-    Y2 = np.stack([x * y, y * z, z * x,
-                   x * x - y * y,
-                   (2 * z * z - x * x - y * y) / np.sqrt(3.0)], axis=1)  # (M,5)
+    Y2 = np.stack([x * y, y * z, z * x, x * x - y * y, (2 * z * z - x * x - y * y) / np.sqrt(3.0)], axis=1)  # (M,5)
     return {0: Y0, 1: Y1, 2: Y2}
 
 
@@ -53,7 +52,7 @@ def _neighbor_moments(pos, edge_index, max_l=2):
     N = len(pos)
     out = np.zeros((N, max_l + 1))
     for l in range(max_l + 1):
-        Yl = Ys[l]                                       # (E, 2l+1)
+        Yl = Ys[l]  # (E, 2l+1)
         # sum contributions per destination node, then take the invariant norm
         acc = np.zeros((N, Yl.shape[1]))
         np.add.at(acc, dst, Yl)
@@ -65,8 +64,8 @@ def _graph_descriptor(graph, max_l=2):
     """Pool per-node moments to a per-GRAPH descriptor (sum over nodes) -> (max_l+1,)."""
     pos = np.asarray(graph["pos"], dtype=np.float64)
     ei = np.asarray(graph["edge_index"])
-    m = _neighbor_moments(pos, ei, max_l)               # (N, max_l+1)
-    return m.sum(0)                                      # graph-level, one value per order
+    m = _neighbor_moments(pos, ei, max_l)  # (N, max_l+1)
+    return m.sum(0)  # graph-level, one value per order
 
 
 def _r2(X, y):
@@ -89,7 +88,7 @@ def measure_angular_marginal(graphs, y, max_l=2):
     D = (D - D.mean(0)) / (D.std(0) + 1e-9)
     cum_r2 = {}
     for l in range(max_l + 1):
-        cum_r2[l] = _r2(D[:, :l + 1], y)
+        cum_r2[l] = _r2(D[:, : l + 1], y)
     marginals = {0: cum_r2[0]}
     for l in range(1, max_l + 1):
         marginals[l] = cum_r2[l] - cum_r2[l - 1]
@@ -107,7 +106,7 @@ def select_max_l(graphs, y, mu=0.01, max_l=2):
         if marg[l] >= mu:
             chosen = l
         else:
-            break                                       # marginal below price -> stop adding orders
+            break  # marginal below price -> stop adding orders
     return {"max_l": chosen, "marginals": marg, "cumulative_r2": res["cumulative_r2"]}
 
 
@@ -119,6 +118,7 @@ def select_max_l(graphs, y, mu=0.01, max_l=2):
 # cannot see). So the faithful marginal-value rule TRAINS short l<=k models and measures the actual
 # validation-loss reduction -- exactly the priced-depth methodology, applied to angular order.
 # --------------------------------------------------------------------------------------------------
+
 
 def measure_angular_marginal_model(graphs, y, collate_fn, fit_fn, orders=(0, 1, 2)):
     """Train a short model at each max-l in `orders` and return the validation loss at each, plus the
@@ -162,6 +162,7 @@ def select_max_l_priced(val_losses, mu):
 # model training, just a kernel solve on a subsample).
 # --------------------------------------------------------------------------------------------------
 
+
 def _poly_kernel(A, B, zeta=2, gamma=None):
     """(gamma <A,B> + 1)^zeta -- an inhomogeneous polynomial kernel; zeta>1 captures cross-order
     (nonlinear) angular interactions, the SOAP-GAP mechanism for beyond-3-body structure."""
@@ -177,11 +178,12 @@ def _krr_r2_cv(X, y, zeta=2, lam=1e-2, folds=4):
     Xs = (X - X.mean(0)) / (X.std(0) + 1e-9)
     y = y - y.mean()
     idx = np.arange(n)
-    rng = np.random.RandomState(0); rng.shuffle(idx)
+    rng = np.random.RandomState(0)
+    rng.shuffle(idx)
     fold_sz = n // folds
     r2s = []
     for f in range(folds):
-        te = idx[f * fold_sz:(f + 1) * fold_sz] if f < folds - 1 else idx[f * fold_sz:]
+        te = idx[f * fold_sz : (f + 1) * fold_sz] if f < folds - 1 else idx[f * fold_sz :]
         tr = np.setdiff1d(idx, te)
         Ktr = _poly_kernel(Xs[tr], Xs[tr], zeta)
         Kte = _poly_kernel(Xs[te], Xs[tr], zeta)
@@ -205,7 +207,7 @@ def measure_angular_marginal_nonlinear(graphs, y, max_l=2, zeta=2, sample=400):
     ys = y[sel]
     cum = {}
     for l in range(max_l + 1):
-        cum[l] = _krr_r2_cv(D[:, :l + 1], ys, zeta=zeta)
+        cum[l] = _krr_r2_cv(D[:, : l + 1], ys, zeta=zeta)
     marg = {0: cum[0]}
     for l in range(1, max_l + 1):
         marg[l] = cum[l] - cum[l - 1]
@@ -235,16 +237,18 @@ def select_max_l_nonlinear(graphs, y, mu=0.01, max_l=2, zeta=2, sample=400):
 # This is the recommended max-l selector.
 # --------------------------------------------------------------------------------------------------
 
+
 def _per_atom_distribution_descriptor(graph, max_l):
     """Distribution (mean, std, 2nd-moment, max) of each per-atom invariant moment p_l across atoms.
     Preserves per-environment angular structure that graph-summing destroys."""
-    m = _neighbor_moments(np.asarray(graph["pos"], dtype=np.float64),
-                          np.asarray(graph["edge_index"]), max_l)     # (N, max_l+1)
+    m = _neighbor_moments(
+        np.asarray(graph["pos"], dtype=np.float64), np.asarray(graph["edge_index"]), max_l
+    )  # (N, max_l+1)
     feats = []
     for l in range(max_l + 1):
         pl = m[:, l]
-        feats += [pl.mean(), pl.std(), (pl ** 2).mean(), (pl.max() if len(pl) else 0.0)]
-    return np.array(feats)                                            # (4*(max_l+1),)
+        feats += [pl.mean(), pl.std(), (pl**2).mean(), (pl.max() if len(pl) else 0.0)]
+    return np.array(feats)  # (4*(max_l+1),)
 
 
 def _cols_upto_order(l, max_l):
@@ -291,5 +295,4 @@ def select_max_l_faithful(graphs, y, mu=0.02, max_l=2, zeta=2, sample=1500):
             chosen = l
         best_lower = max(best_lower, cum[l])
     # recompute reported marginals relative to running best (informative, monotone baseline)
-    return {"max_l": chosen, "marginals": res["marginals"],
-            "cumulative_r2": cum}
+    return {"max_l": chosen, "marginals": res["marginals"], "cumulative_r2": cum}

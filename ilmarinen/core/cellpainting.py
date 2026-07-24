@@ -13,6 +13,7 @@ avoid field-of-view leakage.
 
 Requires `jump-portrait` (pip install jump-portrait) and network access to the gallery S3 at first build.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -74,6 +75,7 @@ def _tqdm_joblib(bar, n_jobs=8):
         return
     try:
         import joblib
+
         base = joblib.parallel.BatchCompletionCallBack
         # parallel_config (joblib>=1.3) or the older parallel_backend -- either forces a callback-firing
         # backend; both take (backend, n_jobs=...). Needed because n_jobs=1 fires no completion callback.
@@ -85,7 +87,7 @@ def _tqdm_joblib(bar, n_jobs=8):
     class _Cb(base):
         def __call__(self, *a, **k):
             try:
-                bar.update(self.batch_size)          # batch_size tasks (== images) completed in this callback
+                bar.update(self.batch_size)  # batch_size tasks (== images) completed in this callback
             except Exception:
                 pass
             return super().__call__(*a, **k)
@@ -102,6 +104,7 @@ def _robust_norm_resize(img, hw):
     """uint16 microscopy image -> float32 (hw,hw) in ~[0,1] via per-image 1-99 percentile contrast scaling
     (microscopy has a long bright tail; percentile clipping is the standard robust stretch), then resize."""
     from skimage.transform import resize
+
     a = img.astype(np.float32)
     NATIVE_SHAPE["shape"] = tuple(a.shape)
     lo, hi = np.percentile(a, 1.0), np.percentile(a, 99.0)
@@ -118,17 +121,18 @@ def _select_rows(rows, per_class, sites_per_well):
     predicate well_rank<N & site_rank<M reproduces exactly the selection for (per_class=N, sites_per_well=M).
     That stability is what lets the on-disk cache grow monotonically -- a larger request is a strict superset
     of a smaller one, so we only ever fetch the delta."""
-    wrank = {}                                   # well_key -> its well_rank (assigned once, on first sight)
-    scount = {}                                  # well_key -> next free site_rank
+    wrank = {}  # well_key -> its well_rank (assigned once, on first sight)
+    scount = {}  # well_key -> next free site_rank
     out = []
     for r in rows:
         wk = (r["Metadata_Plate"], r["Metadata_Well"])
         if wk not in wrank:
             if len(wrank) >= per_class:
-                continue                         # this class already has its full quota of distinct wells
-            wrank[wk] = len(wrank); scount[wk] = 0
+                continue  # this class already has its full quota of distinct wells
+            wrank[wk] = len(wrank)
+            scount[wk] = 0
         if scount[wk] >= sites_per_well:
-            continue                             # this well already has its full quota of sites
+            continue  # this well already has its full quota of sites
         out.append((r, wrank[wk], scount[wk]))
         scount[wk] += 1
     return out
@@ -153,7 +157,8 @@ def _plan_class(gene, source, per_class, sites_per_well, have):
     import pyarrow as pa
     import pyarrow.compute as pc
     from jump_portrait.fetch import get_item_location_metadata
-    meta = get_item_location_metadata(gene)                        # pyarrow Table of (source,plate,well,site,urls)
+
+    meta = get_item_location_metadata(gene)  # pyarrow Table of (source,plate,well,site,urls)
     meta = meta.filter(pc.equal(meta.column("Metadata_Source"), source))
     rmap, to_fetch = {}, []
     for r, wr, sr in _select_rows(meta.to_pylist(), per_class, sites_per_well):
@@ -171,12 +176,13 @@ def _fetch_rows(plans, channels, hw, progress=True, fetch_jobs=8):
     None if nothing was fetched. One shared tqdm bar advances per IMAGE across every class (see _tqdm_joblib
     for why a threading backend is forced). Each assembled field carries its canonical ranks from rank_map."""
     from jump_portrait.fetch import get_jump_image_batch
+
     total_imgs = sum(sub.num_rows * len(channels) for _, sub, _ in plans)
     Xs, ys, wells, sites, wr, sr = [], [], [], [], [], []
     with _image_bar(total_imgs, enabled=progress) as bar:
         for ci, sub, rmap in plans:
             with _tqdm_joblib(bar, n_jobs=fetch_jobs):
-                md, imgs = get_jump_image_batch(sub, channels=list(channels), site=None)   # parallel S3 fetch
+                md, imgs = get_jump_image_batch(sub, channels=list(channels), site=None)  # parallel S3 fetch
             # regroup the flat (field x channel) output into one (C,hw,hw) stack per field
             groups = {}
             for d, im in zip(md, imgs):
@@ -185,29 +191,47 @@ def _fetch_rows(plans, channels, hw, progress=True, fetch_jobs=8):
                 key = (d["Metadata_Plate"], d["Metadata_Well"], str(d["Metadata_Site"]))
                 groups.setdefault(key, {})[d["Metadata_Channel"]] = im
             for key, chdict in groups.items():
-                if key not in rmap:                                # defensive: only assemble planned fields
+                if key not in rmap:  # defensive: only assemble planned fields
                     continue
-                if not all(c in chdict for c in channels):         # need every channel present
+                if not all(c in chdict for c in channels):  # need every channel present
                     continue
                 plate, well, site = key
                 Xs.append(np.stack([_robust_norm_resize(chdict[c], hw) for c in channels], 0))
                 w, s = rmap[key]
-                ys.append(ci); wells.append(f"{plate}/{well}"); sites.append(site); wr.append(w); sr.append(s)
+                ys.append(ci)
+                wells.append(f"{plate}/{well}")
+                sites.append(site)
+                wr.append(w)
+                sr.append(s)
     if not Xs:
         return None
-    return (np.stack(Xs, 0).astype(np.float32), np.asarray(ys, np.int64), np.asarray(wells),
-            np.asarray(sites), np.asarray(wr, np.int64), np.asarray(sr, np.int64))
+    return (
+        np.stack(Xs, 0).astype(np.float32),
+        np.asarray(ys, np.int64),
+        np.asarray(wells),
+        np.asarray(sites),
+        np.asarray(wr, np.int64),
+        np.asarray(sr, np.int64),
+    )
 
 
-def build_cellpainting(hw=48, per_class=12, sites_per_well=2, classes=CLASSES, channels=CHANNELS, source=SOURCE,
-                       progress=True, fetch_jobs=8):
+def build_cellpainting(
+    hw=48,
+    per_class=12,
+    sites_per_well=2,
+    classes=CLASSES,
+    channels=CHANNELS,
+    source=SOURCE,
+    progress=True,
+    fetch_jobs=8,
+):
     """Fetch and assemble the dataset from S3, FROM SCRATCH. Returns (X (n,C,hw,hw) float32, y (n,) int64,
     wells (n,) str, class_names). Per class, take up to `per_class` distinct WELLS and up to `sites_per_well`
     fields (sites) each. Normal callers go through the incrementally-cached `_cached_arrays`; this is the
     no-cache builder it (and any direct caller) is built on. `progress` shows a per-IMAGE tqdm bar."""
     plans = []
     for ci, gene in enumerate(classes):
-        sub, rmap = _plan_class(gene, source, per_class, sites_per_well, have=set())   # have=empty -> fetch all
+        sub, rmap = _plan_class(gene, source, per_class, sites_per_well, have=set())  # have=empty -> fetch all
         if sub is not None:
             plans.append((ci, sub, rmap))
     got = _fetch_rows(plans, channels, hw, progress=progress, fetch_jobs=fetch_jobs) if plans else None
@@ -234,6 +258,7 @@ def _cached_arrays(hw, per_class, sites_per_well, classes, progress=True, fetch_
     NOTE: the cache-file naming changed from the older `..._pc{n}_spw{m}.npz` scheme, so a pre-existing
     legacy cache is not reused (it is simply ignored, and the first run rebuilds under the new name)."""
     from .paths import data_dir
+
     tag = f"cellpainting_{'_'.join(classes)}_s{SOURCE}_hw{hw}.npz"
     path = os.path.join(data_dir(), tag)
 
@@ -246,8 +271,10 @@ def _cached_arrays(hw, per_class, sites_per_well, classes, progress=True, fetch_
     else:
         X = np.empty((0, len(CHANNELS), hw, hw), np.float32)
         y = np.empty((0,), np.int64)
-        wells = np.empty((0,), dtype="<U1"); sites = np.empty((0,), dtype="<U1")
-        wrank = np.empty((0,), np.int64); srank = np.empty((0,), np.int64)
+        wells = np.empty((0,), dtype="<U1")
+        sites = np.empty((0,), dtype="<U1")
+        wrank = np.empty((0,), np.int64)
+        srank = np.empty((0,), np.int64)
         pc_max = spw_max = 0
 
     # --- FAST PATH: the request already fits within the high-water mark -> rank-subset, no network ---
@@ -257,7 +284,7 @@ def _cached_arrays(hw, per_class, sites_per_well, classes, progress=True, fetch_
 
     # --- GROW PATH: fetch only the delta up to the new high-water mark (per-dimension max) ---
     target_pc, target_spw = max(per_class, pc_max), max(sites_per_well, spw_max)
-    have = set(zip(wells.tolist(), sites.tolist()))                # identities already on disk
+    have = set(zip(wells.tolist(), sites.tolist()))  # identities already on disk
     plans = []
     for ci, gene in enumerate(classes):
         sub, rmap = _plan_class(gene, SOURCE, target_pc, target_spw, have)
@@ -266,14 +293,27 @@ def _cached_arrays(hw, per_class, sites_per_well, classes, progress=True, fetch_
     got = _fetch_rows(plans, CHANNELS, hw, progress=progress, fetch_jobs=fetch_jobs) if plans else None
     if got is not None:
         nX, ny, nwells, nsites, nwr, nsr = got
-        X = np.concatenate([X, nX]); y = np.concatenate([y, ny])
-        wells = np.concatenate([wells, nwells]); sites = np.concatenate([sites, nsites])
-        wrank = np.concatenate([wrank, nwr]); srank = np.concatenate([srank, nsr])
-    pc_max, spw_max = target_pc, target_spw                        # remember we've now covered this amount
+        X = np.concatenate([X, nX])
+        y = np.concatenate([y, ny])
+        wells = np.concatenate([wells, nwells])
+        sites = np.concatenate([sites, nsites])
+        wrank = np.concatenate([wrank, nwr])
+        srank = np.concatenate([srank, nsr])
+    pc_max, spw_max = target_pc, target_spw  # remember we've now covered this amount
     if len(X) == 0:
         raise RuntimeError("Cell Painting: no fields fetched (check jump-portrait / S3 access).")
-    np.savez(path, X=X, y=y, wells=wells, sites=sites, wrank=wrank, srank=srank,
-             classes=np.array(list(classes)), pc_max=pc_max, spw_max=spw_max)
+    np.savez(
+        path,
+        X=X,
+        y=y,
+        wells=wells,
+        sites=sites,
+        wrank=wrank,
+        srank=srank,
+        classes=np.array(list(classes)),
+        pc_max=pc_max,
+        spw_max=spw_max,
+    )
     idx = _subset_indices(y, wrank, srank, per_class, sites_per_well)
     return X[idx], y[idx], wells[idx], list(classes)
 
@@ -289,6 +329,7 @@ def resample_stack(X, hw):
     controlled choice for a sweep (identical fields and normalization, resolution the only variable),
     but confirm a CHOSEN hw against a direct build before shipping it."""
     from skimage.transform import resize
+
     X = np.asarray(X)
     if X.shape[-1] == hw and X.shape[-2] == hw:
         return X.astype(np.float32)
@@ -308,8 +349,10 @@ def split_by_well(X, y, wells, classes, split_seed=0):
     import torch
 
     from .allgraph import AllData
+
     # per-channel z-score (channels are distinct stains with different dynamic ranges)
-    mu = X.mean((0, 2, 3), keepdims=True); sd = X.std((0, 2, 3), keepdims=True) + 1e-6
+    mu = X.mean((0, 2, 3), keepdims=True)
+    sd = X.std((0, 2, 3), keepdims=True) + 1e-6
     X = (X - mu) / sd
     # split by WELL, STRATIFIED per class -- a well's fields never straddle train/test (no field-of-view
     # leakage) and every class contributes wells to both sides (so the retrieval metric is well-posed).
@@ -319,20 +362,35 @@ def split_by_well(X, y, wells, classes, split_seed=0):
         by_class.setdefault(int(lab), set()).add(w)
     te_wells = set()
     for lab, ws in by_class.items():
-        ws = sorted(ws); rng.shuffle(ws)
+        ws = sorted(ws)
+        rng.shuffle(ws)
         k = max(1, int(round(0.25 * len(ws)))) if len(ws) > 1 else 0
         te_wells.update(ws[:k])
-    te_mask = np.array([w in te_wells for w in wells]); tr_mask = ~te_mask
+    te_mask = np.array([w in te_wells for w in wells])
+    tr_mask = ~te_mask
     Xt = torch.tensor(X)
-    return {"train": AllData.dense_tensor(Xt[tr_mask], y=y[tr_mask]),
-            "test": AllData.dense_tensor(Xt[te_mask], y=y[te_mask]),
-            "task": "classification", "chance": 1.0 / len(classes), "class_names": list(classes),
-            "field": "cell biology (JUMP Cell Painting, CRISPR perturbation ID)",
-            "sota": "acc n/a (custom 6-gene perturbation-ID task; CP benchmarks report retrieval mAP)"}
+    return {
+        "train": AllData.dense_tensor(Xt[tr_mask], y=y[tr_mask]),
+        "test": AllData.dense_tensor(Xt[te_mask], y=y[te_mask]),
+        "task": "classification",
+        "chance": 1.0 / len(classes),
+        "class_names": list(classes),
+        "field": "cell biology (JUMP Cell Painting, CRISPR perturbation ID)",
+        "sota": "acc n/a (custom 6-gene perturbation-ID task; CP benchmarks report retrieval mAP)",
+    }
 
 
-def load_cellpainting(reduced=False, device="cpu", per_class=None, sites_per_well=2, hw=48, classes=None,
-                      split_seed=0, progress=True, fetch_jobs=8):
+def load_cellpainting(
+    reduced=False,
+    device="cpu",
+    per_class=None,
+    sites_per_well=2,
+    hw=48,
+    classes=None,
+    split_seed=0,
+    progress=True,
+    fetch_jobs=8,
+):
     """JUMP Cell Painting K-class perturbation-ID for the spatial contract. `per_class` (distinct wells per
     class) is the data-amount knob; when None it defaults from `reduced` (6 quick / 18 full). Returns the
     standard train/test/task/... dict plus 'class_names' (for the retrieval metric).
@@ -344,6 +402,7 @@ def load_cellpainting(reduced=False, device="cpu", per_class=None, sites_per_wel
     if per_class is None:
         per_class = 6 if reduced else 18
     classes = tuple(classes) if classes else CLASSES
-    X, y, wells, classes = _cached_arrays(hw, per_class, sites_per_well, classes, progress=progress,
-                                          fetch_jobs=fetch_jobs)
+    X, y, wells, classes = _cached_arrays(
+        hw, per_class, sites_per_well, classes, progress=progress, fetch_jobs=fetch_jobs
+    )
     return split_by_well(X, y, wells, classes, split_seed=split_seed)

@@ -72,7 +72,7 @@ def score_to_nll(score, task, n_classes=2, y_std=1.0):
     """
     if task == "regression":
         r2 = float(np.clip(score, -10.0, 1.0 - 1e-4))
-        sigma2 = max((1.0 - r2) * (y_std ** 2), 1e-6)
+        sigma2 = max((1.0 - r2) * (y_std**2), 1e-6)
         return 0.5 * math.log(2.0 * math.pi * math.e * sigma2)
     # classification
     a = float(np.clip(score, 1e-4, 1.0 - 1e-4))
@@ -117,21 +117,29 @@ def contract_evidence(scores, omegas, n, task, n_classes=2, y_std=1.0, mu_c=1.0,
         "neg_log_joint": {c: float(x) for c, x in zip(cs, v)},
         "nll": {c: float(Lhat[c]) for c in cs},
         "omega_struct": {c: float(omegas.get(c, 0.0)) for c in cs},
-        "n": int(n), "mu_c": float(mu_c), "temperature": float(temperature),
+        "n": int(n),
+        "mu_c": float(mu_c),
+        "temperature": float(temperature),
         "posterior_entropy": ent,
         "max_entropy": float(math.log(len(cs))) if len(cs) > 1 else 0.0,
-        "note": ("approximate contract evidence: -log p(c|data) ~ n*Lhat_c + mu_c*Omega_struct(c) "
-                 "(parameter-Occam term cancels at the shared bake-off budget). MAP == argmin J."),
+        "note": (
+            "approximate contract evidence: -log p(c|data) ~ n*Lhat_c + mu_c*Omega_struct(c) "
+            "(parameter-Occam term cancels at the shared bake-off budget). MAP == argmin J."
+        ),
     }
 
 
 def format_evidence(ev):
     """One-line-per-contract human-readable summary of the contract posterior."""
-    lines = [f"contract posterior (n={ev['n']}, mu_c={ev['mu_c']}, "
-             f"entropy={ev['posterior_entropy']:.3f}/{ev['max_entropy']:.3f} nats):"]
+    lines = [
+        f"contract posterior (n={ev['n']}, mu_c={ev['mu_c']}, "
+        f"entropy={ev['posterior_entropy']:.3f}/{ev['max_entropy']:.3f} nats):"
+    ]
     order = sorted(ev["posterior"], key=lambda c: ev["neg_log_joint"][c])
     for c in order:
         star = "  <- MAP" if c == ev["map"] else ""
-        lines.append(f"  {c:12} P={ev['posterior'][c]:.3f}  n*NLL+Omega={ev['neg_log_joint'][c]:8.2f}  "
-                     f"(NLL={ev['nll'][c]:.3f}, Omega={ev['omega_struct'][c]:.2f}){star}")
+        lines.append(
+            f"  {c:12} P={ev['posterior'][c]:.3f}  n*NLL+Omega={ev['neg_log_joint'][c]:8.2f}  "
+            f"(NLL={ev['nll'][c]:.3f}, Omega={ev['omega_struct'][c]:.2f}){star}"
+        )
     return "\n".join(lines)

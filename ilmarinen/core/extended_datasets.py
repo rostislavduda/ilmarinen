@@ -71,10 +71,15 @@ def _heat3d_evolve(u0, steps, dt=0.12, dx=1.0):
     snaps = []
     c = dt / (dx * dx)
     for _ in range(steps):
-        lap = (-6.0 * u
-               + np.roll(u, 1, 0) + np.roll(u, -1, 0)
-               + np.roll(u, 1, 1) + np.roll(u, -1, 1)
-               + np.roll(u, 1, 2) + np.roll(u, -1, 2))
+        lap = (
+            -6.0 * u
+            + np.roll(u, 1, 0)
+            + np.roll(u, -1, 0)
+            + np.roll(u, 1, 1)
+            + np.roll(u, -1, 1)
+            + np.roll(u, 1, 2)
+            + np.roll(u, -1, 2)
+        )
         u = u + c * lap
         snaps.append(u.copy())
     return np.stack(snaps).astype(np.float32)
@@ -86,9 +91,12 @@ def load_heatdiffusion3d(reduced, device):
     total heat (conserved) plus the initial dominant-mode amplitude -- so the task genuinely needs the
     spatiotemporal structure. Solver-generated locally, no external download."""
     from .allgraph import AllData
-    S = 6            # grid side (D=H=W=S); kept small because rank-6 (b,C,T,D,H,W) 4d convs are compute-heavy
-    T = 4            # timesteps
-    n = qscale(220) if reduced else 500   # this regression R2 needs the samples; the reduced 4d epoch budget is the speedup
+
+    S = 6  # grid side (D=H=W=S); kept small because rank-6 (b,C,T,D,H,W) 4d convs are compute-heavy
+    T = 4  # timesteps
+    n = (
+        qscale(220) if reduced else 500
+    )  # this regression R2 needs the samples; the reduced 4d epoch budget is the speedup
     rng = np.random.RandomState(0)
     X = np.zeros((n, 1, T, S, S, S), dtype=np.float32)
     y = np.zeros(n, dtype=np.float32)
@@ -101,7 +109,7 @@ def load_heatdiffusion3d(reduced, device):
             kx, ky, kz = rng.randint(1, 3, 3)
             amp = rng.randn()
             u0 += amp * np.cos(kx * XX + ky * YY + kz * ZZ + rng.rand() * 2 * np.pi)
-        traj = _heat3d_evolve(u0, T)                          # (T, S, S, S)
+        traj = _heat3d_evolve(u0, T)  # (T, S, S, S)
         X[i, 0] = traj
         # target: how much field amplitude DECAYS from the first to the last snapshot -- a genuinely
         # spatiotemporal observable (it requires comparing timesteps; the decay rate of a diffusing field
@@ -112,10 +120,15 @@ def load_heatdiffusion3d(reduced, device):
     y = (y - y.mean()) / (y.std() + 1e-8)
     ntr = int(0.75 * n)
     import torch
-    return {"train": AllData.dense_tensor(torch.tensor(X[:ntr]), y=y[:ntr]),
-            "test": AllData.dense_tensor(torch.tensor(X[ntr:]), y=y[ntr:]),
-            "task": "regression", "chance": 0.0, "field": "physics (3D heat/diffusion equation, spatiotemporal)",
-            "sota": "R2 n/a (synthetic-from-solver; -> 1 for a sufficient 4d model)"}
+
+    return {
+        "train": AllData.dense_tensor(torch.tensor(X[:ntr]), y=y[:ntr]),
+        "test": AllData.dense_tensor(torch.tensor(X[ntr:]), y=y[ntr:]),
+        "task": "regression",
+        "chance": 0.0,
+        "field": "physics (3D heat/diffusion equation, spatiotemporal)",
+        "sota": "R2 n/a (synthetic-from-solver; -> 1 for a sufficient 4d model)",
+    }
 
 
 # --------------------------------------------------------------------------- OPERATOR: 2D wave equation
@@ -123,11 +136,11 @@ def _wave2d_evolve(u0, steps, c=0.25, dt=0.2, dx=1.0):
     """Explicit 2D wave equation u_tt = c^2 laplacian(u) (leapfrog), zero initial velocity. Returns the field
     after `steps` steps. u0: (H,W)."""
     u_prev = u0.astype(np.float32).copy()
-    lap0 = (-4.0 * u0 + np.roll(u0, 1, 0) + np.roll(u0, -1, 0) + np.roll(u0, 1, 1) + np.roll(u0, -1, 1))
+    lap0 = -4.0 * u0 + np.roll(u0, 1, 0) + np.roll(u0, -1, 0) + np.roll(u0, 1, 1) + np.roll(u0, -1, 1)
     r = (c * dt / dx) ** 2
-    u = u0 + 0.5 * r * lap0                                    # first step, zero initial velocity
+    u = u0 + 0.5 * r * lap0  # first step, zero initial velocity
     for _ in range(steps - 1):
-        lap = (-4.0 * u + np.roll(u, 1, 0) + np.roll(u, -1, 0) + np.roll(u, 1, 1) + np.roll(u, -1, 1))
+        lap = -4.0 * u + np.roll(u, 1, 0) + np.roll(u, -1, 0) + np.roll(u, 1, 1) + np.roll(u, -1, 1)
         u_next = 2.0 * u - u_prev + r * lap
         u_prev, u = u, u_next
     return u.astype(np.float32)
@@ -138,7 +151,9 @@ def load_wave2d(reduced, device):
     PDE (distinct from Burgers' nonlinear advection and Darcy's elliptic diffusion), exercising the operator
     contract and priced mode selection on different spectral content. Solver-generated locally."""
     from .allgraph import AllData
-    N = 32; n = qscale(180) if reduced else 400
+
+    N = 32
+    n = qscale(180) if reduced else 400
     rng = np.random.RandomState(0)
     xs = np.linspace(0, 2 * np.pi, N, endpoint=False)
     XX, YY = np.meshgrid(xs, xs, indexing="ij")
@@ -150,17 +165,23 @@ def load_wave2d(reduced, device):
             u0 += (rng.randn() / (kx + ky)) * np.sin(kx * XX + ky * YY + rng.rand() * 2 * np.pi)
         a0.append(u0.astype(np.float32))
         aT.append(_wave2d_evolve(u0, steps=12))
-    a0 = np.array(a0, np.float32); aT = np.array(aT, np.float32)
+    a0 = np.array(a0, np.float32)
+    aT = np.array(aT, np.float32)
     ntr = int(0.75 * n)
-    return {"train": AllData.functions(a=a0[:ntr], y=aT[:ntr]),
-            "test": AllData.functions(a=a0[ntr:], y=aT[ntr:]),
-            "task": "regression", "chance": 0.0, "field": "PDE (2D wave equation, hyperbolic)",
-            "sota": "field R2 ~0.99 (FNO-class)"}
+    return {
+        "train": AllData.functions(a=a0[:ntr], y=aT[:ntr]),
+        "test": AllData.functions(a=a0[ntr:], y=aT[ntr:]),
+        "task": "regression",
+        "chance": 0.0,
+        "field": "PDE (2D wave equation, hyperbolic)",
+        "sota": "field R2 ~0.99 (FNO-class)",
+    }
 
 
 # --------------------------------------------------------------------------- SEQUENCE: Hungarian chickenpox
-_CHICKENPOX_URL = ("https://raw.githubusercontent.com/benedekrozemberczki/"
-                   "pytorch_geometric_temporal/master/dataset/chickenpox.json")
+_CHICKENPOX_URL = (
+    "https://raw.githubusercontent.com/benedekrozemberczki/pytorch_geometric_temporal/master/dataset/chickenpox.json"
+)
 
 
 def load_chickenpox(reduced, device):
@@ -174,13 +195,15 @@ def load_chickenpox(reduced, device):
 
     from .allgraph import AllData
     from .data_sources import pyg_temporal_json
+
     j = pyg_temporal_json("chickenpox")
-    FX = np.asarray(j["FX"], dtype=np.float32)                # (weeks, counties) = (521, 20)
+    FX = np.asarray(j["FX"], dtype=np.float32)  # (weeks, counties) = (521, 20)
     weeks, counties = FX.shape
-    W = 8                                                     # window length
-    cut = int(0.75 * weeks)                                   # TIME split: early weeks train, late weeks test
+    W = 8  # window length
+    cut = int(0.75 * weeks)  # TIME split: early weeks train, late weeks test
     # standardize each county's series using TRAIN-PERIOD stats only (no look-ahead into the test weeks)
-    mu = FX[:cut].mean(0, keepdims=True); sd = FX[:cut].std(0, keepdims=True) + 1e-6
+    mu = FX[:cut].mean(0, keepdims=True)
+    sd = FX[:cut].std(0, keepdims=True) + 1e-6
     FX = (FX - mu) / sd
     # windowed forecasting, split by TIME per county (a window is a test sample iff its TARGET week >= cut), so
     # every county appears in both splits but test targets are strictly later than train -- the standard
@@ -189,18 +212,24 @@ def load_chickenpox(reduced, device):
     for cty in range(counties):
         s = FX[:, cty]
         for t in range(W, weeks):
-            (Xtr if t < cut else Xte).append(s[t - W:t])
+            (Xtr if t < cut else Xte).append(s[t - W : t])
             (ytr if t < cut else yte).append(s[t])
-    Xtr = np.asarray(Xtr, np.float32)[:, :, None]; ytr = np.asarray(ytr, np.float32)
-    Xte = np.asarray(Xte, np.float32)[:, :, None]; yte = np.asarray(yte, np.float32)
-    if reduced:                                              # cap each split, preserving time order
+    Xtr = np.asarray(Xtr, np.float32)[:, :, None]
+    ytr = np.asarray(ytr, np.float32)
+    Xte = np.asarray(Xte, np.float32)[:, :, None]
+    yte = np.asarray(yte, np.float32)
+    if reduced:  # cap each split, preserving time order
         ktr = np.linspace(0, len(Xtr) - 1, min(len(Xtr), qscale(1500))).astype(int)
         kte = np.linspace(0, len(Xte) - 1, min(len(Xte), qscale(500))).astype(int)
         Xtr, ytr, Xte, yte = Xtr[ktr], ytr[ktr], Xte[kte], yte[kte]
-    return {"train": AllData.dense_tensor(torch.tensor(Xtr), y=ytr),
-            "test": AllData.dense_tensor(torch.tensor(Xte), y=yte),
-            "task": "regression", "chance": 0.0, "field": "medicine (epidemiology: Hungarian chickenpox cases)",
-            "sota": "R2 ~0 (recurrent GNNs ~ mean predictor; MSE ~1.1 on z-scored targets, PyG-Temporal)"}
+    return {
+        "train": AllData.dense_tensor(torch.tensor(Xtr), y=ytr),
+        "test": AllData.dense_tensor(torch.tensor(Xte), y=yte),
+        "task": "regression",
+        "chance": 0.0,
+        "field": "medicine (epidemiology: Hungarian chickenpox cases)",
+        "sota": "R2 ~0 (recurrent GNNs ~ mean predictor; MSE ~1.1 on z-scored targets, PyG-Temporal)",
+    }
 
 
 # --------------------------------------------------------------------------- SEQUENCE: superconductivity (physics)
@@ -213,21 +242,29 @@ def load_superconductivity(reduced, device):
 
     from .allgraph import AllData
     from .data_sources import superconductivity_arrays
+
     X, y = superconductivity_arrays()
     # standardize features and target
     X = (X - X.mean(0, keepdims=True)) / (X.std(0, keepdims=True) + 1e-6)
     y = (y - y.mean()) / (y.std() + 1e-6)
     n = len(X)
-    rng = np.random.RandomState(0); perm = rng.permutation(n)
+    rng = np.random.RandomState(0)
+    perm = rng.permutation(n)
     if reduced:
-        perm = perm[:qscale(800)]; n = len(perm)        # capped: the 81-feature vector routes to the sequence
-                                                        # contract, whose RNN/conv primitives are ~O(features) per
-                                                        # sample, so a smaller subset keeps the quick suite fast
-    ntr = int(0.8 * n); tr, te = perm[:ntr], perm[ntr:]
-    return {"train": AllData.dense_tensor(torch.tensor(X[tr]), y=y[tr]),
-            "test": AllData.dense_tensor(torch.tensor(X[te]), y=y[te]),
-            "task": "regression", "chance": 0.0, "field": "physics (superconductor critical temperature)",
-            "sota": "R2 ~0.92 (XGBoost, Hamidieh 2018)"}
+        perm = perm[: qscale(800)]
+        n = len(perm)  # capped: the 81-feature vector routes to the sequence
+        # contract, whose RNN/conv primitives are ~O(features) per
+        # sample, so a smaller subset keeps the quick suite fast
+    ntr = int(0.8 * n)
+    tr, te = perm[:ntr], perm[ntr:]
+    return {
+        "train": AllData.dense_tensor(torch.tensor(X[tr]), y=y[tr]),
+        "test": AllData.dense_tensor(torch.tensor(X[te]), y=y[te]),
+        "task": "regression",
+        "chance": 0.0,
+        "field": "physics (superconductor critical temperature)",
+        "sota": "R2 ~0.92 (XGBoost, Hamidieh 2018)",
+    }
 
 
 # --------------------------------------------------------------------------- EQUIVARIANT: rMD17 aspirin
@@ -240,30 +277,45 @@ def load_rmd17_aspirin(reduced, device):
     from .allgraph import AllData
     from .data_sources import rmd17_npz
     from .rmd17 import load_rmd17 as _l
+
     npz = rmd17_npz("aspirin")
     tmp = tempfile.NamedTemporaryFile(suffix=".npz", delete=False)
-    np.savez(tmp.name, **{k: npz[k] for k in npz.files}); tmp.close()
+    np.savez(tmp.name, **{k: npz[k] for k in npz.files})
+    tmp.close()
     data = _l(tmp.name, max_conf=qscale(800) if reduced else 4000)
-    Eraw = data["energies"].astype("f"); ys = float(Eraw.std() + 1e-8)   # retain kcal/mol scale for physical MAE
+    Eraw = data["energies"].astype("f")
+    ys = float(Eraw.std() + 1e-8)  # retain kcal/mol scale for physical MAE
     E = (Eraw - Eraw.mean()) / ys
-    Z = data["Z"]; elems = sorted(set(Z.tolist())); emap = {e: i for i, e in enumerate(elems)}
+    Z = data["Z"]
+    elems = sorted(set(Z.tolist()))
+    emap = {e: i for i, e in enumerate(elems)}
     feat0 = np.zeros((len(Z), len(elems)), "f")
     for i, z in enumerate(Z):
         feat0[i, emap[z]] = 1.0
     n = len(E)
     nf, ed, pos = [], [], []
     for i in range(n):
-        p = data["coords"][i]; D = np.linalg.norm(p[:, None] - p[None], axis=-1)
+        p = data["coords"][i]
+        D = np.linalg.norm(p[:, None] - p[None], axis=-1)
         src, dst = np.where((D < 3.0) & (D > 0))
-        nf.append(feat0); ed.append(np.stack([src, dst])); pos.append(p.astype("f"))
-    rng = np.random.RandomState(0); perm = rng.permutation(n); ntr = int(0.8 * n)
+        nf.append(feat0)
+        ed.append(np.stack([src, dst]))
+        pos.append(p.astype("f"))
+    rng = np.random.RandomState(0)
+    perm = rng.permutation(n)
+    ntr = int(0.8 * n)
     tr, te = perm[:ntr], perm[ntr:]
-    return {"train": AllData.graphs([nf[i] for i in tr], [ed[i] for i in tr], y=E[tr], positions=[pos[i] for i in tr]),
-            "test": AllData.graphs([nf[i] for i in te], [ed[i] for i in te], y=E[te], positions=[pos[i] for i in te]),
-            "task": "regression", "chance": 0.0, "field": "molecular dynamics (aspirin, 21 atoms)",
-            "target_scale": ys, "target_units": "kcal/mol",   # energy MAE in physical units (forces: follow-up)
-            "sota": "energy MAE ~0.05 kcal/mol (~2.2 meV); force MAE ~6-8 meV/A (MACE/NequIP, rMD17 1000 configs); R2 ~0.999+",
-            "rotated": True}
+    return {
+        "train": AllData.graphs([nf[i] for i in tr], [ed[i] for i in tr], y=E[tr], positions=[pos[i] for i in tr]),
+        "test": AllData.graphs([nf[i] for i in te], [ed[i] for i in te], y=E[te], positions=[pos[i] for i in te]),
+        "task": "regression",
+        "chance": 0.0,
+        "field": "molecular dynamics (aspirin, 21 atoms)",
+        "target_scale": ys,
+        "target_units": "kcal/mol",  # energy MAE in physical units (forces: follow-up)
+        "sota": "energy MAE ~0.05 kcal/mol (~2.2 meV); force MAE ~6-8 meV/A (MACE/NequIP, rMD17 1000 configs); R2 ~0.999+",
+        "rotated": True,
+    }
 
 
 # --------------------------------------------------------------------------- VOLUMETRIC: MedMNIST 3D (medicine)
@@ -272,37 +324,60 @@ def _load_medmnist3d(flag, field, sota, chance, reduced):
 
     from .allgraph import AllData
     from .data_sources import medmnist_arrays
+
     d = medmnist_arrays(flag)
-    Xtr = np.asarray(d["train_images"], dtype=np.float32); ytr = np.asarray(d["train_labels"]).astype(np.int64).ravel()
-    Xte = np.asarray(d["test_images"], dtype=np.float32); yte = np.asarray(d["test_labels"]).astype(np.int64).ravel()
+    Xtr = np.asarray(d["train_images"], dtype=np.float32)
+    ytr = np.asarray(d["train_labels"]).astype(np.int64).ravel()
+    Xte = np.asarray(d["test_images"], dtype=np.float32)
+    yte = np.asarray(d["test_labels"]).astype(np.int64).ravel()
     # standardize intensities; add a channel axis -> (n, 1, D, H, W) for the volumetric contract
     mu, sd = Xtr.mean(), Xtr.std() + 1e-6
-    def prep(X): return torch.tensor((X - mu) / sd).unsqueeze(1)
+
+    def prep(X):
+        return torch.tensor((X - mu) / sd).unsqueeze(1)
+
     ntr = min(len(Xtr), qscale(500)) if reduced else len(Xtr)
-    return {"train": AllData.dense_tensor(prep(Xtr[:ntr]), y=ytr[:ntr]),
-            "test": AllData.dense_tensor(prep(Xte), y=yte),
-            # imbalanced binary: the MedMNIST leaderboard's headline metric is ROC-AUC (accuracy is
-            # misleading under class imbalance), so report AUC to stay comparable to the cited references.
-            "task": "classification", "chance": chance, "field": field, "sota": sota, "auc": True}
+    return {
+        "train": AllData.dense_tensor(prep(Xtr[:ntr]), y=ytr[:ntr]),
+        "test": AllData.dense_tensor(prep(Xte), y=yte),
+        # imbalanced binary: the MedMNIST leaderboard's headline metric is ROC-AUC (accuracy is
+        # misleading under class imbalance), so report AUC to stay comparable to the cited references.
+        "task": "classification",
+        "chance": chance,
+        "field": field,
+        "sota": sota,
+        "auc": True,
+    }
 
 
 def load_synapsemnist3d(reduced, device):
     """SynapseMNIST3D (neuroscience): 28^3 electron-microscopy volumes, binary synapse-direction classification.
     Volumetric contract; diversifies beyond OrganMNIST3D. Reads the uploaded synapsemnist3d.npz."""
-    return _load_medmnist3d("synapsemnist3d",
-                            "neuroscience (SynapseMNIST3D, EM volumes)", "ROC-AUC ~0.82 (ResNet-18+3D), ~0.85 (best, ResNet-50+3D)", 0.5, reduced)
+    return _load_medmnist3d(
+        "synapsemnist3d",
+        "neuroscience (SynapseMNIST3D, EM volumes)",
+        "ROC-AUC ~0.82 (ResNet-18+3D), ~0.85 (best, ResNet-50+3D)",
+        0.5,
+        reduced,
+    )
 
 
 def load_vesselmnist3d(reduced, device):
     """VesselMNIST3D (medicine): 28^3 brain-vessel volumes, binary aneurysm classification. Volumetric contract;
     diversifies beyond OrganMNIST3D. Reads the uploaded vesselmnist3d.npz."""
-    return _load_medmnist3d("vesselmnist3d",
-                            "medicine (VesselMNIST3D, brain-vessel volumes)", "ROC-AUC ~0.87 (ResNet-18+3D), ~0.93 (best, ACS conv)", 0.5, reduced)
+    return _load_medmnist3d(
+        "vesselmnist3d",
+        "medicine (VesselMNIST3D, brain-vessel volumes)",
+        "ROC-AUC ~0.87 (ResNet-18+3D), ~0.93 (best, ACS conv)",
+        0.5,
+        reduced,
+    )
 
 
 # --------------------------------------------------------------------------- SEQUENCE: England Covid (medicine)
-_ENGLAND_COVID_URL = ("https://raw.githubusercontent.com/benedekrozemberczki/"
-                      "pytorch_geometric_temporal/master/dataset/england_covid.json")
+_ENGLAND_COVID_URL = (
+    "https://raw.githubusercontent.com/benedekrozemberczki/pytorch_geometric_temporal/master/dataset/england_covid.json"
+)
 
 
 def load_englandcovid(reduced, device):
@@ -314,8 +389,9 @@ def load_englandcovid(reduced, device):
 
     from .allgraph import AllData
     from .data_sources import pyg_temporal_json
+
     j = pyg_temporal_json("england_covid")
-    Y = np.asarray(j["y"], dtype=np.float32)                  # (time_periods, nodes) = (61, 129)
+    Y = np.asarray(j["y"], dtype=np.float32)  # (time_periods, nodes) = (61, 129)
     periods, nodes = Y.shape
     Y = (Y - Y.mean(0, keepdims=True)) / (Y.std(0, keepdims=True) + 1e-6)
     W = 8
@@ -323,17 +399,24 @@ def load_englandcovid(reduced, device):
     for nd in range(nodes):
         s = Y[:, nd]
         for t in range(W, periods):
-            Xs.append(s[t - W:t]); ys.append(s[t])
+            Xs.append(s[t - W : t])
+            ys.append(s[t])
     X = np.asarray(Xs, dtype=np.float32)[:, :, None]
     y = np.asarray(ys, dtype=np.float32)
     n = len(X)
     if reduced:
-        keep = np.linspace(0, n - 1, min(n, qscale(2000))).astype(int); X, y = X[keep], y[keep]; n = len(X)
+        keep = np.linspace(0, n - 1, min(n, qscale(2000))).astype(int)
+        X, y = X[keep], y[keep]
+        n = len(X)
     ntr = int(0.75 * n)
-    return {"train": AllData.dense_tensor(torch.tensor(X[:ntr]), y=y[:ntr]),
-            "test": AllData.dense_tensor(torch.tensor(X[ntr:]), y=y[ntr:]),
-            "task": "regression", "chance": 0.0, "field": "medicine (epidemiology: England COVID cases)",
-            "sota": "R2 n/a (no canonical value; MSE ~0.5-0.9 z-scored, lag-dependent in follow-ups)"}
+    return {
+        "train": AllData.dense_tensor(torch.tensor(X[:ntr]), y=y[:ntr]),
+        "test": AllData.dense_tensor(torch.tensor(X[ntr:]), y=y[ntr:]),
+        "task": "regression",
+        "chance": 0.0,
+        "field": "medicine (epidemiology: England COVID cases)",
+        "sota": "R2 n/a (no canonical value; MSE ~0.5-0.9 z-scored, lag-dependent in follow-ups)",
+    }
 
 
 # --------------------------------------------------------------------------- SET (regression): JetNet jet mass
@@ -342,8 +425,10 @@ def _relative_jet_mass(pts):
     constituent 4-momenta and take sqrt(E^2-|p|^2). The standard permutation-invariant jet observable used in
     JetNet evaluation -- a genuine set -> scalar target computed FROM the point set (not read off a label)."""
     eta, phi, pt = pts[:, 0], pts[:, 1], pts[:, 2]
-    px = pt * np.cos(phi); py = pt * np.sin(phi)
-    pz = pt * np.sinh(eta); E = pt * np.cosh(eta)             # massless constituents: E = |p|
+    px = pt * np.cos(phi)
+    py = pt * np.sin(phi)
+    pz = pt * np.sinh(eta)
+    E = pt * np.cosh(eta)  # massless constituents: E = |p|
     m2 = E.sum() ** 2 - (px.sum() ** 2 + py.sum() ** 2 + pz.sum() ** 2)
     return float(np.sqrt(max(m2, 0.0)))
 
@@ -355,16 +440,23 @@ def load_jetmass(reduced, device):
     JetNet loader, so it raises (and the runner skips) exactly when JetNet's data is absent."""
     from .allgraph import AllData
     from .jetnet import load_jetnet as _l
+
     particles, mask, labels, names = _l(n_per_class=qscale(700, lo=40) if reduced else None)
     nf = [particles[i][mask[i]] for i in range(len(labels))]
     y = np.array([_relative_jet_mass(p) for p in nf], dtype=np.float32)
     y = (y - y.mean()) / (y.std() + 1e-8)
-    rng = np.random.RandomState(0); perm = rng.permutation(len(nf)); ntr = int(0.8 * len(nf))
+    rng = np.random.RandomState(0)
+    perm = rng.permutation(len(nf))
+    ntr = int(0.8 * len(nf))
     tr, te = perm[:ntr], perm[ntr:]
-    return {"train": AllData.point_sets([nf[i] for i in tr], y=y[tr]),
-            "test": AllData.point_sets([nf[i] for i in te], y=y[te]),
-            "task": "regression", "chance": 0.0, "field": "particle physics (jet mass from constituents)",
-            "sota": "field R2 ~0.9+ (EFN/Deep Sets; mass is a smooth permutation-invariant set function)"}
+    return {
+        "train": AllData.point_sets([nf[i] for i in tr], y=y[tr]),
+        "test": AllData.point_sets([nf[i] for i in te], y=y[te]),
+        "task": "regression",
+        "chance": 0.0,
+        "field": "particle physics (jet mass from constituents)",
+        "sota": "field R2 ~0.9+ (EFN/Deep Sets; mass is a smooth permutation-invariant set function)",
+    }
 
 
 # --------------------------------------------------------------------------- 4D (classification): advection-diffusion
@@ -373,9 +465,9 @@ def _advdiff3d_evolve(u0, steps, v, alpha=0.03, dt=0.5):
     each mode evolves as uh(k,t)=uh(k,0)*exp(-(alpha|k|^2 + i v.k) t), so the snapshots are EXACT and
     unconditionally stable. u0:(S,S,S) on the index grid -> (steps,S,S,S)."""
     S = u0.shape[0]
-    k1 = 2 * np.pi * np.fft.fftfreq(S, d=1.0)                 # wavenumbers on the unit-spacing index grid
+    k1 = 2 * np.pi * np.fft.fftfreq(S, d=1.0)  # wavenumbers on the unit-spacing index grid
     KX, KY, KZ = np.meshgrid(k1, k1, k1, indexing="ij")
-    K2 = KX ** 2 + KY ** 2 + KZ ** 2
+    K2 = KX**2 + KY**2 + KZ**2
     advec = v[0] * KX + v[1] * KY + v[2] * KZ
     uh0 = np.fft.fftn(u0.astype(np.complex128))
     snaps = []
@@ -395,7 +487,8 @@ def load_advectiondiffusion4d(reduced, device):
     import torch
 
     from .allgraph import AllData
-    S, T = (6, 5) if reduced else (8, 5)                      # smaller grid in reduced mode (4d conv ~ S^3*T; big GPU win)
+
+    S, T = (6, 5) if reduced else (8, 5)  # smaller grid in reduced mode (4d conv ~ S^3*T; big GPU win)
     n = qscale(180) if reduced else 600
     rng = np.random.RandomState(0)
     idx = np.arange(S)
@@ -403,23 +496,26 @@ def load_advectiondiffusion4d(reduced, device):
     X = np.zeros((n, 1, T, S, S, S), dtype=np.float32)
     y = np.zeros(n, dtype=np.int64)
     for i in range(n):
-        axis = i % 3                                          # balanced 3-class target (survives the ordered split)
-        speed = rng.uniform(1.0, 1.6)                         # dominant-axis drift, clearly above the off-axis noise
-        v = rng.uniform(-0.15, 0.15, 3).astype(np.float32)    # small off-axis drift so a frame alone can't tell
+        axis = i % 3  # balanced 3-class target (survives the ordered split)
+        speed = rng.uniform(1.0, 1.6)  # dominant-axis drift, clearly above the off-axis noise
+        v = rng.uniform(-0.15, 0.15, 3).astype(np.float32)  # small off-axis drift so a frame alone can't tell
         v[axis] = speed * (1.0 if rng.rand() < 0.5 else -1.0)
         # a LOCALIZED Gaussian blob (not random Fourier modes): a compact feature whose coherent translation
         # across the T snapshots is a strong, readable signal for the dominant transport axis.
         c = rng.uniform(2.0, S - 2.0, 3)
         sig = rng.uniform(1.0, 1.5)
-        u0 = np.exp(-0.5 * ((IX - c[0]) ** 2 + (IY - c[1]) ** 2 + (IZ - c[2]) ** 2) / sig ** 2).astype(np.float32)
+        u0 = np.exp(-0.5 * ((IX - c[0]) ** 2 + (IY - c[1]) ** 2 + (IZ - c[2]) ** 2) / sig**2).astype(np.float32)
         X[i, 0] = _advdiff3d_evolve(u0, T, v, alpha=0.02, dt=0.6)
         y[i] = axis
     ntr = int(0.75 * n)
-    return {"train": AllData.dense_tensor(torch.tensor(X[:ntr]), y=y[:ntr]),
-            "test": AllData.dense_tensor(torch.tensor(X[ntr:]), y=y[ntr:]),
-            "task": "classification", "chance": 1.0 / 3,
-            "field": "physics (3D advection-diffusion, spatiotemporal)",
-            "sota": "acc n/a (synthetic-from-solver; -> 1 for a sufficient 4d model)"}
+    return {
+        "train": AllData.dense_tensor(torch.tensor(X[:ntr]), y=y[:ntr]),
+        "test": AllData.dense_tensor(torch.tensor(X[ntr:]), y=y[ntr:]),
+        "task": "classification",
+        "chance": 1.0 / 3,
+        "field": "physics (3D advection-diffusion, spatiotemporal)",
+        "sota": "acc n/a (synthetic-from-solver; -> 1 for a sufficient 4d model)",
+    }
 
 
 # --------------------------------------------------------------------------- GRAPH: IMDB-BINARY (social, non-molecular)
@@ -432,15 +528,19 @@ def _tu_graphs(name):
     import os
 
     from .data_sources import tudataset_dir
+
     d = tudataset_dir(name)
-    A = np.atleast_2d(np.loadtxt(os.path.join(d, f"{name}_A.txt"), delimiter=",", dtype=np.int64))   # (E,2) 1-idx
-    gind = np.loadtxt(os.path.join(d, f"{name}_graph_indicator.txt"), dtype=np.int64)                 # (num_nodes,)
-    glab = np.loadtxt(os.path.join(d, f"{name}_graph_labels.txt"), dtype=np.int64)                    # (num_graphs,)
+    A = np.atleast_2d(np.loadtxt(os.path.join(d, f"{name}_A.txt"), delimiter=",", dtype=np.int64))  # (E,2) 1-idx
+    gind = np.loadtxt(os.path.join(d, f"{name}_graph_indicator.txt"), dtype=np.int64)  # (num_nodes,)
+    glab = np.loadtxt(os.path.join(d, f"{name}_graph_labels.txt"), dtype=np.int64)  # (num_graphs,)
     num_nodes = len(gind)
-    local = np.zeros(num_nodes + 1, dtype=np.int64)           # global (1-indexed) node -> 0-indexed local position
+    local = np.zeros(num_nodes + 1, dtype=np.int64)  # global (1-indexed) node -> 0-indexed local position
     counts = {}
     for gn0 in np.argsort(gind, kind="stable"):
-        g = int(gind[gn0]); c = counts.get(g, 0); local[gn0 + 1] = c; counts[g] = c + 1
+        g = int(gind[gn0])
+        c = counts.get(g, 0)
+        local[gn0 + 1] = c
+        counts[g] = c + 1
     gids = sorted(counts)
     edges = {g: [] for g in gids}
     for s, t in A:
@@ -453,10 +553,13 @@ def _tu_graphs(name):
         deg = np.bincount(e[0], minlength=nn) if e.shape[1] else np.zeros(nn, dtype=np.int64)
         feat = np.zeros((nn, F), dtype=np.float32)
         feat[np.arange(nn), np.minimum(deg, _TU_DEG_CAP)] = 1.0
-        if e.shape[1] == 0:                                   # isolated graph: self-loops so the GNN has edges
+        if e.shape[1] == 0:  # isolated graph: self-loops so the GNN has edges
             e = np.stack([np.arange(nn), np.arange(nn)])
-        nf_list.append(feat); ed_list.append(e); y_list.append(int(glab[g - 1]))
-    classes = sorted(set(y_list)); cmap = {c: i for i, c in enumerate(classes)}
+        nf_list.append(feat)
+        ed_list.append(e)
+        y_list.append(int(glab[g - 1]))
+    classes = sorted(set(y_list))
+    cmap = {c: i for i, c in enumerate(classes)}
     y = np.array([cmap[v] for v in y_list], dtype=np.int64)
     return nf_list, ed_list, y
 
@@ -467,23 +570,41 @@ def load_imdb_binary(reduced, device):
     real NON-molecular graph dataset broadening the graph contract beyond ESOL/Tox21 chemistry. Small (<1 MB);
     fetched from the TU Dortmund repository with an uploaded IMDB-BINARY.zip fallback."""
     from .allgraph import AllData
+
     nf, ed, y = _tu_graphs("IMDB-BINARY")
     n = len(nf)
-    rng = np.random.RandomState(0); perm = rng.permutation(n)
+    rng = np.random.RandomState(0)
+    perm = rng.permutation(n)
     if reduced:
-        perm = perm[:qscale(400)]; n = len(perm)
-    ntr = int(0.8 * n); tr, te = perm[:ntr], perm[ntr:]
-    yp = y[perm]; chance = float(max(yp.mean(), 1 - yp.mean()))
-    return {"train": AllData.graphs([nf[i] for i in tr], [ed[i] for i in tr], y=y[tr]),
-            "test": AllData.graphs([nf[i] for i in te], [ed[i] for i in te], y=y[te]),
-            "task": "classification", "chance": chance,
-            "field": "social networks (IMDB movie collaborations)",
-            "sota": "acc ~0.70-0.76 (GIN / graph-kernel SOTA)"}
+        perm = perm[: qscale(400)]
+        n = len(perm)
+    ntr = int(0.8 * n)
+    tr, te = perm[:ntr], perm[ntr:]
+    yp = y[perm]
+    chance = float(max(yp.mean(), 1 - yp.mean()))
+    return {
+        "train": AllData.graphs([nf[i] for i in tr], [ed[i] for i in tr], y=y[tr]),
+        "test": AllData.graphs([nf[i] for i in te], [ed[i] for i in te], y=y[te]),
+        "task": "classification",
+        "chance": chance,
+        "field": "social networks (IMDB movie collaborations)",
+        "sota": "acc ~0.70-0.76 (GIN / graph-kernel SOTA)",
+    }
 
 
 # --------------------------------------------------------------------------- EQUIVARIANT (classification): ModelNet10
-_MODELNET10_CLASSES = ("bathtub", "bed", "chair", "desk", "dresser", "monitor",
-                       "night_stand", "sofa", "table", "toilet")
+_MODELNET10_CLASSES = (
+    "bathtub",
+    "bed",
+    "chair",
+    "desk",
+    "dresser",
+    "monitor",
+    "night_stand",
+    "sofa",
+    "table",
+    "toilet",
+)
 
 
 def _parse_off(path):
@@ -492,15 +613,20 @@ def _parse_off(path):
     (e.g. 'OFF684 1240 0')."""
     with open(path) as fh:
         tok = fh.read().split()
-    if tok[0] != "OFF":                                   # 'OFF684 ...' -> split the counts off the header
-        tok[0] = tok[0][3:]; i = 0
+    if tok[0] != "OFF":  # 'OFF684 ...' -> split the counts off the header
+        tok[0] = tok[0][3:]
+        i = 0
     else:
         i = 1
-    nV, nF = int(tok[i]), int(tok[i + 1]); i += 3         # i+2 is nE (unused)
-    verts = np.array(tok[i:i + 3 * nV], dtype=np.float32).reshape(nV, 3); i += 3 * nV
+    nV, nF = int(tok[i]), int(tok[i + 1])
+    i += 3  # i+2 is nE (unused)
+    verts = np.array(tok[i : i + 3 * nV], dtype=np.float32).reshape(nV, 3)
+    i += 3 * nV
     faces = []
     for _ in range(nF):
-        k = int(tok[i]); faces.append([int(tok[i + 1]), int(tok[i + 2]), int(tok[i + 3])]); i += k + 1
+        k = int(tok[i])
+        faces.append([int(tok[i + 1]), int(tok[i + 2]), int(tok[i + 3])])
+        i += k + 1
     return verts, np.array(faces, dtype=np.int64)
 
 
@@ -512,7 +638,8 @@ def _sample_surface(verts, faces, n_pts, rng):
     areas = 0.5 * np.linalg.norm(np.cross(v1 - v0, v2 - v0), axis=1)
     areas = areas if areas.sum() > 0 else np.ones(len(faces))
     tri = rng.choice(len(faces), size=n_pts, p=areas / areas.sum())
-    r1 = np.sqrt(rng.rand(n_pts))[:, None]; r2 = rng.rand(n_pts)[:, None]
+    r1 = np.sqrt(rng.rand(n_pts))[:, None]
+    r2 = rng.rand(n_pts)[:, None]
     pts = (1 - r1) * v0[tri] + r1 * (1 - r2) * v1[tri] + r1 * r2 * v2[tri]
     pts = pts - pts.mean(0)
     return (pts / (np.linalg.norm(pts, axis=1).max() + 1e-8)).astype(np.float32)
@@ -525,7 +652,8 @@ def _knn_edges(pos, k):
     np.fill_diagonal(D, np.inf)
     kk = min(k, n - 1)
     idx = np.argpartition(D, kk, axis=1)[:, :kk]
-    src = np.repeat(np.arange(n), kk); dst = idx.reshape(-1)
+    src = np.repeat(np.arange(n), kk)
+    dst = idx.reshape(-1)
     return np.stack([src, dst]).astype(np.int64)
 
 
@@ -541,6 +669,7 @@ def load_modelnet10(reduced, device):
 
     from .allgraph import AllData
     from .data_sources import modelnet10_dir
+
     root = modelnet10_dir()
     npts = 160 if reduced else 512
     rng = np.random.RandomState(0)
@@ -559,18 +688,27 @@ def load_modelnet10(reduced, device):
                     pos = _sample_surface(v, fc, npts, rng)
                 except Exception:
                     continue
-                NF.append(np.ones((npts, 1), np.float32)); ED.append(_knn_edges(pos, 8))
-                POS.append(pos); Y.append(ci)
+                NF.append(np.ones((npts, 1), np.float32))
+                ED.append(_knn_edges(pos, 8))
+                POS.append(pos)
+                Y.append(ci)
         return NF, ED, POS, np.array(Y, np.int64)
 
-    nf_tr, ed_tr, pos_tr, y_tr = build("train", qscale(30, lo=4) if reduced else None)   # 30/class x 10 = 300 train (rotated)
+    nf_tr, ed_tr, pos_tr, y_tr = build(
+        "train", qscale(30, lo=4) if reduced else None
+    )  # 30/class x 10 = 300 train (rotated)
     nf_te, ed_te, pos_te, y_te = build("test", qscale(10, lo=3) if reduced else None)
     if len(y_tr) == 0 or len(y_te) == 0:
         raise FileNotFoundError("ModelNet10: no .off shapes found under the expected class/split folders")
-    return {"train": AllData.graphs(nf_tr, ed_tr, y=y_tr, positions=pos_tr),
-            "test": AllData.graphs(nf_te, ed_te, y=y_te, positions=pos_te),
-            "task": "classification", "chance": 0.1, "field": "3D geometry (ModelNet10 CAD shapes)",
-            "sota": "acc ~0.93-0.95 (PointNet++/DGCNN); rotation-robust variants lower", "rotated": True}
+    return {
+        "train": AllData.graphs(nf_tr, ed_tr, y=y_tr, positions=pos_tr),
+        "test": AllData.graphs(nf_te, ed_te, y=y_te, positions=pos_te),
+        "task": "classification",
+        "chance": 0.1,
+        "field": "3D geometry (ModelNet10 CAD shapes)",
+        "sota": "acc ~0.93-0.95 (PointNet++/DGCNN); rotation-robust variants lower",
+        "rotated": True,
+    }
 
 
 # --------------------------------------------------------------------------- SET: Top Quark Tagging (Lorentz)
@@ -584,6 +722,7 @@ def load_toptagging(reduced, device):
     pandas + PyTables to read the HDF5, plus a heavy first-time download or an uploaded file; skips otherwise."""
     from .allgraph import AllData
     from .data_sources import top_tagging_h5
+
     try:
         import pandas as pd
     except ImportError:
@@ -592,26 +731,33 @@ def load_toptagging(reduced, device):
     n_total = qscale(4000) if reduced else 30000
     df = pd.read_hdf(path, key="table", stop=n_total)
     cols = set(df.columns)
-    idx = [i for i in range(200) if f"E_{i}" in cols]                 # present constituent slots
+    idx = [i for i in range(200) if f"E_{i}" in cols]  # present constituent slots
     E = df[[f"E_{i}" for i in idx]].to_numpy(np.float32)
     PX = df[[f"PX_{i}" for i in idx]].to_numpy(np.float32)
     PY = df[[f"PY_{i}" for i in idx]].to_numpy(np.float32)
     PZ = df[[f"PZ_{i}" for i in idx]].to_numpy(np.float32)
     y = df["is_signal_new"].to_numpy(np.int64)
-    scale = float(np.median(E[E > 0])) + 1e-6                          # global scale preserves Lorentz ratios
+    scale = float(np.median(E[E > 0])) + 1e-6  # global scale preserves Lorentz ratios
     sets = []
     for j in range(len(y)):
-        m = E[j] > 0                                                  # drop zero-padded (absent) constituents
+        m = E[j] > 0  # drop zero-padded (absent) constituents
         feat = np.stack([E[j][m], PX[j][m], PY[j][m], PZ[j][m]], axis=1) / scale
         sets.append(feat.astype(np.float32) if len(feat) else np.zeros((1, 4), np.float32))
-    rng = np.random.RandomState(0); perm = rng.permutation(len(y)); ntr = int(0.8 * len(y))
+    rng = np.random.RandomState(0)
+    perm = rng.permutation(len(y))
+    ntr = int(0.8 * len(y))
     tr, te = perm[:ntr], perm[ntr:]
     chance = float(max(y.mean(), 1 - y.mean()))
-    return {"train": AllData.point_sets([sets[i] for i in tr], y=y[tr]),
-            "test": AllData.point_sets([sets[i] for i in te], y=y[te]),
-            "task": "classification", "chance": chance, "report_auc": True, "bg_rejection": [0.3, 0.5],
-            "field": "particle physics (top-quark vs QCD jet tagging, Lorentz)",
-            "sota": "acc ~0.93 / AUC ~0.98; 1/eB@eS0.3 ~2200, @eS0.5 ~500 (from-scratch SOTA LorentzNet/PELICAN); Deep Sets lower"}
+    return {
+        "train": AllData.point_sets([sets[i] for i in tr], y=y[tr]),
+        "test": AllData.point_sets([sets[i] for i in te], y=y[te]),
+        "task": "classification",
+        "chance": chance,
+        "report_auc": True,
+        "bg_rejection": [0.3, 0.5],
+        "field": "particle physics (top-quark vs QCD jet tagging, Lorentz)",
+        "sota": "acc ~0.93 / AUC ~0.98; 1/eB@eS0.3 ~2200, @eS0.5 ~500 (from-scratch SOTA LorentzNet/PELICAN); Deep Sets lower",
+    }
 
 
 # --------------------------------------------------------------------------- SET / Lorentz-discovery demonstrator
@@ -625,27 +771,37 @@ def load_jetmasslorentz(reduced, device):
     boosts). Reuses the JetNet loader, so no new download (skips exactly when JetNet's data is absent)."""
     from .allgraph import AllData
     from .jetnet import load_jetnet as _l
+
     particles, mask, labels, names = _l(n_per_class=qscale(700, lo=40) if reduced else None)
     jets, m2 = [], []
     for i in range(len(labels)):
         pts = particles[i][mask[i]]
         eta, phi, pt = pts[:, 0], pts[:, 1], pts[:, 2]
-        four = np.stack([pt * np.cosh(eta), pt * np.cos(phi),
-                         pt * np.sin(phi), pt * np.sinh(eta)], 1).astype(np.float32)   # [E,px,py,pz]
+        four = np.stack([pt * np.cosh(eta), pt * np.cos(phi), pt * np.sin(phi), pt * np.sinh(eta)], 1).astype(
+            np.float32
+        )  # [E,px,py,pz]
         if len(four) < 2:
             four = np.zeros((2, 4), np.float32)
         S = four.sum(0)
-        jets.append(four); m2.append(float(S[0] ** 2 - (S[1] ** 2 + S[2] ** 2 + S[3] ** 2)))
-    y = np.array(m2, np.float32); y = (y - y.mean()) / (y.std() + 1e-8)
-    rng = np.random.RandomState(0); perm = rng.permutation(len(jets)); ntr = int(0.8 * len(jets))
+        jets.append(four)
+        m2.append(float(S[0] ** 2 - (S[1] ** 2 + S[2] ** 2 + S[3] ** 2)))
+    y = np.array(m2, np.float32)
+    y = (y - y.mean()) / (y.std() + 1e-8)
+    rng = np.random.RandomState(0)
+    perm = rng.permutation(len(jets))
+    ntr = int(0.8 * len(jets))
 
     def md(ids):
         return AllData.point_sets([jets[i] for i in ids], y=y[ids], positions=[jets[i] for i in ids])
 
-    return {"train": md(perm[:ntr]), "test": md(perm[ntr:]),
-            "task": "regression", "chance": 0.0,
-            "field": "particle physics (jet invariant-mass^2; Lorentz O(1,3) discovery demonstrator)",
-            "sota": "regression R2 n/a (synthetic demonstrator; -> ~1.0 for an adequate set regressor); discovered-metric R2=1.0 -> O(1,3), 6 generators under --discover extended"}
+    return {
+        "train": md(perm[:ntr]),
+        "test": md(perm[ntr:]),
+        "task": "regression",
+        "chance": 0.0,
+        "field": "particle physics (jet invariant-mass^2; Lorentz O(1,3) discovery demonstrator)",
+        "sota": "regression R2 n/a (synthetic demonstrator; -> ~1.0 for an adequate set regressor); discovered-metric R2=1.0 -> O(1,3), 6 generators under --discover extended",
+    }
 
 
 # --------------------------------------------------------------------------- SPATIAL (regression): MNIST rotation angle
@@ -660,6 +816,7 @@ def load_mnistangle(reduced, device):
 
     from .allgraph import AllData
     from .paths import data_dir
+
     root = data_dir()
     tr = torchvision.datasets.MNIST(root=root, train=True, download=True)
     te = torchvision.datasets.MNIST(root=root, train=False, download=True)
@@ -676,13 +833,18 @@ def load_mnistangle(reduced, device):
 
     Xtr, atr = make(tr, qscale(1500) if reduced else 6000, 0)
     Xte, ate = make(te, qscale(1000) if reduced else 2000, 1)
-    im_mu, im_sd = Xtr.mean(), Xtr.std() + 1e-8                # standardize intensities (as load_mnist does)
-    Xtr = (Xtr - im_mu) / im_sd; Xte = (Xte - im_mu) / im_sd
+    im_mu, im_sd = Xtr.mean(), Xtr.std() + 1e-8  # standardize intensities (as load_mnist does)
+    Xtr = (Xtr - im_mu) / im_sd
+    Xte = (Xte - im_mu) / im_sd
     am, as_ = atr.mean(), atr.std() + 1e-8
-    return {"train": AllData.dense_tensor(torch.tensor(Xtr), y=(atr - am) / as_),
-            "test": AllData.dense_tensor(torch.tensor(Xte), y=(ate - am) / as_),
-            "task": "regression", "chance": 0.0, "field": "vision (MNIST digit rotation-angle regression)",
-            "sota": "R2 n/a (semi-synthetic; -> high for a CNN reading digit orientation)"}
+    return {
+        "train": AllData.dense_tensor(torch.tensor(Xtr), y=(atr - am) / as_),
+        "test": AllData.dense_tensor(torch.tensor(Xte), y=(ate - am) / as_),
+        "task": "regression",
+        "chance": 0.0,
+        "field": "vision (MNIST digit rotation-angle regression)",
+        "sota": "R2 n/a (semi-synthetic; -> high for a CNN reading digit orientation)",
+    }
 
 
 # --------------------------------------------------------------------------- VOLUMETRIC (regression): 3D diffusion blob
@@ -694,6 +856,7 @@ def load_diffusionblob3d(reduced, device):
     import torch
 
     from .allgraph import AllData
+
     S = 16
     n = qscale(400) if reduced else 800
     rng = np.random.RandomState(0)
@@ -706,33 +869,37 @@ def load_diffusionblob3d(reduced, device):
         g = [np.exp(-0.5 * ((ax - c[d]) / sig[d]) ** 2) for d in range(3)]
         field = g[0][:, None, None] * g[1][None, :, None] * g[2][None, None, :]
         X[i, 0] = (field + 0.02 * rng.randn(S, S, S)).astype(np.float32)
-        y[i] = float(np.cbrt(sig[0] * sig[1] * sig[2]))       # effective width (needs the 3D extent)
+        y[i] = float(np.cbrt(sig[0] * sig[1] * sig[2]))  # effective width (needs the 3D extent)
     y = (y - y.mean()) / (y.std() + 1e-8)
     ntr = int(0.8 * n)
-    return {"train": AllData.dense_tensor(torch.tensor(X[:ntr]), y=y[:ntr]),
-            "test": AllData.dense_tensor(torch.tensor(X[ntr:]), y=y[ntr:]),
-            "task": "regression", "chance": 0.0, "field": "physics (3D diffusion-blob width, volumetric)",
-            "sota": "R2 n/a (synthetic-from-solver; -> 1 for a sufficient 3D conv)"}
+    return {
+        "train": AllData.dense_tensor(torch.tensor(X[:ntr]), y=y[:ntr]),
+        "test": AllData.dense_tensor(torch.tensor(X[ntr:]), y=y[ntr:]),
+        "task": "regression",
+        "chance": 0.0,
+        "field": "physics (3D diffusion-blob width, volumetric)",
+        "sota": "R2 n/a (synthetic-from-solver; -> 1 for a sufficient 3D conv)",
+    }
 
 
 # --------------------------------------------------------------------------- registration
 EXTENDED_DATASETS = {
-    "HeatDiffusion3D":  (load_heatdiffusion3d, "4d", True),
-    "Wave2D":           (load_wave2d, "operator", True),
-    "Chickenpox":       (load_chickenpox, "sequence", True),
+    "HeatDiffusion3D": (load_heatdiffusion3d, "4d", True),
+    "Wave2D": (load_wave2d, "operator", True),
+    "Chickenpox": (load_chickenpox, "sequence", True),
     "Superconductivity": (load_superconductivity, "sequence", True),
-    "rMD17-aspirin":    (load_rmd17_aspirin, "equivariant", True),
-    "SynapseMNIST3D":   (load_synapsemnist3d, "volumetric", True),
-    "VesselMNIST3D":    (load_vesselmnist3d, "volumetric", True),
-    "EnglandCovid":     (load_englandcovid, "sequence", True),
-    "JetMass":          (load_jetmass, "set", True),
+    "rMD17-aspirin": (load_rmd17_aspirin, "equivariant", True),
+    "SynapseMNIST3D": (load_synapsemnist3d, "volumetric", True),
+    "VesselMNIST3D": (load_vesselmnist3d, "volumetric", True),
+    "EnglandCovid": (load_englandcovid, "sequence", True),
+    "JetMass": (load_jetmass, "set", True),
     "AdvectionDiffusion4D": (load_advectiondiffusion4d, "4d", True),
-    "IMDB-BINARY":      (load_imdb_binary, "graph", True),
-    "ModelNet10":       (load_modelnet10, "equivariant", True),
-    "TopTagging":       (load_toptagging, "set", True),
-    "MNISTAngle":       (load_mnistangle, "spatial", True),
-    "DiffusionBlob3D":  (load_diffusionblob3d, "volumetric", True),
-    "JetMassLorentz":   (load_jetmasslorentz, "set", True),
+    "IMDB-BINARY": (load_imdb_binary, "graph", True),
+    "ModelNet10": (load_modelnet10, "equivariant", True),
+    "TopTagging": (load_toptagging, "set", True),
+    "MNISTAngle": (load_mnistangle, "spatial", True),
+    "DiffusionBlob3D": (load_diffusionblob3d, "volumetric", True),
+    "JetMassLorentz": (load_jetmasslorentz, "set", True),
 }
 
 
@@ -741,6 +908,7 @@ def register_extended_datasets(suite=None):
     dict {name: (loader, contract, reduced_default)}."""
     if suite is None:
         from .dataset_registry import quick_suite
+
         suite = dict(quick_suite())
     suite.update(EXTENDED_DATASETS)
     return suite

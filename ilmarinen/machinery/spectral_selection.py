@@ -80,22 +80,30 @@ def select_modes(mode_grid, S_mean, marginals, mu, spatial_dims=1, channels=1):
         return mode_grid[0], {"reason": "single mode budget measured", "selected_modes": mode_grid[0]}
     Mstar = mode_grid[0]
     ladder = []
-    for (mid, m, _me) in marginals:
-        lo = int(np.floor(mid - 0.5)); hi = int(np.ceil(mid + 0.5))
+    for mid, m, _me in marginals:
+        lo = int(np.floor(mid - 0.5))
+        hi = int(np.ceil(mid + 0.5))
         # per-mode added code length going lo -> hi (average step cost)
-        dOmega = (spectral_code_length(hi, spatial_dims, channels)
-                  - spectral_code_length(lo, spatial_dims, channels)) / max(hi - lo, 1)
+        dOmega = (
+            spectral_code_length(hi, spatial_dims, channels) - spectral_code_length(lo, spatial_dims, channels)
+        ) / max(hi - lo, 1)
         bar = mu * dOmega
         pays = m >= bar
-        ladder.append({"from_modes": lo, "to_modes": hi, "marginal": float(m),
-                       "price_bar": float(bar), "pays": bool(pays)})
+        ladder.append(
+            {"from_modes": lo, "to_modes": hi, "marginal": float(m), "price_bar": float(bar), "pays": bool(pays)}
+        )
         if pays:
             Mstar = hi
         else:
-            break                                  # stop before the first unprofitable mode
-    detail = {"selected_modes": int(Mstar), "mu": float(mu), "spatial_dims": int(spatial_dims),
-              "channels": int(channels), "ladder": ladder,
-              "note": "mode budget via the marginal-value rule: add modes while the per-mode val-loss "
-                      "reduction exceeds mu * (added spectral code length). The operator-contract analogue of "
-                      "width/depth selection."}
+            break  # stop before the first unprofitable mode
+    detail = {
+        "selected_modes": int(Mstar),
+        "mu": float(mu),
+        "spatial_dims": int(spatial_dims),
+        "channels": int(channels),
+        "ladder": ladder,
+        "note": "mode budget via the marginal-value rule: add modes while the per-mode val-loss "
+        "reduction exceeds mu * (added spectral code length). The operator-contract analogue of "
+        "width/depth selection.",
+    }
     return int(Mstar), detail

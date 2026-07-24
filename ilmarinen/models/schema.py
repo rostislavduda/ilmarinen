@@ -29,6 +29,7 @@ contraction rather than a Python sum. The per-timestep recurrence itself is inhe
 sequential and nonlinear (not an associative scan), so it stays a loop; the non-recurrent
 cores (conv/attention/dense/norm/spectral) are already fully vectorized over time.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -41,8 +42,10 @@ from .init_utils import _init_linear
 # Sequence-to-sequence primitive cores (common contract: forward_seq -> (b,T,width))
 # ---------------------------------------------------------------------------
 
+
 class _PlainSeq(nn.Module):
     """Plain tanh recurrence over time. h_t = tanh(Wx x_t + Wh h_{t-1})."""
+
     name = "plain"
 
     def __init__(self, n_in, width, sigma_w2=1.76, sigma_b2=0.05):
@@ -55,20 +58,23 @@ class _PlainSeq(nn.Module):
 
     def forward_seq(self, x):  # x: (b, T, n_in)
         b, T, _ = x.shape
-        xp = self.Wx(x).unbind(1)            # tuple of (b,width); avoids per-step indexing
+        xp = self.Wx(x).unbind(1)  # tuple of (b,width); avoids per-step indexing
         h = x.new_zeros(b, self.width)
         outs = []
         for t in range(T):
             h = torch.tanh(xp[t] + self.Wh(h))
             outs.append(h)
-        return torch.stack(outs, dim=1)      # (b,T,width)
+        return torch.stack(outs, dim=1)  # (b,T,width)
 
     # --- streaming API: one timestep, carrying state ---
     is_recurrent = True
 
     def init_state(self, b, device=None, dtype=None):
-        return self.Wx.weight.new_zeros(b, self.width) if device is None \
+        return (
+            self.Wx.weight.new_zeros(b, self.width)
+            if device is None
             else torch.zeros(b, self.width, device=device, dtype=dtype)
+        )
 
     def step(self, x_t, state):  # x_t: (b, n_in), state: h (b,width) -> (out_t, new_state)
         h = torch.tanh(self.Wx(x_t) + self.Wh(state))
@@ -77,35 +83,40 @@ class _PlainSeq(nn.Module):
 
 class _GatedSeq(nn.Module):
     """GRU-style gated recurrence over time (multiplicative gating primitive)."""
+
     name = "gated"
 
     def __init__(self, n_in, width, sigma_w2=1.76, sigma_b2=0.05):
         super().__init__()
         self.width = width
-        self.Wx = nn.Linear(n_in, 3 * width, bias=False)   # [r, z, n]
+        self.Wx = nn.Linear(n_in, 3 * width, bias=False)  # [r, z, n]
         self.Wh = nn.Linear(width, 3 * width, bias=True)
         _init_linear(self.Wx, 1.0, 0.0)
         _init_linear(self.Wh, sigma_w2, sigma_b2)
 
     def forward_seq(self, x):
         b, T, _ = x.shape
-        xp = self.Wx(x).unbind(1)            # tuple of (b,3w)
-        h = x.new_zeros(b, self.width); outs = []
+        xp = self.Wx(x).unbind(1)  # tuple of (b,3w)
+        h = x.new_zeros(b, self.width)
+        outs = []
         for t in range(T):
             gx_r, gx_z, gx_n = xp[t].chunk(3, dim=1)
             gh_r, gh_z, gh_n = self.Wh(h).chunk(3, dim=1)
             r = torch.sigmoid(gx_r + gh_r)
             z = torch.sigmoid(gx_z + gh_z)
             n = torch.tanh(gx_n + r * gh_n)
-            h = torch.addcmul(n, z, h - n)    # h = n + z * (h - n) = (1-z)*n + z*h
+            h = torch.addcmul(n, z, h - n)  # h = n + z * (h - n) = (1-z)*n + z*h
             outs.append(h)
         return torch.stack(outs, dim=1)
 
     is_recurrent = True
 
     def init_state(self, b, device=None, dtype=None):
-        return self.Wx.weight.new_zeros(b, self.width) if device is None \
+        return (
+            self.Wx.weight.new_zeros(b, self.width)
+            if device is None
             else torch.zeros(b, self.width, device=device, dtype=dtype)
+        )
 
     def step(self, x_t, state):  # state: h (b,width)
         gx_r, gx_z, gx_n = self.Wx(x_t).chunk(3, dim=1)
@@ -119,12 +130,13 @@ class _GatedSeq(nn.Module):
 
 class _LSTMSeq(nn.Module):
     """LSTM recurrence over time (additive cell-state carry), with optional chrono-init."""
+
     name = "lstm"
 
     def __init__(self, n_in, width, sigma_w2=1.76, sigma_b2=0.05, chrono_tmax=None):
         super().__init__()
         self.width = width
-        self.Wx = nn.Linear(n_in, 4 * width, bias=False)   # [i, f, o, g]
+        self.Wx = nn.Linear(n_in, 4 * width, bias=False)  # [i, f, o, g]
         self.Wh = nn.Linear(width, 4 * width, bias=True)
         _init_linear(self.Wx, 1.0, 0.0)
         _init_linear(self.Wh, sigma_w2, sigma_b2)
@@ -132,18 +144,23 @@ class _LSTMSeq(nn.Module):
             if chrono_tmax is not None and chrono_tmax > 1:
                 u = torch.rand(width) * (chrono_tmax - 1.0) + 1.0
                 b_f = torch.log(u)
-                self.Wh.bias[width:2 * width].copy_(b_f)
+                self.Wh.bias[width : 2 * width].copy_(b_f)
                 self.Wh.bias[0:width].copy_(-b_f)
             else:
-                self.Wh.bias[width:2 * width].fill_(1.0)
+                self.Wh.bias[width : 2 * width].fill_(1.0)
 
     def forward_seq(self, x):
         b, T, _ = x.shape
-        xp = self.Wx(x).unbind(1); w = self.width
-        h = x.new_zeros(b, w); c = x.new_zeros(b, w); outs = []
+        xp = self.Wx(x).unbind(1)
+        w = self.width
+        h = x.new_zeros(b, w)
+        c = x.new_zeros(b, w)
+        outs = []
         for t in range(T):
             i, f, o, g = (xp[t] + self.Wh(h)).chunk(4, dim=1)
-            i = torch.sigmoid(i); f = torch.sigmoid(f); o = torch.sigmoid(o)
+            i = torch.sigmoid(i)
+            f = torch.sigmoid(f)
+            o = torch.sigmoid(o)
             c = f * c + i * torch.tanh(g)
             h = o * torch.tanh(c)
             outs.append(h)
@@ -152,14 +169,19 @@ class _LSTMSeq(nn.Module):
     is_recurrent = True
 
     def init_state(self, b, device=None, dtype=None):
-        z = self.Wx.weight.new_zeros(b, self.width) if device is None \
+        z = (
+            self.Wx.weight.new_zeros(b, self.width)
+            if device is None
             else torch.zeros(b, self.width, device=device, dtype=dtype)
-        return (z, z.clone())            # (h, c)
+        )
+        return (z, z.clone())  # (h, c)
 
-    def step(self, x_t, state):          # state: (h, c)
+    def step(self, x_t, state):  # state: (h, c)
         h, c = state
         i, f, o, g = (self.Wx(x_t) + self.Wh(h)).chunk(4, dim=1)
-        i = torch.sigmoid(i); f = torch.sigmoid(f); o = torch.sigmoid(o)
+        i = torch.sigmoid(i)
+        f = torch.sigmoid(f)
+        o = torch.sigmoid(o)
         c = f * c + i * torch.tanh(g)
         h = o * torch.tanh(c)
         return h, (h, c)
@@ -167,6 +189,7 @@ class _LSTMSeq(nn.Module):
 
 class _ConvSeq(nn.Module):
     """Causal 1-D convolution over time (weight-sharing under time translation, LOCAL)."""
+
     name = "conv"
     is_recurrent = False
 
@@ -177,10 +200,10 @@ class _ConvSeq(nn.Module):
         self.width = width
 
     def forward_seq(self, x):  # (b,T,n_in)
-        xt = x.transpose(1, 2)                             # (b,n_in,T)
+        xt = x.transpose(1, 2)  # (b,n_in,T)
         xt = torch.nn.functional.pad(xt, (self.ksize - 1, 0))  # causal left pad
-        c = torch.tanh(self.conv(xt))                     # (b,width,T)
-        return c.transpose(1, 2)                          # (b,T,width)
+        c = torch.tanh(self.conv(xt))  # (b,width,T)
+        return c.transpose(1, 2)  # (b,T,width)
 
 
 class _DilatedConvSeq(nn.Module):
@@ -190,6 +213,7 @@ class _DilatedConvSeq(nn.Module):
     is the multi-scale receptive field that a single-kernel `conv` cannot express -- the primitive the
     real time-series literature (InceptionTime, LITE, dilated TCNs) is built on. Weight-sharing under
     time translation (LOCAL), non-recurrent."""
+
     name = "dilconv"
     is_recurrent = False
 
@@ -198,31 +222,32 @@ class _DilatedConvSeq(nn.Module):
         self.ksize = ksize
         # use at most `width` dilation branches so no branch gets 0 channels -- a variable-width d.o.f. stage
         # can pick width < len(dilations); capping the branch count keeps every active branch >= 1 channel.
-        self.dilations = tuple(dilations)[:max(1, width)]
+        self.dilations = tuple(dilations)[: max(1, width)]
         nb = len(self.dilations)
         # split width across branches as evenly as possible; last branch takes the remainder
         base = width // nb
         self.branch_widths = [base] * (nb - 1) + [width - base * (nb - 1)]
-        self.branches = nn.ModuleList([
-            nn.Conv1d(n_in, bw, kernel_size=ksize, dilation=d)
-            for bw, d in zip(self.branch_widths, self.dilations)])
+        self.branches = nn.ModuleList(
+            [nn.Conv1d(n_in, bw, kernel_size=ksize, dilation=d) for bw, d in zip(self.branch_widths, self.dilations)]
+        )
         self.proj = nn.Conv1d(width, width, kernel_size=1)  # mix the multi-scale features
         self.width = width
 
     def forward_seq(self, x):  # (b,T,n_in)
-        xt = x.transpose(1, 2)                                  # (b,n_in,T)
+        xt = x.transpose(1, 2)  # (b,n_in,T)
         outs = []
         for conv, d in zip(self.branches, self.dilations):
-            pad = (self.ksize - 1) * d                          # causal left pad for this dilation
+            pad = (self.ksize - 1) * d  # causal left pad for this dilation
             xp = torch.nn.functional.pad(xt, (pad, 0))
-            outs.append(conv(xp))                               # (b, bw, T)
-        c = torch.tanh(torch.cat(outs, dim=1))                 # (b,width,T)
-        c = self.proj(c)                                        # (b,width,T)
-        return c.transpose(1, 2)                                # (b,T,width)
+            outs.append(conv(xp))  # (b, bw, T)
+        c = torch.tanh(torch.cat(outs, dim=1))  # (b,width,T)
+        c = self.proj(c)  # (b,width,T)
+        return c.transpose(1, 2)  # (b,T,width)
 
 
 class _AttentionSeq(nn.Module):
     """Causal self-attention over timesteps (content-based routing over time)."""
+
     name = "attention"
     is_recurrent = False
 
@@ -239,17 +264,18 @@ class _AttentionSeq(nn.Module):
         self.width = width
 
     def forward_seq(self, x):  # (b,T,n_in)
-        e = torch.tanh(self.embed(x))                     # (b,T,d)
+        e = torch.tanh(self.embed(x))  # (b,T,d)
         q, k, v = self.Wq(e), self.Wk(e), self.Wv(e)
         # scaled dot-product attention with the causal mask applied INTERNALLY -- avoids materializing the full
         # (b,T,T) score matrix and re-allocating a (T,T) mask every forward (an O(T^2) blowup on long series);
         # SDPA's default scale is 1/sqrt(d_model), matching the previous explicit scaling.
         ctx = torch.nn.functional.scaled_dot_product_attention(q, k, v, is_causal=True)  # (b,T,d) over the past
-        return torch.tanh(self.proj(ctx))                 # (b,T,width)
+        return torch.tanh(self.proj(ctx))  # (b,T,width)
 
 
 class _DenseSeq(nn.Module):
     """Per-timestep dense/affine map (affine primitive #1; no time mixing)."""
+
     name = "dense"
     is_recurrent = False
 
@@ -260,11 +286,12 @@ class _DenseSeq(nn.Module):
         self.width = width
 
     def forward_seq(self, x):
-        return torch.tanh(self.fc(x))                     # (b,T,width), applied per step
+        return torch.tanh(self.fc(x))  # (b,T,width), applied per step
 
 
 class _NormSeq(nn.Module):
     """Per-timestep LayerNorm + affine (normalization primitive #6, the stabilizer)."""
+
     name = "norm"
     is_recurrent = False
 
@@ -297,13 +324,14 @@ class _LinearSSMSeq(nn.Module):
     scalar recurrence a*h + drive stays in the loop. The decay is parameterized as
     a = sigmoid(a_logit), initialized near 0.9 (slow decay -> long memory by default).
     """
+
     name = "linssm"
 
     def __init__(self, n_in, width):
         super().__init__()
         self.width = width
-        self.B = nn.Linear(n_in, width, bias=True)     # input -> state drive
-        self.C = nn.Linear(width, width, bias=False)   # state -> output
+        self.B = nn.Linear(n_in, width, bias=True)  # input -> state drive
+        self.C = nn.Linear(width, width, bias=False)  # state -> output
         _init_linear(self.B, 1.0, 0.0)
         _init_linear(self.C, 1.0, 0.0)
         # per-channel decay logit; sigmoid(2.0) ~ 0.88 -> slow decay / long memory at init
@@ -311,10 +339,10 @@ class _LinearSSMSeq(nn.Module):
 
     def forward_seq(self, x):  # (b, T, n_in)
         b, T, _ = x.shape
-        drive = self.B(x)                              # (b, T, width), precomputed
-        a = torch.sigmoid(self.a_logit)                # (width,) decay in (0,1)
-        ys = self._scan(drive, a, T)                   # (b, T, width) parallel associative scan
-        return torch.tanh(self.C(ys))                  # output projection
+        drive = self.B(x)  # (b, T, width), precomputed
+        a = torch.sigmoid(self.a_logit)  # (width,) decay in (0,1)
+        ys = self._scan(drive, a, T)  # (b, T, width) parallel associative scan
+        return torch.tanh(self.C(ys))  # output projection
 
     @staticmethod
     def _scan(drive, a, T, block=None):
@@ -338,18 +366,20 @@ class _LinearSSMSeq(nn.Module):
             a_min = float(a.min().clamp(min=1e-4))
             # a^{-block} < ~e^88 (fp32 safe margin); solve block < 0.4*88/(-log a_min)
             import math as _m
+
             block = max(8, min(T, int(0.4 * 88.0 / (-_m.log(a_min) + 1e-9))))
         out = drive.new_empty(bsz, T, W)
         carry = drive.new_zeros(bsz, W)
         t_idx = torch.arange(block, device=drive.device, dtype=drive.dtype)
         for s in range(0, T, block):
-            e = min(s + block, T); L = e - s
+            e = min(s + block, T)
+            L = e - s
             ti = t_idx[:L]
-            ap = a[None, :] ** ti[:, None]                      # (L, W) = a^t within block
-            blk = drive[:, s:e]                                 # (b, L, W)
+            ap = a[None, :] ** ti[:, None]  # (L, W) = a^t within block
+            blk = drive[:, s:e]  # (b, L, W)
             from_carry = (a[None, :] ** (ti[:, None] + 1))[None] * carry[:, None]  # a^{t+1} * carry
             local = ap[None] * torch.cumsum(blk / ap[None], dim=1)
-            h = from_carry + local                             # (b, L, W)
+            h = from_carry + local  # (b, L, W)
             out[:, s:e] = h
             carry = h[:, -1]
         return out
@@ -357,10 +387,13 @@ class _LinearSSMSeq(nn.Module):
     is_recurrent = True
 
     def init_state(self, b, device=None, dtype=None):
-        return self.B.weight.new_zeros(b, self.width) if device is None \
+        return (
+            self.B.weight.new_zeros(b, self.width)
+            if device is None
             else torch.zeros(b, self.width, device=device, dtype=dtype)
+        )
 
-    def step(self, x_t, state):          # state: h (b,width)
+    def step(self, x_t, state):  # state: h (b,width)
         a = torch.sigmoid(self.a_logit)
         h = a * state + self.B(x_t)
         return torch.tanh(self.C(h)), h  # output is projected; state is the raw recurrence
@@ -390,32 +423,33 @@ class _SelectiveSSMSeq(nn.Module):
     state has `width` channels. Recurrent (streams via step); the loop is sequential because the
     transition is input-dependent (not an associative scan without extra work).
     """
+
     name = "selssm"
     is_recurrent = True
 
     def __init__(self, n_in, width):
         super().__init__()
         self.width = width
-        self.x_proj = nn.Linear(n_in, width, bias=True)     # value stream into the state channels
-        self.Wdelta = nn.Linear(n_in, width, bias=True)     # input-dependent step size
-        self.WB = nn.Linear(n_in, width, bias=True)         # input-dependent input gate
-        self.WC = nn.Linear(n_in, width, bias=True)         # input-dependent output gate
+        self.x_proj = nn.Linear(n_in, width, bias=True)  # value stream into the state channels
+        self.Wdelta = nn.Linear(n_in, width, bias=True)  # input-dependent step size
+        self.WB = nn.Linear(n_in, width, bias=True)  # input-dependent input gate
+        self.WC = nn.Linear(n_in, width, bias=True)  # input-dependent output gate
         for lin in (self.x_proj, self.Wdelta, self.WB, self.WC):
             _init_linear(lin, 1.0, 0.0)
         # A > 0 per channel (state decay rate); init so exp(-Delta*A) ~ slow decay at unit Delta
-        self.A_log = nn.Parameter(torch.randn(width) * 0.5 - 1.0)   # softplus(-1)~0.31
-        self.D = nn.Parameter(torch.ones(width))                    # skip/residual per channel
-        self.out = nn.Linear(width, width)                          # final width->width mix
+        self.A_log = nn.Parameter(torch.randn(width) * 0.5 - 1.0)  # softplus(-1)~0.31
+        self.D = nn.Parameter(torch.ones(width))  # skip/residual per channel
+        self.out = nn.Linear(width, width)  # final width->width mix
         _init_linear(self.out, 1.0, 0.0)
 
     def _params(self, x_t):
-        A = torch.nn.functional.softplus(self.A_log)               # (width,) > 0
-        delta = torch.nn.functional.softplus(self.Wdelta(x_t))     # (b,width) > 0
-        B = self.WB(x_t)                                            # (b,width)
-        C = self.WC(x_t)                                            # (b,width)
-        xp = self.x_proj(x_t)                                       # (b,width) value stream
-        Abar = torch.exp(-delta * A)                               # (b,width) input-dependent decay
-        Bbar = delta * B                                           # discretized input gate
+        A = torch.nn.functional.softplus(self.A_log)  # (width,) > 0
+        delta = torch.nn.functional.softplus(self.Wdelta(x_t))  # (b,width) > 0
+        B = self.WB(x_t)  # (b,width)
+        C = self.WC(x_t)  # (b,width)
+        xp = self.x_proj(x_t)  # (b,width) value stream
+        Abar = torch.exp(-delta * A)  # (b,width) input-dependent decay
+        Bbar = delta * B  # discretized input gate
         return Abar, Bbar, C, xp
 
     def forward_seq(self, x):  # (b, T, n_in)
@@ -427,12 +461,15 @@ class _SelectiveSSMSeq(nn.Module):
             h = Abar * h + Bbar * xp
             y = C * h + self.D * xp
             outs.append(y)
-        ys = torch.stack(outs, dim=1)                             # (b,T,width)
+        ys = torch.stack(outs, dim=1)  # (b,T,width)
         return torch.tanh(self.out(ys))
 
     def init_state(self, b, device=None, dtype=None):
-        return self.x_proj.weight.new_zeros(b, self.width) if device is None \
+        return (
+            self.x_proj.weight.new_zeros(b, self.width)
+            if device is None
             else torch.zeros(b, self.width, device=device, dtype=dtype)
+        )
 
     def step(self, x_t, state):
         Abar, Bbar, C, xp = self._params(x_t)
@@ -455,26 +492,29 @@ class _SpectralSeq(nn.Module):
     2*n_in feature that a fixed-size projection maps to width. Time-invariant, so the width
     vector is broadcast over time to satisfy the s2s contract.
     """
+
     name = "spectral"
     is_recurrent = False
 
     def __init__(self, n_in, width):
         super().__init__()
         self.n_in, self.width = n_in, width
-        self.proj = nn.Linear(2 * n_in, width)   # [mean-power | max-power] per channel
+        self.proj = nn.Linear(2 * n_in, width)  # [mean-power | max-power] per channel
         _init_linear(self.proj, 1.0, 0.0)
 
     def forward_seq(self, x):  # (b, T, n_in)
         b, T, C = x.shape
+
         def _spec(x):
-            Xf = torch.fft.rfft(x, dim=1)                       # (b, nf, C) over time
-            power = torch.log1p(Xf.real ** 2 + Xf.imag ** 2)    # (b, nf, C)
+            Xf = torch.fft.rfft(x, dim=1)  # (b, nf, C) over time
+            power = torch.log1p(Xf.real**2 + Xf.imag**2)  # (b, nf, C)
             # MPS' long rfft/reductions can silently emit non-finite values (CPU stays finite). A NaN in
             # `power` then makes max(dim=1) return an invalid (-1) argmax on MPS, whose backward SCATTER
             # hard-crashes with an AcceleratorError. Keep `power` finite, and use amax (mask-based backward)
             # rather than max().values (argmax-scatter backward) so the reduction is MPS-safe regardless.
             power = torch.nan_to_num(power)
             return torch.cat([power.mean(dim=1), power.amax(dim=1)], dim=1)  # (b, 2C)
+
         try:
             feat = _spec(x)
         except (NotImplementedError, RuntimeError) as e:
@@ -482,21 +522,29 @@ class _SpectralSeq(nn.Module):
             if "mps" not in str(e).lower() and "not implemented" not in str(e).lower() and "fft" not in str(e).lower():
                 raise
             feat = _spec(x.to("cpu")).to(x.device)
-        v = torch.tanh(self.proj(feat))                     # (b, width), time-invariant
-        return v.unsqueeze(1).expand(b, T, self.width)      # broadcast over time
+        v = torch.tanh(self.proj(feat))  # (b, width), time-invariant
+        return v.unsqueeze(1).expand(b, T, self.width)  # broadcast over time
 
 
 _SEQ_CORES = {
-    "plain": _PlainSeq, "gated": _GatedSeq, "lstm": _LSTMSeq,
-    "conv": _ConvSeq, "dilconv": _DilatedConvSeq, "attention": _AttentionSeq,
-    "dense": _DenseSeq, "norm": _NormSeq,
-    "spectral": _SpectralSeq, "linssm": _LinearSSMSeq, "selssm": _SelectiveSSMSeq,
+    "plain": _PlainSeq,
+    "gated": _GatedSeq,
+    "lstm": _LSTMSeq,
+    "conv": _ConvSeq,
+    "dilconv": _DilatedConvSeq,
+    "attention": _AttentionSeq,
+    "dense": _DenseSeq,
+    "norm": _NormSeq,
+    "spectral": _SpectralSeq,
+    "linssm": _LinearSSMSeq,
+    "selssm": _SelectiveSSMSeq,
 }
 
 
 # ---------------------------------------------------------------------------
 # cell + schema
 # ---------------------------------------------------------------------------
+
 
 class _SequenceCell(nn.Module):
     """A meta-cell holding N sequence primitives in parallel; alpha mixes their seq outputs."""
@@ -520,8 +568,8 @@ class _SequenceCell(nn.Module):
         # weighted sum over primitives WITHOUT stacking (sum_p w_p * out_p == einsum over a (P,b,T,w) stack):
         # stacking would allocate an extra full (P,b,T,width) copy of all P primitives' activations, doubling
         # the mixing-layer peak memory (a real cost for long sequences). Matches the 4d/operator cells.
-        w = torch.softmax(self.alpha, dim=0)                                          # (P,)
-        outs = [core.forward_seq(x_seq) for core in self.cores]                       # P x (b,T,width)
+        w = torch.softmax(self.alpha, dim=0)  # (P,)
+        outs = [core.forward_seq(x_seq) for core in self.cores]  # P x (b,T,width)
         return sum(wi * o for wi, o in zip(w, outs))
 
     # --- streaming API ---
@@ -534,8 +582,7 @@ class _SequenceCell(nn.Module):
 
     def init_state(self, b, device=None, dtype=None):
         """One state per primitive; non-recurrent primitives get None."""
-        return [c.init_state(b, device, dtype) if getattr(c, "is_recurrent", False) else None
-                for c in self.cores]
+        return [c.init_state(b, device, dtype) if getattr(c, "is_recurrent", False) else None for c in self.cores]
 
     def step(self, x_t, states):
         """Advance one timestep. x_t: (b, n_in); states: list (one per primitive from init_state).
@@ -543,16 +590,18 @@ class _SequenceCell(nn.Module):
         cell containing a non-recurrent primitive (conv/attention/dense/norm/spectral) cannot stream,
         because those primitives need the whole sequence at once."""
         if not self.all_recurrent():
-            bad = [p for p, c in zip(self.primitives, self.cores)
-                   if not getattr(c, "is_recurrent", False)]
-            raise RuntimeError(f"cannot stream: non-recurrent primitive(s) {bad} need the full "
-                               f"sequence. Restrict the schema to recurrent primitives "
-                               f"(plain/gated/lstm/linssm) to stream.")
+            bad = [p for p, c in zip(self.primitives, self.cores) if not getattr(c, "is_recurrent", False)]
+            raise RuntimeError(
+                f"cannot stream: non-recurrent primitive(s) {bad} need the full "
+                f"sequence. Restrict the schema to recurrent primitives "
+                f"(plain/gated/lstm/linssm) to stream."
+            )
         w = torch.softmax(self.alpha, dim=0)
         new_states, outs = [], []
         for i, core in enumerate(self.cores):
             o, s = core.step(x_t, states[i])
-            outs.append(o); new_states.append(s)
+            outs.append(o)
+            new_states.append(s)
         mixed = torch.einsum("p,pbw->bw", w, torch.stack(outs, dim=0))
         return mixed, new_states
 
@@ -579,10 +628,19 @@ class Schema(nn.Module):
     sequence output.
     """
 
-    def __init__(self, depth, width, n_in=1, n_out=10, seed=0,
-                 primitives=("plain", "gated", "lstm", "conv", "attention", "dense",
-                             "norm", "spectral", "linssm"),
-                 sigma_w2=1.76, chrono_tmax=None, readout="last", deep_supervision=False):
+    def __init__(
+        self,
+        depth,
+        width,
+        n_in=1,
+        n_out=10,
+        seed=0,
+        primitives=("plain", "gated", "lstm", "conv", "attention", "dense", "norm", "spectral", "linssm"),
+        sigma_w2=1.76,
+        chrono_tmax=None,
+        readout="last",
+        deep_supervision=False,
+    ):
         super().__init__()
         if depth < 1:
             raise ValueError("depth must be >= 1")
@@ -611,8 +669,10 @@ class Schema(nn.Module):
             _init_linear(self.head, 1.0, 0.0)
         if deep_supervision:
             if readout == "flatten":
-                raise ValueError("deep_supervision is not supported with readout='flatten' "
-                                 "(early heads would need per-layer flatten sizing); use 'last'/'mean'.")
+                raise ValueError(
+                    "deep_supervision is not supported with readout='flatten' "
+                    "(early heads would need per-layer flatten sizing); use 'last'/'mean'."
+                )
             early = [nn.Linear(width, n_out) for _ in range(depth - 1)]
             for h in early:
                 _init_linear(h, 1.0, 0.0)
@@ -626,7 +686,7 @@ class Schema(nn.Module):
         seqs = []
         h = x_seq
         for cell in self.cells:
-            h = cell.mixed(h)     # (b,T,width)
+            h = cell.mixed(h)  # (b,T,width)
             seqs.append(h)
         return seqs
 
@@ -636,7 +696,7 @@ class Schema(nn.Module):
             return seq[:, -1]
         if self.readout == "mean":
             return seq.mean(dim=1)
-        return seq.reshape(seq.shape[0], -1)   # flatten: concat all timesteps (position-aware)
+        return seq.reshape(seq.shape[0], -1)  # flatten: concat all timesteps (position-aware)
 
     def _ensure_flatten_head(self, feat):
         # lazily build the T*width -> n_out head on first forward (T known only at runtime)
@@ -675,13 +735,15 @@ class Schema(nn.Module):
         (readout='last') or accumulate a running mean externally (readout='mean').
         """
         if not self.can_stream():
-            raise RuntimeError("cannot stream: schema contains a non-recurrent primitive. "
-                               "Build with primitives restricted to the recurrent set "
-                               "(plain, gated, lstm, linssm) to enable streaming.")
+            raise RuntimeError(
+                "cannot stream: schema contains a non-recurrent primitive. "
+                "Build with primitives restricted to the recurrent set "
+                "(plain, gated, lstm, linssm) to enable streaming."
+            )
         new_states = []
         h = x_t
         for cell, st in zip(self.cells, states):
-            h, ns = cell.step(h, st)     # mixed output of this layer -> input to next
+            h, ns = cell.step(h, st)  # mixed output of this layer -> input to next
             new_states.append(ns)
         return h, new_states
 
@@ -705,10 +767,12 @@ class Schema(nn.Module):
     def forward_seq_readout(self, x_seq, k):
         """Return per-timestep head outputs for the last k timesteps (copy-task style)."""
         if self.readout == "flatten":
-            raise RuntimeError("forward_seq_readout needs a per-timestep (width-sized) head; "
-                               "not available with readout='flatten'. Use readout='last'/'mean'.")
-        seq = self._layer_seqs(x_seq)[-1]              # (b,T,width)
-        return self.head(seq[:, -k:])                  # (b,k,n_out)
+            raise RuntimeError(
+                "forward_seq_readout needs a per-timestep (width-sized) head; "
+                "not available with readout='flatten'. Use readout='last'/'mean'."
+            )
+        seq = self._layer_seqs(x_seq)[-1]  # (b,T,width)
+        return self.head(seq[:, -k:])  # (b,k,n_out)
 
     def alpha_entropy(self):
         ent = self.cells[0].alpha.new_zeros(())
@@ -735,13 +799,30 @@ class Schema(nn.Module):
         return [self.selected_primitive(l) for l in range(self.depth)]
 
 
-def build_schema(depth, width, n_in=1, n_out=10, seed=0,
-                 primitives=("plain", "gated", "lstm", "conv", "attention", "dense",
-                             "norm", "spectral", "linssm"),
-                 sigma_w2=1.76, chrono_tmax=None, readout="last", deep_supervision=False):
+def build_schema(
+    depth,
+    width,
+    n_in=1,
+    n_out=10,
+    seed=0,
+    primitives=("plain", "gated", "lstm", "conv", "attention", "dense", "norm", "spectral", "linssm"),
+    sigma_w2=1.76,
+    chrono_tmax=None,
+    readout="last",
+    deep_supervision=False,
+):
     """Sequence-schema factory. Explicit signature (mirroring Schema.__init__ and the sibling
     build_*_schema factories) so the accepted arguments are visible here rather than hidden behind
     **kwargs -> Schema(**kwargs)."""
-    return Schema(depth, width, n_in=n_in, n_out=n_out, seed=seed, primitives=primitives,
-                  sigma_w2=sigma_w2, chrono_tmax=chrono_tmax, readout=readout,
-                  deep_supervision=deep_supervision)
+    return Schema(
+        depth,
+        width,
+        n_in=n_in,
+        n_out=n_out,
+        seed=seed,
+        primitives=primitives,
+        sigma_w2=sigma_w2,
+        chrono_tmax=chrono_tmax,
+        readout=readout,
+        deep_supervision=deep_supervision,
+    )

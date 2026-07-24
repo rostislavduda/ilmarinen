@@ -14,7 +14,10 @@ Two parts:
 
 Run: python studies/b6_depth_mu_study.py [dataset_name]
 """
-import warnings; warnings.filterwarnings("ignore")
+
+import warnings
+
+warnings.filterwarnings("ignore")
 import sys
 
 import numpy as np
@@ -32,13 +35,16 @@ def synthetic_recovery(alphas=(1.0, 2.0, 3.0), Lmax=60):
         for i, L in enumerate(depths):
             acc += L ** (-(alpha + 1.0))
             S[i] = 5.0 - acc
-        marg = [((depths[i - 1] + depths[i]) / 2, (S[i - 1] - S[i]) / (depths[i] - depths[i - 1]), 0.0)
-                for i in range(1, len(depths))]
+        marg = [
+            ((depths[i - 1] + depths[i]) / 2, (S[i - 1] - S[i]) / (depths[i] - depths[i - 1]), 0.0)
+            for i in range(1, len(depths))
+        ]
         curve = DepthCurve(depths, S, np.zeros(len(depths)), np.zeros(len(depths)), marg)
         mus = np.logspace(-3.5, -1.0, 12)
-        Ls = np.array([select_depth(curve, mu) for mu in mus]); ok = Ls > 1
+        Ls = np.array([select_depth(curve, mu) for mu in mus])
+        ok = Ls > 1
         slope = np.polyfit(np.log(mus[ok]), np.log(Ls[ok]), 1)[0]
-        print(f"  alpha={alpha}: predicted {-1/(alpha+1):.3f}, measured {slope:.3f}")
+        print(f"  alpha={alpha}: predicted {-1 / (alpha + 1):.3f}, measured {slope:.3f}")
 
 
 def measure_real_curve(name="ESOL", task="regression", width=48, depths=(1, 2, 3, 4, 5), seeds=(0, 1, 2)):
@@ -47,21 +53,27 @@ def measure_real_curve(name="ESOL", task="regression", width=48, depths=(1, 2, 3
 
     from ilmarinen.core.allgraph import AllGraph
     from ilmarinen.core.dataset_registry import quick_suite
-    d = quick_suite()[name][0](reduced=True, device="cpu"); tr, te = d["train"], d["test"]
+
+    d = quick_suite()[name][0](reduced=True, device="cpu")
+    tr, te = d["train"], d["test"]
 
     def train_eval(depth, seed):
-        np.random.seed(seed); torch.manual_seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
         mg = AllGraph(width=width, depth=depth, epochs=40, verbose=False, seed=seed)
-        mg.fit(tr, task=task); y = np.asarray(te.y)
+        mg.fit(tr, task=task)
+        y = np.asarray(te.y)
         with torch.no_grad():
             ids = np.arange(len(te.node_feats))
-            wp = (mg.contract == "equivariant"); ue = mg.contract in ("graph", "equivariant")
+            wp = mg.contract == "equivariant"
+            ue = mg.contract in ("graph", "equivariant")
             out = mg._forward_contract(mg.net, te, ids, mg.contract, wp, ue, 3.0).cpu().numpy()
         p = out.squeeze(-1) if out.ndim > 1 else out
-        return float(((p - y[:len(p)]) ** 2).mean()), 0.0
+        return float(((p - y[: len(p)]) ** 2).mean()), 0.0
 
     curve = measure_depth_curve(train_eval, list(depths), list(seeds))
-    mids = np.array([m[0] for m in curve.marginals]); ms = np.array([m[1] for m in curve.marginals])
+    mids = np.array([m[0] for m in curve.marginals])
+    ms = np.array([m[1] for m in curve.marginals])
     pos = ms > 1e-5
     print(f"\n{name} ({len(seeds)} seeds): S={[round(float(s), 4) for s in curve.S_mean]}")
     print(f"  marginals={[(round(m[0], 1), round(float(m[1]), 4)) for m in curve.marginals]}")
@@ -70,7 +82,7 @@ def measure_real_curve(name="ESOL", task="regression", width=48, depths=(1, 2, 3
         pred = slope * np.log(mids[pos]) + inter
         denom = ((np.log(ms[pos]) - np.log(ms[pos]).mean()) ** 2).sum() + 1e-9
         r2 = 1 - ((np.log(ms[pos]) - pred) ** 2).sum() / denom
-        print(f"  apparent (alpha+1)={-slope:.2f} (alpha={-slope-1:.2f}), power-law R2={r2:.3f}")
+        print(f"  apparent (alpha+1)={-slope:.2f} (alpha={-slope - 1:.2f}), power-law R2={r2:.3f}")
         print("  NOTE: this exponent is seed-unstable -- rerun with a different number of seeds to see it move.")
     else:
         print(f"  only {int(pos.sum())} positive marginals -- depth saturates/does not pay (no power law).")

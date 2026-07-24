@@ -4,6 +4,7 @@ The "degrees of freedom" stage: select_architecture (sequential width-then-depth
 select_architecture_by_area (joint width x depth area) sweep candidate sizes on a held-out split and pick
 by the priced marginal-value rule; _select_size_variable does per-layer variable-width selection. Split out
 of allgraph.py to keep the controller focused; AllGraph mixes this in so `self` resolves as before."""
+
 import numpy as np
 
 from .allgraph_types import _SweepCtx
@@ -26,17 +27,33 @@ class _SizeSelectionMixin:
         nf = getattr(data, "node_feats", None)
         n = len(nf) if nf is not None else len(data.y)
         rng = np.random.RandomState(self.seed)
-        perm = rng.permutation(n); nval = max(1, int(val_frac * n))
+        perm = rng.permutation(n)
+        nval = max(1, int(val_frac * n))
         va, tr = perm[:nval], perm[nval:]
         n_out = self._infer_nout(data.y, task, n_out)
         ep = sweep_epochs if sweep_epochs is not None else self._search_ep(max(self.epochs, sweep_epochs_floor))
         return contract, tr, va, n_out, ep
 
-    def select_architecture(self, data, task="classification", n_out=None, contract=None,
-                            widths=(8, 16, 32, 64, 128), depths=(1, 2, 3), width_mu=0.0, depth_mu=0.0,
-                            seeds=(0,), val_frac=0.25, sweep_epochs=None, sweep_epochs_floor=40,
-                            edge_cutoff=None, min_signal_r2=0.05, record=True,
-                            extend_width=True, max_width_cap=1024):
+    def select_architecture(
+        self,
+        data,
+        task="classification",
+        n_out=None,
+        contract=None,
+        widths=(8, 16, 32, 64, 128),
+        depths=(1, 2, 3),
+        width_mu=0.0,
+        depth_mu=0.0,
+        seeds=(0,),
+        val_frac=0.25,
+        sweep_epochs=None,
+        sweep_epochs_floor=40,
+        edge_cutoff=None,
+        min_signal_r2=0.05,
+        record=True,
+        extend_width=True,
+        max_width_cap=1024,
+    ):
         """OPT-IN minimal-architecture selection: choose WIDTH (K*) and DEPTH (L*) by the priced
         marginal-value criterion, so architecture size becomes an OUTPUT of metaoptimality rather than a
         fixed hyperparameter. This trains O(#widths + #depths) nets -- a sweep -- so it is a SEPARATE,
@@ -61,11 +78,13 @@ class _SizeSelectionMixin:
         Returns a detail dict with both curves.
         """
         from ..machinery.priced_depth import measure_depth_curve, select_depth, significant_elbow
+
         contract, tr, va, n_out, ep = self._sweep_setup(
-            data, task, n_out, contract, val_frac, sweep_epochs, sweep_epochs_floor)
+            data, task, n_out, contract, val_frac, sweep_epochs, sweep_epochs_floor
+        )
         sweep_depth = self.depth if self.depth and self.depth >= 1 else 1
         w0, d0, s0 = self.width, self.depth, self.seed
-        ctx = _SweepCtx(data, contract, tr, va, task, n_out, ep, edge_cutoff)   # sweep-invariant (size varies via self)
+        ctx = _SweepCtx(data, contract, tr, va, task, n_out, ep, edge_cutoff)  # sweep-invariant (size varies via self)
 
         def score_at(width, depth, seed):
             self.width, self.depth, self.seed = width, depth, seed
@@ -86,15 +105,16 @@ class _SizeSelectionMixin:
                 for i in range(1, len(widths)):
                     marg = (wlosses[i - 1] - wlosses[i]) / (widths[i] - widths[i - 1])
                     if marg < width_mu:
-                        return widths[i - 1], False           # interior stop: marginal dropped below price
-                return widths[-1], True                        # never dropped -> ceiling binding
+                        return widths[i - 1], False  # interior stop: marginal dropped below price
+                return widths[-1], True  # never dropped -> ceiling binding
             else:
-                Kstar = widths[0]; interior = False
+                Kstar = widths[0]
+                interior = False
                 for i in range(1, len(widths)):
                     if wlosses[i - 1] - wlosses[i] > 1e-4:
                         Kstar = widths[i]
                     else:
-                        interior = True                        # a width stopped clearly improving -> elbow found
+                        interior = True  # a width stopped clearly improving -> elbow found
                 return Kstar, (Kstar == widths[-1] and not interior)
 
         if uninformative:
@@ -112,8 +132,10 @@ class _SizeSelectionMixin:
                 while Kstar == widths[-1] and widths[-1] * 2 <= max_width_cap:
                     w_new = widths[-1] * 2
                     s_new = np.mean([score_at(w_new, sweep_depth, s) for s in seeds])
-                    gain = s_new - wscores[-1]                 # improvement from the current top width
-                    widths.append(w_new); wscores.append(s_new); wlosses.append(1.0 - s_new)
+                    gain = s_new - wscores[-1]  # improvement from the current top width
+                    widths.append(w_new)
+                    wscores.append(s_new)
+                    wlosses.append(1.0 - s_new)
                     best_width_score = max(best_width_score, s_new)
                     # SATURATION FLOOR: if doubling the width barely moved the score, the curve has
                     # plateaued -- stop extending even if the formal marginal-value rule hasn't fired, so we
@@ -130,31 +152,53 @@ class _SizeSelectionMixin:
         def depth_eval(L, sd):
             self.width, self.depth, self.seed = Kstar, L, sd
             score = self._train_candidate_contract(ctx)
-            return 1.0 - float(score), float(score)   # (val_loss, val_score) as measure_depth_curve expects
+            return 1.0 - float(score), float(score)  # (val_loss, val_score) as measure_depth_curve expects
+
         curve = measure_depth_curve(depth_eval, list(depths), list(seeds))
         Lstar = select_depth(curve, depth_mu) if depth_mu > 0 else significant_elbow(curve)
 
         self.seed = s0
         self.width, self.depth = int(Kstar), int(Lstar)
-        detail = {"contract": contract, "width_star": int(Kstar), "depth_star": int(Lstar),
-                  "sweep_epochs": ep, "sweep_depth": sweep_depth,
-                  "best_width_val_score": round(float(best_width_score), 4),
-                  "uninformative_sweep": bool(uninformative),
-                  "ceiling_extended": bool(ceiling_extended),
-                  "width_curve": list(zip(list(widths), [round(float(x), 4) for x in wlosses])),
-                  "depth_marginals": [(m, round(float(v), 4), round(float(e), 4)) for (m, v, e) in curve.marginals],
-                  "prev": {"width": w0, "depth": d0}}
+        detail = {
+            "contract": contract,
+            "width_star": int(Kstar),
+            "depth_star": int(Lstar),
+            "sweep_epochs": ep,
+            "sweep_depth": sweep_depth,
+            "best_width_val_score": round(float(best_width_score), 4),
+            "uninformative_sweep": bool(uninformative),
+            "ceiling_extended": bool(ceiling_extended),
+            "width_curve": list(zip(list(widths), [round(float(x), 4) for x in wlosses])),
+            "depth_marginals": [(m, round(float(v), 4), round(float(e), 4)) for (m, v, e) in curve.marginals],
+            "prev": {"width": w0, "depth": d0},
+        }
         if record:
             note = " [uninformative -> max width]" if uninformative else ""
             note += f" [ceiling extended to {widths[-1]}]" if ceiling_extended else ""
-            self._log(f"[AllGraph] select_architecture -> width K*={Kstar}, depth L*={Lstar} "
-                      f"(contract={contract}, sweep_epochs={ep}, best_val={best_width_score:.3f}){note}")
+            self._log(
+                f"[AllGraph] select_architecture -> width K*={Kstar}, depth L*={Lstar} "
+                f"(contract={contract}, sweep_epochs={ep}, best_val={best_width_score:.3f}){note}"
+            )
         return detail
 
-    def select_architecture_by_area(self, data, task="classification", n_out=None, contract=None,
-                                    widths=(16, 32, 48, 64), depths=(1, 2, 3), tol=0.05,
-                                    seeds=(0,), val_frac=0.25, sweep_epochs=None, sweep_epochs_floor=40,
-                                    edge_cutoff=None, extend_depth=True, max_depth_cap=8, record=True):
+    def select_architecture_by_area(
+        self,
+        data,
+        task="classification",
+        n_out=None,
+        contract=None,
+        widths=(16, 32, 48, 64),
+        depths=(1, 2, 3),
+        tol=0.05,
+        seeds=(0,),
+        val_frac=0.25,
+        sweep_epochs=None,
+        sweep_epochs_floor=40,
+        edge_cutoff=None,
+        extend_depth=True,
+        max_depth_cap=8,
+        record=True,
+    ):
         """OPT-IN joint width/depth selection by AREA (= width*depth = total neurons) minimization.
 
         select_architecture chooses width and depth SEQUENTIALLY (width first at a fixed sweep depth, then
@@ -174,11 +218,12 @@ class _SizeSelectionMixin:
         Returns a detail dict; also sets self.width, self.depth to the selected (K*, L*).
         """
         contract, tr, va, n_out, ep = self._sweep_setup(
-            data, task, n_out, contract, val_frac, sweep_epochs, sweep_epochs_floor)
+            data, task, n_out, contract, val_frac, sweep_epochs, sweep_epochs_floor
+        )
         w0, d0, s0 = self.width, self.depth, self.seed
-        ctx = _SweepCtx(data, contract, tr, va, task, n_out, ep, edge_cutoff)   # sweep-invariant (size varies via self)
+        ctx = _SweepCtx(data, contract, tr, va, task, n_out, ep, edge_cutoff)  # sweep-invariant (size varies via self)
 
-        grid = {}      # (w, L) -> mean val score
+        grid = {}  # (w, L) -> mean val score
         grid_std = {}  # (w, L) -> std across seeds (noise estimate for significance gating)
 
         def score_at(width, depth):
@@ -188,7 +233,8 @@ class _SizeSelectionMixin:
                 vals.append(float(self._train_candidate_contract(ctx)))
             return float(np.mean(vals)), float(np.std(vals))
 
-        widths = list(widths); depths = list(depths)
+        widths = list(widths)
+        depths = list(depths)
         for w in widths:
             for L in depths:
                 grid[(w, L)], grid_std[(w, L)] = score_at(w, L)
@@ -203,6 +249,7 @@ class _SizeSelectionMixin:
         # the noise floor -- so we do not extend into noise (the single-seed depth-4 mirage).
         def best_depth_of_best():
             return max(grid, key=lambda k: grid[k])[1]
+
         depth_extended = False
         if extend_depth:
             while best_depth_of_best() == depths[-1] and depths[-1] < max_depth_cap:
@@ -232,26 +279,46 @@ class _SizeSelectionMixin:
 
         self.seed = s0
         self.width, self.depth = int(Kstar), int(Lstar)
-        detail = {"contract": contract, "width_star": int(Kstar), "depth_star": int(Lstar),
-                  "area_star": int(Kstar * Lstar), "score_star": round(float(star_score), 4),
-                  "best_score": round(float(best), 4), "tol": tol, "noise": round(float(noise), 4),
-                  "eff_tol": round(float(eff_tol), 4), "sweep_epochs": ep,
-                  "depth_extended": bool(depth_extended), "max_depth_reached": int(depths[-1]),
-                  "shallow_first": {"width": int(sw), "depth": int(sL), "area": int(sw * sL),
-                                    "score": round(float(ss), 4)},
-                  "area_beats_shallow": bool(Kstar * Lstar < sw * sL),
-                  "grid": {f"w{w}_L{L}": round(float(grid[(w, L)]), 4) for (w, L) in grid},
-                  "prev": {"width": w0, "depth": d0}}
+        detail = {
+            "contract": contract,
+            "width_star": int(Kstar),
+            "depth_star": int(Lstar),
+            "area_star": int(Kstar * Lstar),
+            "score_star": round(float(star_score), 4),
+            "best_score": round(float(best), 4),
+            "tol": tol,
+            "noise": round(float(noise), 4),
+            "eff_tol": round(float(eff_tol), 4),
+            "sweep_epochs": ep,
+            "depth_extended": bool(depth_extended),
+            "max_depth_reached": int(depths[-1]),
+            "shallow_first": {"width": int(sw), "depth": int(sL), "area": int(sw * sL), "score": round(float(ss), 4)},
+            "area_beats_shallow": bool(Kstar * Lstar < sw * sL),
+            "grid": {f"w{w}_L{L}": round(float(grid[(w, L)]), 4) for (w, L) in grid},
+            "prev": {"width": w0, "depth": d0},
+        }
         if record:
             note = f" [depth extended to {depths[-1]}]" if depth_extended else ""
             note += " [area < shallow-first]" if detail["area_beats_shallow"] else ""
-            self._log(f"[AllGraph] select_architecture_by_area -> width K*={Kstar}, depth L*={Lstar}, "
-                      f"area={Kstar*Lstar} (contract={contract}, tol={tol}, best_val={best:.3f}){note}")
+            self._log(
+                f"[AllGraph] select_architecture_by_area -> width K*={Kstar}, depth L*={Lstar}, "
+                f"area={Kstar * Lstar} (contract={contract}, tol={tol}, best_val={best:.3f}){note}"
+            )
         return detail
 
-    def _select_size_variable(self, data, task="classification", n_out=None, max_width=None,
-                              max_depth=3, lam=None, epochs=400, seeds=(0, 1),
-                              extend_depth=True, max_depth_cap=8):
+    def _select_size_variable(
+        self,
+        data,
+        task="classification",
+        n_out=None,
+        max_width=None,
+        max_depth=3,
+        lam=None,
+        epochs=400,
+        seeds=(0, 1),
+        extend_depth=True,
+        max_depth_cap=8,
+    ):
         """Bridge the generalized-area variable-width selector (variable_width_area) into the size-selection
         stage. The variable-width net is dense, so we featurize each example into a fixed vector (relational:
         permutation-invariant mean||max pool over nodes; dense: flattened / pooled grid), run the certificate-
@@ -268,6 +335,7 @@ class _SizeSelectionMixin:
         depth rule: depth grows until the marginal accuracy benefit becomes insignificant, rather than being
         capped by hand."""
         from .variable_width_area import certificate_lambda_scale, fit_variable_width_area
+
         # featurize to a fixed vector per example (relational node_feats OR dense grid).
         if getattr(data, "node_feats", None) is not None:
             feats = []
@@ -285,8 +353,13 @@ class _SizeSelectionMixin:
                 lead = D.reshape(nex, -1, D.shape[-1])
                 pooled = np.concatenate([lead.mean(1), lead.max(1), lead.std(1)], axis=1)
                 nblk = 32
-                blk = np.stack([flat[:, i * (flat.shape[1] // nblk):(i + 1) * (flat.shape[1] // nblk)].mean(1)
-                                for i in range(nblk)], axis=1)
+                blk = np.stack(
+                    [
+                        flat[:, i * (flat.shape[1] // nblk) : (i + 1) * (flat.shape[1] // nblk)].mean(1)
+                        for i in range(nblk)
+                    ],
+                    axis=1,
+                )
                 X = np.concatenate([pooled, blk], axis=1).astype(np.float32)
         else:
             raise ValueError("variable size selection needs node_feats (relational) or dense (grid) data")
@@ -303,9 +376,11 @@ class _SizeSelectionMixin:
             """Fit the variable-width net at ceiling md over seeds; return (mean_widths, mean_val, val_std)."""
             wr, vs = [], []
             for sd in seeds:
-                r = fit_variable_width_area(X, y, task=task, lam=lam, max_width=mw, max_depth=md,
-                                            epochs=epochs, seed=sd)
-                wr.append(r["widths"]); vs.append(r["value"])
+                r = fit_variable_width_area(
+                    X, y, task=task, lam=lam, max_width=mw, max_depth=md, epochs=epochs, seed=sd
+                )
+                wr.append(r["widths"])
+                vs.append(r["value"])
             return np.array(wr).mean(0), float(np.mean(vs)), float(np.std(vs))
 
         cur = max_depth
@@ -317,26 +392,39 @@ class _SizeSelectionMixin:
         # combined seed-noise. Crucially the marginal-gain test applies from the FIRST extension: a task that
         # already fits at max_depth (e.g. a linear signal) yields no significant gain and stops immediately,
         # so depth does not climb to the cap just because every layer is nominally "used".
-        while (extend_depth and cur < max_depth_cap
-               and int(np.sum(mean_widths > 0.5)) >= cur):          # ceiling binding
+        while extend_depth and cur < max_depth_cap and int(np.sum(mean_widths > 0.5)) >= cur:  # ceiling binding
             new_widths, new_val, new_std = fit_at(cur + 1)
             gain = new_val - prev_val
             noise = max(vstd, new_std)
-            if gain <= noise:                                        # marginal gain below noise -> stop
+            if gain <= noise:  # marginal gain below noise -> stop
                 break
-            cur += 1; mean_widths, val, vstd = new_widths, new_val, new_std
-            prev_val = new_val; depth_extended = True
+            cur += 1
+            mean_widths, val, vstd = new_widths, new_val, new_std
+            prev_val = new_val
+            depth_extended = True
 
         eff_depth = int(max(1, np.sum(mean_widths > 0.5)))
-        chosen_width = int(max(1, round(float(mean_widths[mean_widths > 0.5].max()) if np.any(mean_widths > 0.5)
-                                        else mean_widths.max())))
+        chosen_width = int(
+            max(
+                1,
+                round(float(mean_widths[mean_widths > 0.5].max()) if np.any(mean_widths > 0.5) else mean_widths.max()),
+            )
+        )
         w0, d0 = self.width, self.depth
         self.width, self.depth = chosen_width, eff_depth
-        detail = {"mode": "variable", "contract": self.contract,
-                  "lam": float(lam), "width_profile_mean": [round(float(x), 2) for x in mean_widths],
-                  "effective_depth": eff_depth, "chosen_width": chosen_width,
-                  "generalized_area_mean": float(mean_widths.sum()),
-                  "probe_val_mean": float(val), "probe_val_std": float(vstd),
-                  "depth_extended": bool(depth_extended), "final_max_depth": int(cur),
-                  "max_width": mw, "prev": {"width": w0, "depth": d0}}
+        detail = {
+            "mode": "variable",
+            "contract": self.contract,
+            "lam": float(lam),
+            "width_profile_mean": [round(float(x), 2) for x in mean_widths],
+            "effective_depth": eff_depth,
+            "chosen_width": chosen_width,
+            "generalized_area_mean": float(mean_widths.sum()),
+            "probe_val_mean": float(val),
+            "probe_val_std": float(vstd),
+            "depth_extended": bool(depth_extended),
+            "final_max_depth": int(cur),
+            "max_width": mw,
+            "prev": {"width": w0, "depth": d0},
+        }
         return detail

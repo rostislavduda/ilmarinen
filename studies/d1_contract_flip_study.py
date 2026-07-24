@@ -30,6 +30,7 @@ DoF honestly, but does not, on realistic converged data, change which contract i
 
 Run: PYTHONPATH=/tmp/ilmarinen python studies/d1_contract_flip_study.py
 """
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -82,7 +83,9 @@ def train(model, X, y, epochs=400, lr=3e-3, seed=0):
     Xt, yt = torch.tensor(X), torch.tensor(y)
     lossf = nn.MSELoss()
     for _ in range(epochs):
-        opt.zero_grad(); lossf(model(Xt), yt).backward(); opt.step()
+        opt.zero_grad()
+        lossf(model(Xt), yt).backward()
+        opt.step()
     with torch.no_grad():
         ss_res = float(((model(Xt) - yt) ** 2).sum())
         ss_tot = float(((yt - yt.mean()) ** 2).sum())
@@ -105,10 +108,12 @@ def natural_corner(n_seeds=5):
         set_net, graph_net = SetEncoder(32), GraphEncoder(32)
         sr = train(set_net, X, y, epochs=400, seed=seed + 10)
         gr = train(graph_net, X, y, epochs=400, seed=seed + 10)
-        sc_s = singular_complexity_of(set_net, llc_closure(set_net, X, y), n,
-                                      chains=3, steps=250, burn=80, eps=2e-5, seed=seed)
-        sc_g = singular_complexity_of(graph_net, llc_closure(graph_net, X, y), n,
-                                      chains=3, steps=250, burn=80, eps=2e-5, seed=seed)
+        sc_s = singular_complexity_of(
+            set_net, llc_closure(set_net, X, y), n, chains=3, steps=250, burn=80, eps=2e-5, seed=seed
+        )
+        sc_g = singular_complexity_of(
+            graph_net, llc_closure(graph_net, X, y), n, chains=3, steps=250, burn=80, eps=2e-5, seed=seed
+        )
         scores = {"set": sr, "graph": gr}
         om_struct = {"set": omega_struct("set", N, P), "graph": omega_struct("graph", N, P)}
         flips = []
@@ -121,9 +126,11 @@ def natural_corner(n_seeds=5):
             w_f, _ = select_contract_mdl(scores, om_aug, mu_c=mc)
             flips.append(w_f != w_s)
             any_flip = any_flip or (w_f != w_s)
-        print(f"  seed {seed}: R2 set={sr:.4f} graph={gr:.4f} | lambda set={sc_s['lambda']:+.2f} "
-              f"graph={sc_g['lambda']:+.2f} | omega_func set={sc_s['omega_func']:.1f} graph={sc_g['omega_func']:.1f} "
-              f"| flips@mu_c[.05,.1,.2,.4]={flips}")
+        print(
+            f"  seed {seed}: R2 set={sr:.4f} graph={gr:.4f} | lambda set={sc_s['lambda']:+.2f} "
+            f"graph={sc_g['lambda']:+.2f} | omega_func set={sc_s['omega_func']:.1f} graph={sc_g['omega_func']:.1f} "
+            f"| flips@mu_c[.05,.1,.2,.4]={flips}"
+        )
     print(f"  => any flip in natural runs: {any_flip}\n")
     return any_flip
 
@@ -131,8 +138,8 @@ def natural_corner(n_seeds=5):
 def adversarial_corner():
     print("=== ADVERSARIAL corner: place lambda so the fit-leader is the MORE singular contract ===")
     n = 400
-    scores = {"set": 0.9969, "graph": 0.9968}       # set marginally leads fit
-    om_struct = {"set": 0.0, "graph": 0.015}         # complete-graph tie
+    scores = {"set": 0.9969, "graph": 0.9968}  # set marginally leads fit
+    om_struct = {"set": 0.0, "graph": 0.015}  # complete-graph tie
     # fit-leader (set) made deliberately MORE singular than graph:
     lam = {"set": 8.0, "graph": 1.0}
     for mc in [0.05, 0.2]:
@@ -140,8 +147,7 @@ def adversarial_corner():
         om_aug = {c: om_struct[c] + omega_func(lam[c], n) for c in scores}
         w_f, df = select_contract_mdl(scores, om_aug, mu_c=mc)
         flip = "  <== FLIP" if w_f != w_s else ""
-        print(f"  mu_c={mc}: lambda set={lam['set']} graph={lam['graph']} | struct-only={w_s} "
-              f"+func={w_f}{flip}")
+        print(f"  mu_c={mc}: lambda set={lam['set']} graph={lam['graph']} | struct-only={w_s} +func={w_f}{flip}")
     # threshold: how singular must the fit-leader be to flip at mu_c=0.05?
     mc = 0.05
     thr = None
@@ -151,17 +157,21 @@ def adversarial_corner():
         if w_f == "graph":
             thr = lam_set
             break
-    print(f"  flip threshold at mu_c=0.05: fit-leader lambda >= {thr} (graph lambda=1.0), "
-          f"i.e. an omega_func gap of ~{omega_func(thr,n)-omega_func(1.0,n):.1f} nats\n")
+    print(
+        f"  flip threshold at mu_c=0.05: fit-leader lambda >= {thr} (graph lambda=1.0), "
+        f"i.e. an omega_func gap of ~{omega_func(thr, n) - omega_func(1.0, n):.1f} nats\n"
+    )
 
 
 def main():
     natural = natural_corner()
     adversarial_corner()
-    print("CONCLUSION: the functional term omega_func flips a contract decision only in the "
-          "anti-correlated corner (fit-leader = more singular). Natural training aligns the two Occam "
-          "pressures (simpler class wins structure AND has lower lambda), so no flip occurs here: "
-          f"natural-run flip = {natural}.")
+    print(
+        "CONCLUSION: the functional term omega_func flips a contract decision only in the "
+        "anti-correlated corner (fit-leader = more singular). Natural training aligns the two Occam "
+        "pressures (simpler class wins structure AND has lower lambda), so no flip occurs here: "
+        f"natural-run flip = {natural}."
+    )
 
 
 if __name__ == "__main__":

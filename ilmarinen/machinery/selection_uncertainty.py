@@ -20,6 +20,7 @@ CALIBRATION CHECK. calibration_curve bins predicted confidences and measures the
 frequency per bin on tasks with a KNOWN correct primitive; a calibrated method has correctness ~ p
 (reliability diagonal). Returns the per-bin (confidence, accuracy) and the expected calibration error.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -37,6 +38,7 @@ def selection_distribution(selections, vocabulary=None):
     because beating several spread-out alternatives with e.g. 55% is actually decisive): empirically it
     roughly halves the Expected Calibration Error (0.21 -> 0.11 in the reference check)."""
     from collections import Counter
+
     c = Counter(selections)
     K = len(selections)
     vocab = vocabulary or sorted(c.keys())
@@ -48,13 +50,18 @@ def selection_distribution(selections, vocabulary=None):
     conf_cal = conf / (conf + runner) if (conf + runner) > 0 else 1.0
     probs = np.array([v for v in dist.values() if v > 0])
     entropy = float(-(probs * np.log(probs)).sum())
-    return {"distribution": dist, "top": top, "confidence": conf,
-            "confidence_calibrated": conf_cal, "margin": margin,
-            "entropy": entropy, "n_runs": K}
+    return {
+        "distribution": dist,
+        "top": top,
+        "confidence": conf,
+        "confidence_calibrated": conf_cal,
+        "margin": margin,
+        "entropy": entropy,
+        "n_runs": K,
+    }
 
 
-def selection_uncertainty(search_fn, n_runs=10, vocabulary=None, conf_threshold=0.7,
-                          margin_threshold=0.2):
+def selection_uncertainty(search_fn, n_runs=10, vocabulary=None, conf_threshold=0.7, margin_threshold=0.2):
     """Run search_fn(seed) -> selected primitive (str), n_runs times over different seeds, and return the
     calibrated selection distribution with a stability verdict. search_fn should perform one full
     search+discretization and return the selected primitive name. Optionally search_fn can bootstrap the
@@ -67,10 +74,10 @@ def selection_uncertainty(search_fn, n_runs=10, vocabulary=None, conf_threshold=
     summary = selection_distribution(selections, vocabulary=vocabulary)
     stable = summary["confidence"] >= conf_threshold and summary["margin"] >= margin_threshold
     if stable:
-        verdict = f"CONFIDENT: '{summary['top']}' selected in {summary['confidence']*100:.0f}% of runs"
+        verdict = f"CONFIDENT: '{summary['top']}' selected in {summary['confidence'] * 100:.0f}% of runs"
     else:
         topk = sorted(summary["distribution"].items(), key=lambda kv: -kv[1])[:3]
-        topk = [f"{p}({w*100:.0f}%)" for p, w in topk if w > 0]
+        topk = [f"{p}({w * 100:.0f}%)" for p, w in topk if w > 0]
         verdict = f"UNCERTAIN: ambiguous among {topk} -- report distribution, not a single pick"
     return {**summary, "stable": stable, "verdict": verdict}
 
@@ -95,9 +102,18 @@ def calibration_curve(confidences, correct, n_bins=5):
         cbar = float(confidences[m].mean())
         acc = float(correct[m].mean())
         cnt = int(m.sum())
-        rows.append({"bin": (round(lo, 2), round(hi, 2)), "mean_confidence": round(cbar, 3),
-                     "accuracy": round(acc, 3), "count": cnt})
+        rows.append(
+            {
+                "bin": (round(lo, 2), round(hi, 2)),
+                "mean_confidence": round(cbar, 3),
+                "accuracy": round(acc, 3),
+                "count": cnt,
+            }
+        )
         ece += (cnt / N) * abs(acc - cbar)
-    return {"bins": rows, "ece": round(ece, 4),
-            "interpretation": "accuracy ~ mean_confidence per bin => calibrated; ECE near 0 = well "
-                              "calibrated (reported confidence matches empirical correctness)."}
+    return {
+        "bins": rows,
+        "ece": round(ece, 4),
+        "interpretation": "accuracy ~ mean_confidence per bin => calibrated; ECE near 0 = well "
+        "calibrated (reported confidence matches empirical correctness).",
+    }

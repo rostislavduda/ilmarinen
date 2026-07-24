@@ -34,6 +34,7 @@ quantitative completion of the package's "kinematics -> degrees of freedom" orde
 in three modules. It is a pure REPORTING object -- it computes nothing new that changes a selection; it
 reuses the existing estimators and states them on one axis.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -69,36 +70,58 @@ def participation_ratio(spectrum: Sequence[float]) -> float:
     if total <= 0:
         return 0.0
     p = s / total
-    return float(1.0 / np.sum(p ** 2))
+    return float(1.0 / np.sum(p**2))
 
 
 # --------------------------------------------------------------------------------------------------
 # The ledger levels, as data (the coarse-graining axis, coarsest input -> whole model)
 # --------------------------------------------------------------------------------------------------
 LEDGER_LEVELS = (
-    {"level": "data_modes",       "functional": "participation ratio 1/sum(p^2)",
-     "spectrum": "covariance eigenvalues of X",           "unit": "effective data coordinates",
-     "supervised": False, "source": "redundancy_reduction.effective_dimension"},
-    {"level": "data_modes_flow",  "functional": "d_IB(beta) = #{i: lambda_i < 1 - 1/beta}",
-     "spectrum": "supervised Gib spectrum of (X,Y)",       "unit": "effective data modes at scale beta",
-     "supervised": True,  "source": "ib_rg_flow.ib_rg_flow"},
-    {"level": "primitive_mixture", "functional": "participation ratio 1/sum(alpha^2)",
-     "spectrum": "alpha mixture weights on the primitive simplex", "unit": "effective primitives",
-     "supervised": True,  "source": "sparsity_priced_alpha.participation"},
-    {"level": "model",            "functional": "lambda (RLCT / local learning coefficient)",
-     "spectrum": "loss-singular geometry at w*",           "unit": "functional dimensions (nats-scale, <= k/2)",
-     "supervised": True,  "source": "singular_complexity.estimate_llc"},
+    {
+        "level": "data_modes",
+        "functional": "participation ratio 1/sum(p^2)",
+        "spectrum": "covariance eigenvalues of X",
+        "unit": "effective data coordinates",
+        "supervised": False,
+        "source": "redundancy_reduction.effective_dimension",
+    },
+    {
+        "level": "data_modes_flow",
+        "functional": "d_IB(beta) = #{i: lambda_i < 1 - 1/beta}",
+        "spectrum": "supervised Gib spectrum of (X,Y)",
+        "unit": "effective data modes at scale beta",
+        "supervised": True,
+        "source": "ib_rg_flow.ib_rg_flow",
+    },
+    {
+        "level": "primitive_mixture",
+        "functional": "participation ratio 1/sum(alpha^2)",
+        "spectrum": "alpha mixture weights on the primitive simplex",
+        "unit": "effective primitives",
+        "supervised": True,
+        "source": "sparsity_priced_alpha.participation",
+    },
+    {
+        "level": "model",
+        "functional": "lambda (RLCT / local learning coefficient)",
+        "spectrum": "loss-singular geometry at w*",
+        "unit": "functional dimensions (nats-scale, <= k/2)",
+        "supervised": True,
+        "source": "singular_complexity.estimate_llc",
+    },
 )
 
 
 # --------------------------------------------------------------------------------------------------
 # Assemble the ledger from whatever pieces are available (no recomputation of selections)
 # --------------------------------------------------------------------------------------------------
-def effective_dimension_ledger(*,
-                               cov_spectrum: Sequence[float] | None = None,
-                               ib_flow: dict | None = None,
-                               alpha: Sequence[float] | None = None,
-                               llc: dict | None = None) -> dict:
+def effective_dimension_ledger(
+    *,
+    cov_spectrum: Sequence[float] | None = None,
+    ib_flow: dict | None = None,
+    alpha: Sequence[float] | None = None,
+    llc: dict | None = None,
+) -> dict:
     """Assemble the effective-dimension ledger from already-computed pieces. Every argument is
     optional; a level is included only when its input is supplied (a run may have data modes but no
     fitted mixture, or a model lambda but no IB flow, etc.).
@@ -122,16 +145,18 @@ def effective_dimension_ledger(*,
     # --- data modes (unsupervised participation ratio) ---
     if cov_spectrum is not None and len(cov_spectrum) > 0:
         d_eff = participation_ratio(cov_spectrum)
-        levels.append({
-            "level": "data_modes",
-            "value": d_eff,
-            "ambient": int(len(cov_spectrum)),
-            "functional": "participation ratio 1/sum(p^2)",
-            "unit": "effective data coordinates",
-            "supervised": False,
-            "source": "redundancy_reduction.effective_dimension",
-            "note": f"{d_eff:.2f} effective of {len(cov_spectrum)} ambient covariance modes",
-        })
+        levels.append(
+            {
+                "level": "data_modes",
+                "value": d_eff,
+                "ambient": int(len(cov_spectrum)),
+                "functional": "participation ratio 1/sum(p^2)",
+                "unit": "effective data coordinates",
+                "supervised": False,
+                "source": "redundancy_reduction.effective_dimension",
+                "note": f"{d_eff:.2f} effective of {len(cov_spectrum)} ambient covariance modes",
+            }
+        )
 
     # --- data modes, supervised scale-resolved (the IB-RG flow) ---
     if ib_flow is not None and isinstance(ib_flow, dict):
@@ -149,9 +174,11 @@ def effective_dimension_ledger(*,
             "unit": "effective data modes at scale beta",
             "supervised": True,
             "source": "ib_rg_flow.ib_rg_flow",
-            "note": (f"supervised staircase; d_eff_static={d_static:.2f}, "
-                     f"{len(trans)} located RG transitions" if d_static is not None
-                     else f"supervised staircase; {len(trans)} located RG transitions"),
+            "note": (
+                f"supervised staircase; d_eff_static={d_static:.2f}, {len(trans)} located RG transitions"
+                if d_static is not None
+                else f"supervised staircase; {len(trans)} located RG transitions"
+            ),
         }
         levels.append(entry)
 
@@ -159,16 +186,18 @@ def effective_dimension_ledger(*,
     if alpha is not None and len(alpha) > 0:
         a = np.asarray(alpha, dtype=np.float64)
         ipr = participation_ratio(a)  # alpha already normalized; PR is scale-free anyway
-        levels.append({
-            "level": "primitive_mixture",
-            "value": ipr,
-            "n_primitives": int(len(a)),
-            "functional": "participation ratio 1/sum(alpha^2)",
-            "unit": "effective primitives",
-            "supervised": True,
-            "source": "sparsity_priced_alpha.participation",
-            "note": f"{ipr:.2f} effective of {len(a)} primitives in the mixture",
-        })
+        levels.append(
+            {
+                "level": "primitive_mixture",
+                "value": ipr,
+                "n_primitives": int(len(a)),
+                "functional": "participation ratio 1/sum(alpha^2)",
+                "unit": "effective primitives",
+                "supervised": True,
+                "source": "sparsity_priced_alpha.participation",
+                "note": f"{ipr:.2f} effective of {len(a)} primitives in the mixture",
+            }
+        )
 
     # --- model (lambda / RLCT) ---
     if llc is not None and isinstance(llc, dict) and "lambda" in llc:
@@ -176,30 +205,35 @@ def effective_dimension_ledger(*,
         half = llc.get("half_params")
         ratio = llc.get("ratio")
         valid = llc.get("valid", True)
-        levels.append({
-            "level": "model",
-            "value": (float(lam) if lam is not None else None),
-            "half_params": (float(half) if half is not None else None),
-            "ratio_to_half_params": (float(ratio) if ratio is not None else None),
-            "valid": bool(valid),
-            "functional": "lambda (RLCT / local learning coefficient)",
-            "unit": "functional dimensions (<= k/2)",
-            "supervised": True,
-            "source": "singular_complexity.estimate_llc",
-            "note": (f"lambda={lam:.2f} vs k/2={half:.0f} (ratio {ratio:.3f}); a DISTINCT functional "
-                     f"(RLCT, not a participation ratio) at the model level"
-                     if (lam is not None and half is not None and ratio is not None)
-                     else "model-level functional dimension (RLCT)")
-            if valid else "lambda invalid (non-converged optimum); model level not certified",
-        })
+        levels.append(
+            {
+                "level": "model",
+                "value": (float(lam) if lam is not None else None),
+                "half_params": (float(half) if half is not None else None),
+                "ratio_to_half_params": (float(ratio) if ratio is not None else None),
+                "valid": bool(valid),
+                "functional": "lambda (RLCT / local learning coefficient)",
+                "unit": "functional dimensions (<= k/2)",
+                "supervised": True,
+                "source": "singular_complexity.estimate_llc",
+                "note": (
+                    f"lambda={lam:.2f} vs k/2={half:.0f} (ratio {ratio:.3f}); a DISTINCT functional "
+                    f"(RLCT, not a participation ratio) at the model level"
+                    if (lam is not None and half is not None and ratio is not None)
+                    else "model-level functional dimension (RLCT)"
+                )
+                if valid
+                else "lambda invalid (non-converged optimum); model level not certified",
+            }
+        )
 
     return {
         "levels": levels,
         "axis": "coarse-graining: data modes -> supervised data modes(beta) -> primitive mixture -> model",
         "note": "One participation-ratio functional (1/sum p^2) read at the kinematic levels (data "
-                "covariance, alpha simplex) plus lambda (RLCT) at the model level. Values are in "
-                "DIFFERENT units (data modes vs effective primitives vs functional dimensions) and are "
-                "NOT summed -- the ledger unifies the QUESTION and (for the kinematic levels) the "
-                "FUNCTIONAL, not the scalar. This is the 'kinematics -> degrees of freedom' axis stated "
-                "once rather than as separate metaphors.",
+        "covariance, alpha simplex) plus lambda (RLCT) at the model level. Values are in "
+        "DIFFERENT units (data modes vs effective primitives vs functional dimensions) and are "
+        "NOT summed -- the ledger unifies the QUESTION and (for the kinematic levels) the "
+        "FUNCTIONAL, not the scalar. This is the 'kinematics -> degrees of freedom' axis stated "
+        "once rather than as separate metaphors.",
     }

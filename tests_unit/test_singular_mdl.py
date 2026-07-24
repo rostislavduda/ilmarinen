@@ -130,8 +130,7 @@ def test_price_singular_wires_into_fit():
     from ilmarinen import AllGraph
 
     data = _graph_data_with_positions()
-    mg = AllGraph(width=8, depth=1, epochs=4, verbose=False, seed=0,
-                   price_singular=True, contract_router=None)
+    mg = AllGraph(width=8, depth=1, epochs=4, verbose=False, seed=0, price_singular=True, contract_router=None)
     r = mg.fit(data, task="classification", n_out=2, tiebreak=True)
     assert np.isfinite(r["value"])
     sp = (mg.route_detail or {}).get("tiebreak", {}).get("singular_pricing", {})

@@ -8,7 +8,10 @@ toward the target. See tests/b8_ib_rg_flow.md for the full write-up and honest s
 
 Run: python studies/b8_ib_rg_flow_study.py
 """
-import warnings; warnings.filterwarnings("ignore")
+
+import warnings
+
+warnings.filterwarnings("ignore")
 import sys
 
 import numpy as np
@@ -21,17 +24,21 @@ def controlled_gaussian(rho=(0.95, 0.8, 0.5, 0.2, 0.05), n=4000, seed=0):
     """Verify the GIB closed form and the beta staircase on data with KNOWN canonical correlations, and check
     the semigroup (nesting) property that makes it a genuine RG flow."""
     rng = np.random.RandomState(seed)
-    rho = np.asarray(rho); d = len(rho)
-    Z = rng.randn(n, d); Y = Z.copy()
-    X = rho[None, :] * Y + np.sqrt(1 - rho ** 2)[None, :] * rng.randn(n, d)
-    Q, _ = np.linalg.qr(rng.randn(d, d)); X = X @ Q.T
+    rho = np.asarray(rho)
+    d = len(rho)
+    Z = rng.randn(n, d)
+    Y = Z.copy()
+    X = rho[None, :] * Y + np.sqrt(1 - rho**2)[None, :] * rng.randn(n, d)
+    Q, _ = np.linalg.qr(rng.randn(d, d))
+    X = X @ Q.T
     flow = ib_rg_flow(X, Y)
     print("Controlled Gaussian (known canonical correlations):")
     print(f"  true rho                 : {np.round(rho, 3)}")
     print(f"  recovered canonical corr : {np.round(flow['canonical_corr'], 3)}")
     print(f"  critical betas (transitions): {np.round(flow['critical_betas'], 2)}")
     print(f"  d_IB flow range          : {flow['d_IB'].min()}..{flow['d_IB'].max()}")
-    lam, _ = gib_spectrum(X, Y); bc = critical_betas(lam)
+    lam, _ = gib_spectrum(X, Y)
+    bc = critical_betas(lam)
     sets = [set(np.where(b > bc)[0]) for b in (2.0, 5.0, 30.0)]
     nested = all(sets[i].issubset(sets[i + 1]) for i in range(len(sets) - 1))
     print(f"  semigroup (nested retained-mode sets across beta)? {nested}")
@@ -42,10 +49,12 @@ def layer_flow_demo(n=2000, d=12, seed=0):
     more linearly decodable (top canonical corr -> 1), the measurable RG coarse-graining of depth."""
     import torch
     import torch.nn as nn
+
     rng = np.random.RandomState(seed)
     X = rng.randn(n, d).astype(np.float32)
     y = (np.tanh(X[:, 0] + X[:, 1]) + 0.5 * np.tanh(X[:, 2] - X[:, 3]) + 0.3 * X[:, 4]).astype(np.float32)
-    Xt = torch.tensor(X); yt = torch.tensor(y).unsqueeze(1)
+    Xt = torch.tensor(X)
+    yt = torch.tensor(y).unsqueeze(1)
 
     class Net(nn.Module):
         def __init__(self, d, h=24, L=4):
@@ -56,7 +65,8 @@ def layer_flow_demo(n=2000, d=12, seed=0):
         def forward(self, x, rh=False):
             hs = []
             for lin in self.layers:
-                x = torch.tanh(lin(x)); hs.append(x)
+                x = torch.tanh(lin(x))
+                hs.append(x)
             o = self.out(x)
             return (o, hs) if rh else o
 
@@ -64,14 +74,18 @@ def layer_flow_demo(n=2000, d=12, seed=0):
     net = Net(d, 24, 4)
     opt = torch.optim.Adam(net.parameters(), lr=3e-3, weight_decay=1e-5)
     for _ in range(400):
-        opt.zero_grad(); ((net(Xt) - yt) ** 2).mean().backward(); opt.step()
+        opt.zero_grad()
+        ((net(Xt) - yt) ** 2).mean().backward()
+        opt.step()
     with torch.no_grad():
         _, hs = net(Xt, rh=True)
     lf = layer_rg_flow([h.numpy() for h in hs], y)
     print("\nRG-flow across a trained net's layers (coarse-graining toward the target):")
     for r in lf["layers"]:
-        print(f"  layer {r['layer'] + 1}: top canonical corr={r['top_canonical_corr']:.3f}, "
-              f"relevant info={r['relevant_information']:.3f}, #informative={r['n_informative']}")
+        print(
+            f"  layer {r['layer'] + 1}: top canonical corr={r['top_canonical_corr']:.3f}, "
+            f"relevant info={r['relevant_information']:.3f}, #informative={r['n_informative']}"
+        )
     print(f"  monotone rise in decodability? {lf['top_canonical_corr_monotone']}")
 
 

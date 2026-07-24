@@ -13,25 +13,41 @@ from .volumetric_schema import VolumetricSchema, build_volumetric_schema
 # LEGACY re-exports (superseded by AllGraph + the per-contract build_*_schema contracts; consolidated under ilmarinen/legacy).
 # DEPRECATED: resolved lazily with a DeprecationWarning, kept for one release for backward compatibility.
 _LEGACY_ZOO = {  # the pre-AllGraph model zoo
-    "build_model": "ilmarinen.legacy.networks", "MODEL_REGISTRY": "ilmarinen.legacy.networks",
-    "PlainMLP": "ilmarinen.legacy.networks", "ResNetMLP": "ilmarinen.legacy.networks",
-    "build_rnn": "ilmarinen.legacy.recurrent", "RNN_REGISTRY": "ilmarinen.legacy.recurrent",
+    "build_model": "ilmarinen.legacy.networks",
+    "MODEL_REGISTRY": "ilmarinen.legacy.networks",
+    "PlainMLP": "ilmarinen.legacy.networks",
+    "ResNetMLP": "ilmarinen.legacy.networks",
+    "build_rnn": "ilmarinen.legacy.recurrent",
+    "RNN_REGISTRY": "ilmarinen.legacy.recurrent",
     "PlainRNN": "ilmarinen.legacy.recurrent",
 }
-_LAZY_LEGACY = {"build_supergraph", "SUPERGRAPH_REGISTRY", "SuperGraphRNN", "SuperCell", "DiscreteRNN",
-                "discretize", "build_multi_supergraph", "build_parallel_supergraph",
-                "build_multi_parallel_supergraph", "build_spatial_supergraph", "SpatialSuperGraph"}
+_LAZY_LEGACY = {
+    "build_supergraph",
+    "SUPERGRAPH_REGISTRY",
+    "SuperGraphRNN",
+    "SuperCell",
+    "DiscreteRNN",
+    "discretize",
+    "build_multi_supergraph",
+    "build_parallel_supergraph",
+    "build_multi_parallel_supergraph",
+    "build_spatial_supergraph",
+    "SpatialSuperGraph",
+}
 
 
 def __getattr__(name):
     from .._deprecation import warn_legacy
+
     if name in _LEGACY_ZOO:
         import importlib
+
         warn_legacy(name, _LEGACY_ZOO[name])
         return getattr(importlib.import_module(_LEGACY_ZOO[name]), name)
     if name in _LAZY_LEGACY:
         warn_legacy(name, "ilmarinen.legacy")
         from .. import legacy
+
         return getattr(legacy, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

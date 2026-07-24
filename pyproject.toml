@@ -88,8 +88,7 @@ target-version = "py311"
 select = ["E", "W", "F", "I", "B", "UP"]
 ignore = [
     # --- deliberate house style (kept permanently) ---
-    "E501",           # line length — leave to a formatter if one is ever adopted
-    "E701", "E702",   # compact one-line / semicolon-separated statements
+    "E501",           # line length — the formatter reflows most; long string literals remain
     "E741",           # ambiguous identifiers l/I/O — standard in math/physics code
     "E731",           # assigning a lambda to a variable
     "E402",           # module import not at top — intentional lazy/optional imports
@@ -102,8 +101,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["F401"]   # unused imports in package __init__ are re-exports
-"studies/*.py" = ["I001"]  # standalone scripts: intentional early `warnings.filterwarnings` import order
+"__init__.py" = ["F401"]  # unused imports in package __init__ are re-exports
 
 [tool.ruff.lint.isort]
 known-first-party = ["ilmarinen"]

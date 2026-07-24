@@ -66,7 +66,7 @@ def test_llc_positive_bounded_at_minimum():
     out = estimate_llc(model, _loss_closure(model, X, y), n=len(y), chains=5, steps=300, burn=100, seed=0)
     lam = out["lambda"]
     assert np.isfinite(lam)
-    assert lam <= k / 2 + 0.5, f"lambda {lam} exceeds k/2={k/2}"
+    assert lam <= k / 2 + 0.5, f"lambda {lam} exceeds k/2={k / 2}"
 
 
 @pytest.mark.smoke

@@ -19,6 +19,7 @@ PlainRNN uses a tanh cell with sigma_w^2-scaled recurrent + input weights, no
 gating (the plain cell that FAILS the long unroll -- the baseline against which
 gating will later be shown necessary).
 """
+
 from __future__ import annotations
 
 import torch
@@ -35,8 +36,9 @@ class _RNNCell(nn.Module):
     as in the mean-field theory (the recurrent map is the layer map).
     """
 
-    def __init__(self, n_in: int, width: int, sigma_w2_h: float,
-                 sigma_w2_x: float | None = None, sigma_b2: float = 0.05):
+    def __init__(
+        self, n_in: int, width: int, sigma_w2_h: float, sigma_w2_x: float | None = None, sigma_b2: float = 0.05
+    ):
         super().__init__()
         self.width = width
         self.Wx = nn.Linear(n_in, width, bias=False)
@@ -62,8 +64,16 @@ class PlainRNN(nn.Module):
     n_out : number of classes.
     """
 
-    def __init__(self, depth: int, width: int, sigma_w2: float,
-                 sigma_b2: float = 0.05, n_in: int = 1, n_out: int = 10, seed: int = 0):
+    def __init__(
+        self,
+        depth: int,
+        width: int,
+        sigma_w2: float,
+        sigma_b2: float = 0.05,
+        n_in: int = 1,
+        n_out: int = 10,
+        seed: int = 0,
+    ):
         super().__init__()
         torch.manual_seed(seed)
         self.depth = depth

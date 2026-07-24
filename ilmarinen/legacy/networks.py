@@ -12,6 +12,7 @@ the mean-field theory in core.meanfield can drive their init:
 Both expose `.init_report()` hooks so validation code can read gradient norms
 at initialization.
 """
+
 from __future__ import annotations
 
 import torch
@@ -23,8 +24,16 @@ from ..models.init_utils import _init_linear  # canonical home is init_utils; re
 class PlainMLP(nn.Module):
     """Deep tanh MLP with critical-style init and no normalization."""
 
-    def __init__(self, depth: int, width: int, sigma_w2: float,
-                 sigma_b2: float = 0.05, n_in: int = 784, n_out: int = 10, seed: int = 0):
+    def __init__(
+        self,
+        depth: int,
+        width: int,
+        sigma_w2: float,
+        sigma_b2: float = 0.05,
+        n_in: int = 784,
+        n_out: int = 10,
+        seed: int = 0,
+    ):
         super().__init__()
         torch.manual_seed(seed)
         layers = []
@@ -64,8 +73,16 @@ class _ResBlock(nn.Module):
 class ResNetMLP(nn.Module):
     """Pre-norm residual MLP (primitive #6 present): trainable at large depth."""
 
-    def __init__(self, depth: int, width: int, sigma_w2: float,
-                 sigma_b2: float = 0.05, n_in: int = 784, n_out: int = 10, seed: int = 0):
+    def __init__(
+        self,
+        depth: int,
+        width: int,
+        sigma_w2: float,
+        sigma_b2: float = 0.05,
+        n_in: int = 784,
+        n_out: int = 10,
+        seed: int = 0,
+    ):
         super().__init__()
         torch.manual_seed(seed)
         self.inp = nn.Linear(n_in, width)

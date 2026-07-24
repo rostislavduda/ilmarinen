@@ -26,6 +26,7 @@ Both are the "measure the resource, price it, let mu select" pattern the project
 the cheapest candidate whose accuracy is within tol of the best, i.e. the analytical
 description-length-optimal receptive field / angular order.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -35,7 +36,7 @@ def kernel_costs(kernel_sizes, ndim=2):
     """Analytical conv receptive-field cost ~ k^ndim (kernel volume = params & MACs per channel pair).
     Returns costs normalized to the smallest kernel."""
     k = np.asarray(kernel_sizes, dtype=np.float64)
-    c = k ** ndim
+    c = k**ndim
     return c / c.min()
 
 

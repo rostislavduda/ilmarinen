@@ -10,6 +10,7 @@ at the top. Run this whenever new .md write-ups are added so the log stays curre
 The script is deterministic and idempotent: running it again with no new files reproduces the same
 STUDY_LOG.md. It reads tests/*.md and writes STUDY_LOG.md at the package root.
 """
+
 import datetime
 import glob
 import os
@@ -44,12 +45,14 @@ def read_body(path):
             continue
         out.append(ln)
     body = "\n".join(out).strip("\n")
+
     # demote every ATX heading by two levels so per-file "##"/"###" sit under the entry's "###"
     # (entries are H3; a file's top-level "##" becomes "#####"). This keeps the global TOC clean
     # while preserving the write-up's internal structure.
     def demote(m):
         hashes = m.group(1)
         return "#" * min(len(hashes) + 2, 6) + " "
+
     body = re.sub(r"^(#{1,4})\s", demote, body, flags=re.MULTILINE)
     return body
 
@@ -83,8 +86,10 @@ def render(rows):
     lines.append("")
     span0 = rows[0][0].strftime("%Y-%m-%d") if rows else "-"
     span1 = rows[-1][0].strftime("%Y-%m-%d") if rows else "-"
-    lines.append(f"_Total write-ups: {len(rows)} &nbsp;|&nbsp; span: {span0} to {span1} "
-                 f"&nbsp;|&nbsp; generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}_")
+    lines.append(
+        f"_Total write-ups: {len(rows)} &nbsp;|&nbsp; span: {span0} to {span1} "
+        f"&nbsp;|&nbsp; generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}_"
+    )
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -126,9 +131,11 @@ def render(rows):
 
 def main():
     if not os.path.isdir(TESTS):
-        print(f"no tests/ directory at {TESTS} -- nothing to index (STUDY_LOG.md left unchanged). "
-              f"The write-ups live in tests/, which is excluded from the distribution tarball; "
-              f"run this from the working tree where tests/*.md are present.")
+        print(
+            f"no tests/ directory at {TESTS} -- nothing to index (STUDY_LOG.md left unchanged). "
+            f"The write-ups live in tests/, which is excluded from the distribution tarball; "
+            f"run this from the working tree where tests/*.md are present."
+        )
         return
     rows = build_rows()
     if not rows:
@@ -138,10 +145,11 @@ def main():
     with open(OUT, "w", encoding="utf-8") as f:
         f.write(text)
     kb = os.path.getsize(OUT) / 1024
-    print(f"wrote {OUT}: {len(rows)} entries inlined in full, "
-          f"{rows[0][0].strftime('%Y-%m-%d')}..{rows[-1][0].strftime('%Y-%m-%d')}, {kb:.0f} KB")
+    print(
+        f"wrote {OUT}: {len(rows)} entries inlined in full, "
+        f"{rows[0][0].strftime('%Y-%m-%d')}..{rows[-1][0].strftime('%Y-%m-%d')}, {kb:.0f} KB"
+    )
 
 
 if __name__ == "__main__":
     main()
-

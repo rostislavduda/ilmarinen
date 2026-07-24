@@ -32,6 +32,7 @@ THE CODE LENGTHS (excess over the cheapest contract; per datum with N units), de
 Both branches are strictly monotone up their lattice, so a richer contract must EARN its extra structure
 by a risk reduction exceeding mu_c times the added code length -- the marginal-value rule, one rung up.
 """
+
 from __future__ import annotations
 
 import math
@@ -63,19 +64,19 @@ def omega_struct(contract, N, E=0, d=3, delta=0.1, rank=None, shape=None, axis_b
             r = rank if rank is not None else grid_rank.get(c, 1)
             added_axes = []
         ab = axis_bits if axis_bits is not None else math.log(8.0)  # nominal per-added-axis structural cost
-        primary = (r - 1) * ab                                      # rank is the strictly-monotone commitment
-        secondary = sum(math.log(max(s, 2)) for s in added_axes)    # axis-length refinement
+        primary = (r - 1) * ab  # rank is the strictly-monotone commitment
+        secondary = sum(math.log(max(s, 2)) for s in added_axes)  # axis-length refinement
         return float(primary + secondary)
     # ---- relational chain ----
     if c == "set":
         return 0.0
     P = max(N * (N - 1) / 2.0, 1.0)
-    graph = E * math.log(max(P / max(E, 1), 1.001)) if E > 0 else 0.0   # log C(P,E) ~ E log(P/E)
+    graph = E * math.log(max(P / max(E, 1), 1.001)) if E > 0 else 0.0  # log C(P,E) ~ E log(P/E)
     if c == "graph":
         return float(graph)
     if c == "equivariant":
         logres = math.log(1.0 / delta)
-        geom = (N * d - d * (d - 1) / 2.0) * logres                     # N*d coords minus SO(d) gauge
+        geom = (N * d - d * (d - 1) / 2.0) * logres  # N*d coords minus SO(d) gauge
         return float(graph + geom)
     raise ValueError(f"unknown contract '{contract}'")
 
@@ -92,8 +93,7 @@ def dataset_omega_struct(contract, sizes, edge_counts=None, d=3, delta=0.1, shap
 
 
 # --------------------------------------------------------------------------- the contract selector
-CONTRACT_LATTICE_ORDER = {"set": 0, "graph": 1, "equivariant": 2,
-                          "sequence": 0, "spatial": 1, "volumetric": 2, "4d": 3}
+CONTRACT_LATTICE_ORDER = {"set": 0, "graph": 1, "equivariant": 2, "sequence": 0, "spatial": 1, "volumetric": 2, "4d": 3}
 
 
 def select_contract_mdl(scores, omegas, mu_c=0.05):
@@ -115,11 +115,13 @@ def select_contract_mdl(scores, omegas, mu_c=0.05):
     J = R + mu_c * omn
     k = int(np.argmin(J))
     winner = cs[k]
-    detail = {"J": {c: float(j) for c, j in zip(cs, J)},
-              "risk": {c: float(r) for c, r in zip(cs, R)},
-              "omega_struct": {c: float(o) for c, o in zip(cs, om)},
-              "mu_c": float(mu_c),
-              "note": "contract selected by J = R + mu_c * Omega_struct (derived structural code length)"}
+    detail = {
+        "J": {c: float(j) for c, j in zip(cs, J)},
+        "risk": {c: float(r) for c, r in zip(cs, R)},
+        "omega_struct": {c: float(o) for c, o in zip(cs, om)},
+        "mu_c": float(mu_c),
+        "note": "contract selected by J = R + mu_c * Omega_struct (derived structural code length)",
+    }
     return winner, detail
 
 
@@ -141,16 +143,28 @@ def marginal_value_contract(scores, omegas, mu_c=0.05):
     winner = order[0]
     steps = []
     for prev, nxt in zip(order[:-1], order[1:]):
-        dR = (1.0 - scores[winner]) - (1.0 - scores[nxt])          # risk reduction from climbing to nxt
-        dOmega = max(omegas[nxt] - omegas[winner], 1e-9)           # added structural code length
+        dR = (1.0 - scores[winner]) - (1.0 - scores[nxt])  # risk reduction from climbing to nxt
+        dOmega = max(omegas[nxt] - omegas[winner], 1e-9)  # added structural code length
         marginal = dR / dOmega
         climb = marginal > mu_c
-        steps.append({"from": winner, "to": nxt, "dR": float(dR),
-                      "dOmega": float(dOmega), "marginal": float(marginal), "climb": bool(climb)})
+        steps.append(
+            {
+                "from": winner,
+                "to": nxt,
+                "dR": float(dR),
+                "dOmega": float(dOmega),
+                "marginal": float(marginal),
+                "climb": bool(climb),
+            }
+        )
         if climb:
             winner = nxt
-    detail = {"order": order, "steps": steps, "mu_c": float(mu_c),
-              "note": "contract via marginal-value rule: climb the lattice while dR/dOmega > mu_c"}
+    detail = {
+        "order": order,
+        "steps": steps,
+        "mu_c": float(mu_c),
+        "note": "contract via marginal-value rule: climb the lattice while dR/dOmega > mu_c",
+    }
     return winner, detail
 
 
@@ -177,6 +191,7 @@ def price_tensorization(X, mu=0.05, method="gaussian", axis_bits=None, max_rank=
     import numpy as _np
 
     from ..core.mode_structure import mutual_information_matrix, parse_grid_shape, parse_grid_shape_scalable
+
     X = _np.asarray(X, float)
     D = X.shape[1]
     # For large D the dense D x D MI matrix is intractable (~4 GB at D=22000), so use the scalable

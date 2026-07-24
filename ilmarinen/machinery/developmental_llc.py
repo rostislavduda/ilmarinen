@@ -40,6 +40,7 @@ What the curve MEANS (and the honest scope -- both established by premise-check 
 
 --------------------------------------------------------------------------------------------------------------
 """
+
 from __future__ import annotations
 
 from .singular_complexity import estimate_llc, free_energy
@@ -87,9 +88,14 @@ def _locate_transitions(curve, onset_tol=0.5):
         rise = lam[b] - lam[a]
         noise = curve[a]["lambda_std"] + curve[b]["lambda_std"]
         if rise > max(noise, onset_tol) and rise > 0:
-            jumps.append({"from_epoch": eps[a], "to_epoch": eps[b],
-                          "delta_lambda": round(float(rise), 3),
-                          "noise_band": round(float(noise), 3)})
+            jumps.append(
+                {
+                    "from_epoch": eps[a],
+                    "to_epoch": eps[b],
+                    "delta_lambda": round(float(rise), 3),
+                    "noise_band": round(float(noise), 3),
+                }
+            )
 
     return {
         "convergence_onset_epoch": onset,
@@ -99,10 +105,24 @@ def _locate_transitions(curve, onset_tol=0.5):
     }
 
 
-def developmental_llc(build_net, make_closure, train_step, n, *,
-                      total_epochs=None, checkpoints=None,
-                      chains=3, steps=120, burn=45, eps=1e-4, gamma=100.0, seed=0,
-                      k_params=None, verbose=False, log=None):
+def developmental_llc(
+    build_net,
+    make_closure,
+    train_step,
+    n,
+    *,
+    total_epochs=None,
+    checkpoints=None,
+    chains=3,
+    steps=120,
+    burn=45,
+    eps=1e-4,
+    gamma=100.0,
+    seed=0,
+    k_params=None,
+    verbose=False,
+    log=None,
+):
     """Track lambda_hat over ONE training trajectory of a freshly built net, probing at checkpoints.
 
     This drives its own explicit training loop (so it touches no validated fit path) using caller-supplied
@@ -144,8 +164,7 @@ def developmental_llc(build_net, make_closure, train_step, n, *,
     half = k_params / 2.0
 
     closure = make_closure(net)
-    opt = torch.optim.Adam((p for p in net.parameters() if p.requires_grad),
-                           lr=1e-3, weight_decay=1e-4)
+    opt = torch.optim.Adam((p for p in net.parameters() if p.requires_grad), lr=1e-3, weight_decay=1e-4)
 
     if checkpoints is None:
         te = int(total_epochs if total_epochs is not None else 200)
@@ -163,8 +182,7 @@ def developmental_llc(build_net, make_closure, train_step, n, *,
             last_train_loss = float(train_step(net, opt))
             ep += 1
         # probe lambda at THIS checkpoint (net params are the current w*)
-        r = estimate_llc(net, closure, n, chains=chains, steps=steps, burn=burn,
-                         eps=eps, gamma=gamma, seed=seed)
+        r = estimate_llc(net, closure, n, chains=chains, steps=steps, burn=burn, eps=eps, gamma=gamma, seed=seed)
         rec = {
             "epoch": ep,
             "train_loss": (last_train_loss if ep > 0 else float(r["L_star"])),
@@ -175,9 +193,11 @@ def developmental_llc(build_net, make_closure, train_step, n, *,
             "free_energy_singular": round(free_energy(r["L_star"], r["lambda"], n), 4),
         }
         curve.append(rec)
-        _log(f"[developmental_llc] epoch {ep:>4}: L={rec['train_loss']:.4f} "
-             f"lambda={rec['lambda']:.3f}+/-{rec['lambda_std']:.3f} "
-             f"ratio={rec['ratio']:.4f} valid={rec['valid']}")
+        _log(
+            f"[developmental_llc] epoch {ep:>4}: L={rec['train_loss']:.4f} "
+            f"lambda={rec['lambda']:.3f}+/-{rec['lambda_std']:.3f} "
+            f"ratio={rec['ratio']:.4f} valid={rec['valid']}"
+        )
 
     transitions = _locate_transitions(curve)
     out = {
@@ -188,13 +208,15 @@ def developmental_llc(build_net, make_closure, train_step, n, *,
         "half_params": half,
         "n": int(n),
         "checkpoints": checkpoints,
-        "note": ("Developmental LLC lambda_hat(t) over training (D4). READ THE SHAPE, NOT THE VALUES: the "
-                 "robust signal is the CONVERGENCE ONSET -- the located checkpoint where lambda flips from "
-                 "strongly negative (invalid: w* not yet at a minimum, SGLD escapes downhill) to a stable "
-                 "positive value (usable capacity turns on). Distinct plateaus/jumps WITHIN the positive "
-                 "regime mark staged learning, but appear only when the data induces temporally-separated "
-                 "phases; candidate_staged_jumps flags rises exceeding the per-checkpoint SGLD noise and is "
-                 "advisory. Per-checkpoint lambda is a short, noisy SGLD estimate (especially in the negative "
-                 "regime); the final lambda << k/2 is the singular-complexity signature, consistent with B2."),
+        "note": (
+            "Developmental LLC lambda_hat(t) over training (D4). READ THE SHAPE, NOT THE VALUES: the "
+            "robust signal is the CONVERGENCE ONSET -- the located checkpoint where lambda flips from "
+            "strongly negative (invalid: w* not yet at a minimum, SGLD escapes downhill) to a stable "
+            "positive value (usable capacity turns on). Distinct plateaus/jumps WITHIN the positive "
+            "regime mark staged learning, but appear only when the data induces temporally-separated "
+            "phases; candidate_staged_jumps flags rises exceeding the per-checkpoint SGLD noise and is "
+            "advisory. Per-checkpoint lambda is a short, noisy SGLD estimate (especially in the negative "
+            "regime); the final lambda << k/2 is the singular-complexity signature, consistent with B2."
+        ),
     }
     return out

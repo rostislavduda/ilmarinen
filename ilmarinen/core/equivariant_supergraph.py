@@ -23,6 +23,7 @@ to a SET of generators with direct-sum reps and indefinite metrics (O(p,q)/U/Sp/
 This module is retained as the documented, validated Family-2 realization; it is exported but no longer
 invoked by fit().
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -41,7 +42,7 @@ class _DenseVec(nn.Module):
         self.n, self.out_ch = n, out_channels
         self.lin = nn.Linear(in_channels * n, out_channels * n)
 
-    def forward(self, x):                              # x: (b, in_ch, n)
+    def forward(self, x):  # x: (b, in_ch, n)
         b = x.shape[0]
         return self.lin(x.reshape(b, -1)).reshape(b, self.out_ch, self.n)
 
@@ -92,7 +93,7 @@ class EquivariantSuperGraph(nn.Module):
         # x: (b, n)  -> lift to (b, channels, n) by broadcasting, then the super-cell
         b = x.shape[0]
         xin = x.unsqueeze(1).expand(b, self.channels, self.n)
-        h = self.cell(xin)                           # (b, channels, n)
+        h = self.cell(xin)  # (b, channels, n)
         return self.head(h.reshape(b, -1))
 
     def update_peak(self):

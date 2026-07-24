@@ -16,6 +16,7 @@ only the chosen primitive per layer.
 This is a DEPLOYMENT optimization; the searchable schema is untouched and remains the training
 object. It complements (does not replace) the joint-search compaction of width/depth.
 """
+
 from __future__ import annotations
 
 import torch
@@ -67,7 +68,8 @@ def compile_supergraph(net, build_fn, **build_kwargs):
     with torch.no_grad():
         for cell, p in zip(frozen.cells, prims):
             idx = cell.primitives.index(p)
-            cell.alpha.zero_(); cell.alpha[idx] = 20.0    # ~one-hot softmax
+            cell.alpha.zero_()
+            cell.alpha[idx] = 20.0  # ~one-hot softmax
     frozen.eval()
     return frozen
 

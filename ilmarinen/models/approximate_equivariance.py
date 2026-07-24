@@ -68,8 +68,7 @@ class ApproxEquivariantModel(nn.Module):
         # blowup) controls the breaking contribution.
         self.register_buffer("_free_mean", torch.zeros(free_in_dim))
         self.register_buffer("_free_std", torch.ones(free_in_dim))
-        self.free = nn.Sequential(nn.Linear(free_in_dim, free_hidden), nn.Tanh(),
-                                  nn.Linear(free_hidden, n_out))
+        self.free = nn.Sequential(nn.Linear(free_in_dim, free_hidden), nn.Tanh(), nn.Linear(free_hidden, n_out))
         self.relax = float(relax)
 
     def set_free_normalization(self, X_free):
@@ -98,7 +97,7 @@ class ApproxEquivariantModel(nn.Module):
             equiv = self.equiv(xe)
             full = equiv + (self.relax * self._free_forward(x) if self.relax > 0 else 0.0)
             bp = float(((full - equiv) ** 2).mean().item())
-            tp = float((full ** 2).mean().item()) + 1e-9
+            tp = float((full**2).mean().item()) + 1e-9
             return bp / tp
 
 
@@ -114,11 +113,15 @@ def price_relaxation(risk_by_relax, omega_by_relax, mu_c=0.3):
     J = {r: float(risk_by_relax[r]) + float(mu_c) * float(omega_by_relax.get(r, 0.0)) for r in relaxes}
     # argmin J; ties broken toward smaller relax (already sorted ascending)
     best = min(relaxes, key=lambda r: (J[r], r))
-    detail = {"J": J, "risk": {r: float(risk_by_relax[r]) for r in relaxes},
-              "omega": {r: float(omega_by_relax.get(r, 0.0)) for r in relaxes},
-              "mu_c": float(mu_c), "selected_relax": float(best),
-              "note": "relaxation selected by J = R_val + mu_c * Omega(relax); Omega = relative power of the "
-                      "symmetry-breaking pathway. relax=0 is exact equivariance (Occam default on a tie)."}
+    detail = {
+        "J": J,
+        "risk": {r: float(risk_by_relax[r]) for r in relaxes},
+        "omega": {r: float(omega_by_relax.get(r, 0.0)) for r in relaxes},
+        "mu_c": float(mu_c),
+        "selected_relax": float(best),
+        "note": "relaxation selected by J = R_val + mu_c * Omega(relax); Omega = relative power of the "
+        "symmetry-breaking pathway. relax=0 is exact equivariance (Occam default on a tie).",
+    }
     return best, detail
 
 

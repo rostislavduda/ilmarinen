@@ -37,7 +37,7 @@ def test_locate_convergence_onset():
     curve = [
         _rec(0, -50.0, 5.0, False),
         _rec(10, -8.0, 2.0, False),
-        _rec(25, 0.5, 0.4, True),      # <- first stable-valid checkpoint
+        _rec(25, 0.5, 0.4, True),  # <- first stable-valid checkpoint
         _rec(50, 1.2, 0.3, True),
         _rec(90, 1.5, 0.3, True),
     ]
@@ -51,9 +51,9 @@ def test_onset_requires_stable_validity():
     """A lone valid blip that then goes invalid again is NOT the onset (must stay valid)."""
     curve = [
         _rec(0, -20.0, 3.0, False),
-        _rec(10, 0.3, 2.0, True),      # transient blip
-        _rec(20, -5.0, 2.0, False),    # back to invalid
-        _rec(40, 0.8, 0.3, True),      # <- real, stable onset
+        _rec(10, 0.3, 2.0, True),  # transient blip
+        _rec(20, -5.0, 2.0, False),  # back to invalid
+        _rec(40, 0.8, 0.3, True),  # <- real, stable onset
         _rec(70, 1.0, 0.3, True),
     ]
     tr = _locate_transitions(curve)
@@ -64,8 +64,8 @@ def test_staged_jump_detected_above_noise():
     """A rise between adjacent valid checkpoints exceeding the summed per-chain std is flagged."""
     curve = [
         _rec(0, 0.5, 0.05, True),
-        _rec(10, 0.55, 0.05, True),    # small rise within noise -> not a jump
-        _rec(20, 2.5, 0.10, True),     # big rise (1.95 >> 0.15+0.10) -> jump
+        _rec(10, 0.55, 0.05, True),  # small rise within noise -> not a jump
+        _rec(20, 2.5, 0.10, True),  # big rise (1.95 >> 0.15+0.10) -> jump
     ]
     tr = _locate_transitions(curve)
     jumps = tr["candidate_staged_jumps"]
@@ -92,8 +92,7 @@ def test_developmental_llc_runs_and_is_wellformed():
     y = torch.tanh(3.0 * (X @ w) / math.sqrt(d)).unsqueeze(1)
 
     def build_net():
-        return torch.nn.Sequential(torch.nn.Linear(d, 16), torch.nn.Tanh(),
-                                   torch.nn.Linear(16, 1))
+        return torch.nn.Sequential(torch.nn.Linear(d, 16), torch.nn.Tanh(), torch.nn.Linear(16, 1))
 
     def make_closure(net):
         lf = torch.nn.MSELoss()
@@ -107,8 +106,9 @@ def test_developmental_llc_runs_and_is_wellformed():
         opt.step()
         return float(loss.item())
 
-    out = developmental_llc(build_net, make_closure, train_step, n,
-                            checkpoints=[0, 10, 30, 70, 130], chains=2, steps=60, burn=20, seed=0)
+    out = developmental_llc(
+        build_net, make_closure, train_step, n, checkpoints=[0, 10, 30, 70, 130], chains=2, steps=60, burn=20, seed=0
+    )
     # well-formed
     assert len(out["curve"]) == 5
     for rec in out["curve"]:

@@ -14,11 +14,12 @@ detect/exploit SO(3) rotation invariance, which the Coulomb matrix X would pre-b
 The .mat file is not redistributed with the package; point `path` at a local copy (e.g. the
 canonical quantum-machine.org / deepchem qm7.mat).
 """
+
 from __future__ import annotations
 
 import numpy as np
 
-QM7_ELEMENTS = [1, 6, 7, 8, 16]   # H, C, N, O, S
+QM7_ELEMENTS = [1, 6, 7, 8, 16]  # H, C, N, O, S
 
 
 def load_qm7(path, max_atoms=23, center=True):
@@ -30,6 +31,7 @@ def load_qm7(path, max_atoms=23, center=True):
     energies : (n,)              float32, atomization energy (kcal/mol)
     """
     from scipy.io import loadmat
+
     d = loadmat(path)
     R = d["R"].astype(np.float32)
     Z = d["Z"].astype(np.int64)
@@ -52,7 +54,7 @@ def random_rotation(seed=None):
     rng = np.random.default_rng(seed)
     A = rng.standard_normal((3, 3))
     Q, Rm = np.linalg.qr(A)
-    Q = Q @ np.diag(np.sign(np.diag(Rm)))       # fix signs
+    Q = Q @ np.diag(np.sign(np.diag(Rm)))  # fix signs
     if np.linalg.det(Q) < 0:
         Q[:, 0] = -Q[:, 0]
     return Q.astype(np.float32)

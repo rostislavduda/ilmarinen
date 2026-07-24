@@ -17,6 +17,7 @@ CASE 2 -- IDENTICAL selection ACROSS adjacent layers. Valid (two conv layers is 
   diagnostic (recommend the shallower net) -- catching what the priced-depth marginal-value rule should
   have caught.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -26,9 +27,24 @@ import torch
 def _primitive_costs(primitives, cost_map=None):
     """Relative cost per primitive for the Occam tiebreak. Default: parameter-free ops (norm) cheapest,
     then pointwise/plain, conv, attention/dense most expensive -- a coarse capacity ordering."""
-    default = {"norm": 0.5, "pointwise": 0.8, "plain": 1.0, "gated": 1.2, "conv": 1.5,
-               "conv2d": 1.5, "spectral": 1.6, "lstm": 1.8, "linssm": 1.8, "selssm": 2.0,
-               "attention": 2.5, "dense": 3.0, "gcn": 1.3, "sage": 1.4, "gin": 1.6, "gat": 2.2}
+    default = {
+        "norm": 0.5,
+        "pointwise": 0.8,
+        "plain": 1.0,
+        "gated": 1.2,
+        "conv": 1.5,
+        "conv2d": 1.5,
+        "spectral": 1.6,
+        "lstm": 1.8,
+        "linssm": 1.8,
+        "selssm": 2.0,
+        "attention": 2.5,
+        "dense": 3.0,
+        "gcn": 1.3,
+        "sage": 1.4,
+        "gin": 1.6,
+        "gat": 2.2,
+    }
     cm = cost_map or default
     return np.array([cm.get(p, 1.5) for p in primitives])
 
@@ -38,6 +54,7 @@ def robust_discretize(server, eval_fn=None, tie_eps=0.05, cost_map=None):
     principled tiebreak and a flag. eval_fn (optional) enables the ablation solo-loss tiebreak when
     cost is also tied. Returns list of dicts: selected, tied (bool), margin, tiebreak, alpha_top2."""
     from ilmarinen.machinery.coadapt import solo_importances
+
     out = []
     for cell in server.net.cells:
         w = torch.softmax(cell.alpha, dim=0).detach().cpu().numpy()
@@ -46,8 +63,15 @@ def robust_discretize(server, eval_fn=None, tie_eps=0.05, cost_map=None):
         margin = float(w[top1] - w[top2])
         prims = cell.primitives
         if margin >= tie_eps:
-            out.append({"selected": prims[top1], "tied": False, "margin": round(margin, 4),
-                        "tiebreak": "clear_argmax", "alpha_top2": [prims[top1], prims[top2]]})
+            out.append(
+                {
+                    "selected": prims[top1],
+                    "tied": False,
+                    "margin": round(margin, 4),
+                    "tiebreak": "clear_argmax",
+                    "alpha_top2": [prims[top1], prims[top2]],
+                }
+            )
             continue
         # TIE: gather the tied set (all within tie_eps of the top)
         tied_idx = [int(i) for i in order if w[order[0]] - w[i] < tie_eps]
@@ -55,15 +79,25 @@ def robust_discretize(server, eval_fn=None, tie_eps=0.05, cost_map=None):
         cmin = costs.min()
         cheap = [tied_idx[j] for j in range(len(tied_idx)) if costs[j] <= cmin + 1e-9]
         if len(cheap) == 1:
-            sel = cheap[0]; reason = "cheapest_among_tied (Occam/Omega)"
+            sel = cheap[0]
+            reason = "cheapest_among_tied (Occam/Omega)"
         elif eval_fn is not None:
             # cost-tied too: ablation solo-loss among the cost-cheapest tied ops
             solo = solo_importances(server, eval_fn, cell)
-            sel = min(cheap, key=lambda i: solo[i]); reason = "ablation_solo_best (cost-tied)"
+            sel = min(cheap, key=lambda i: solo[i])
+            reason = "ablation_solo_best (cost-tied)"
         else:
-            sel = cheap[0]; reason = "cheapest_then_first (no eval_fn for ablation)"
-        out.append({"selected": prims[sel], "tied": True, "margin": round(margin, 4),
-                    "tiebreak": reason, "tied_set": [prims[i] for i in tied_idx]})
+            sel = cheap[0]
+            reason = "cheapest_then_first (no eval_fn for ablation)"
+        out.append(
+            {
+                "selected": prims[sel],
+                "tied": True,
+                "margin": round(margin, 4),
+                "tiebreak": reason,
+                "tied_set": [prims[i] for i in tied_idx],
+            }
+        )
     return out
 
 
@@ -78,12 +112,24 @@ def depth_redundancy_report(server, collate_and_eval, tol=0.02):
     report = []
     for l in range(1, len(prims)):
         same = prims[l] == prims[l - 1]
-        delta = collate_and_eval(l) - base           # val-loss increase from dropping layer l
+        delta = collate_and_eval(l) - base  # val-loss increase from dropping layer l
         redundant = same and (delta <= tol)
-        report.append({"layers": (l - 1, l), "same_primitive": same, "primitive": prims[l],
-                       "drop_delta": round(float(delta), 4), "redundant": redundant})
+        report.append(
+            {
+                "layers": (l - 1, l),
+                "same_primitive": same,
+                "primitive": prims[l],
+                "drop_delta": round(float(delta), 4),
+                "redundant": redundant,
+            }
+        )
     n_red = sum(r["redundant"] for r in report)
-    return {"pairs": report, "n_redundant": n_red,
-            "recommendation": (f"{n_red} redundant layer(s): the depth does no independent work; "
-                               "recommend the shallower net" if n_red else
-                               "no depth redundancy: each layer contributes")}
+    return {
+        "pairs": report,
+        "n_redundant": n_red,
+        "recommendation": (
+            f"{n_red} redundant layer(s): the depth does no independent work; recommend the shallower net"
+            if n_red
+            else "no depth redundancy: each layer contributes"
+        ),
+    }

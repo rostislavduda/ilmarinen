@@ -8,14 +8,15 @@ that native format. NOTE on access: the canonical QM9 hosts (figshare, deepchem 
 Kaggle) may be network-restricted; obtain the dsgdb9nsd.xyz.tar.bz2 and extract to a directory, then
 point load_qm9_dir at it.
 """
+
 from __future__ import annotations
 
 import os
 
 import numpy as np
 
-QM9_ELEMENTS = ['H', 'C', 'N', 'O', 'F']
-_ZMAP = {'H': 1, 'C': 6, 'N': 7, 'O': 8, 'F': 9}
+QM9_ELEMENTS = ["H", "C", "N", "O", "F"]
+_ZMAP = {"H": 1, "C": 6, "N": 7, "O": 8, "F": 9}
 # QM9 property-line columns (index into whitespace-split line 2), the U0 internal energy at 0K is idx 12:
 # tag gdb_idx A B C mu alpha homo lumo gap r2 zpve U0 U H G Cv
 _U0_COL = 12
@@ -24,14 +25,14 @@ _U0_COL = 12
 def parse_qm9_xyz(text):
     """Parse a single QM9 extended-XYZ file. Returns (coords (N,3) float32, atomic_numbers (N,) int64,
     props list[str]). QM9 encodes exponents as '*^' (e.g. '1.2*^-3'); we normalize to 'e'."""
-    lines = text.strip().split('\n')
+    lines = text.strip().split("\n")
     na = int(lines[0])
     props = lines[1].split()
     coords, Z = [], []
     for i in range(2, 2 + na):
         p = lines[i].split()
         Z.append(_ZMAP[p[0]])
-        coords.append([float(x.replace('*^', 'e')) for x in p[1:4]])
+        coords.append([float(x.replace("*^", "e")) for x in p[1:4]])
     return np.asarray(coords, np.float32), np.asarray(Z, np.int64), props
 
 
@@ -39,7 +40,7 @@ def load_qm9_dir(path, max_files=None, center=True):
     """Load a directory of QM9 .xyz files. Returns (coords_list, Z_list, U0 array). coords are per-
     molecule (variable N_atoms, 3); Z_list per-molecule atomic numbers; U0 the 0K internal energy.
     Variable atom count is intentional (QM9 molecules differ in size); pad/mask downstream as needed."""
-    files = sorted(f for f in os.listdir(path) if f.endswith('.xyz'))
+    files = sorted(f for f in os.listdir(path) if f.endswith(".xyz"))
     if max_files:
         files = files[:max_files]
     C, Zs, U0 = [], [], []

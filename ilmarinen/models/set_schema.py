@@ -25,6 +25,7 @@ Permutation-primitive vocabulary (the set analogue of the six irreducibles):
   element_mlp : per-element MLP (stabilizer/baseline, the minimal set function; like 'plain').
   norm        : element-wise normalization (parameter-light stabilizer).
 """
+
 from __future__ import annotations
 
 import torch
@@ -72,32 +73,39 @@ def _fspool(h, batch, n_sets, n_pieces=None):
         rows = h[batch == s]
         if rows.shape[0] == 0:
             continue
-        sorted_vals, _ = torch.sort(rows, dim=0)          # sort each feature across elements
+        sorted_vals, _ = torch.sort(rows, dim=0)  # sort each feature across elements
         # descriptor: mean of sorted (invariant), plus the sorted max/min captured via endpoints;
         # a compact FSPool: average the sorted sequence (equals mean) is degenerate, so use a weighted
         # sum with a fixed ramp weight over the sorted order (this is the piecewise-linear FSPool with a
         # fixed single-piece ramp), which is DISTINCT from mean/sum/max.
         k = sorted_vals.shape[0]
         ramp = torch.linspace(-1.0, 1.0, k, device=h.device, dtype=h.dtype).view(k, 1)
-        out[s] = (sorted_vals * ramp).sum(0)              # order-weighted sum of sorted vals (FSPool)
+        out[s] = (sorted_vals * ramp).sum(0)  # order-weighted sum of sorted vals (FSPool)
     return out
 
 
 def _set_pool(h, batch, n_sets, kind):
-    if kind == "sum":    return _scatter_sum(h, batch, n_sets)
-    if kind == "max":    return _scatter_max(h, batch, n_sets)
-    if kind == "fspool": return _fspool(h, batch, n_sets)
+    if kind == "sum":
+        return _scatter_sum(h, batch, n_sets)
+    if kind == "max":
+        return _scatter_max(h, batch, n_sets)
+    if kind == "fspool":
+        return _fspool(h, batch, n_sets)
     return _scatter_mean(h, batch, n_sets)
 
 
 class _MHA(nn.Module):
     """Multihead attention over the elements of each set (masked so attention stays within a set).
     Permutation-EQUIVARIANT: permuting elements permutes the outputs identically."""
+
     def __init__(self, dim, heads=4):
         super().__init__()
-        self.h = heads; self.dk = dim // heads
-        self.q = nn.Linear(dim, dim); self.k = nn.Linear(dim, dim)
-        self.v = nn.Linear(dim, dim); self.o = nn.Linear(dim, dim)
+        self.h = heads
+        self.dk = dim // heads
+        self.q = nn.Linear(dim, dim)
+        self.k = nn.Linear(dim, dim)
+        self.v = nn.Linear(dim, dim)
+        self.o = nn.Linear(dim, dim)
 
     def forward(self, x, batch, n_sets, kv=None, kv_batch=None):
         # x: (Nq, D) queries; kv: (Nk, D) keys/values (defaults to x -> self-attention). Attention is
@@ -107,7 +115,8 @@ class _MHA(nn.Module):
         # is IDENTICAL (softmax over the within-set keys either way).
         kv = x if kv is None else kv
         kvb = batch if kv_batch is None else kv_batch
-        Nq = x.shape[0]; D = x.shape[1]
+        Nq = x.shape[0]
+        D = x.shape[1]
         q = self.q(x).view(Nq, self.h, self.dk)
         k = self.k(kv).view(-1, self.h, self.dk)
         v = self.v(kv).view(-1, self.h, self.dk)
@@ -117,9 +126,9 @@ class _MHA(nn.Module):
             ki = (kvb == s).nonzero(as_tuple=True)[0]
             if qi.numel() == 0 or ki.numel() == 0:
                 continue
-            sc = torch.einsum("qhd,khd->qkh", q[qi], k[ki]) / (self.dk ** 0.5)   # (nq,nk,h), within-set only
+            sc = torch.einsum("qhd,khd->qkh", q[qi], k[ki]) / (self.dk**0.5)  # (nq,nk,h), within-set only
             at = torch.softmax(sc, dim=1)
-            out_list.append(torch.einsum("qkh,khd->qhd", at, v[ki]))            # (nq,h,dk)
+            out_list.append(torch.einsum("qkh,khd->qhd", at, v[ki]))  # (nq,h,dk)
             idx_list.append(qi)
         out = x.new_zeros(Nq, self.h, self.dk)
         if idx_list:
@@ -130,6 +139,7 @@ class _MHA(nn.Module):
 class _SetCore(nn.Module):
     """One set primitive: forward_set(x (N,F), batch, n_sets) -> (N, width) equivariant element features
     (pooling to per-set happens at readout). kind selects the block."""
+
     def __init__(self, fin, width, kind, heads=4, n_inducing=8):
         super().__init__()
         self.kind = kind
@@ -137,7 +147,8 @@ class _SetCore(nn.Module):
         if kind in ("sab", "isab", "pma_block"):
             self.mha = _MHA(width, heads)
             self.ff = nn.Sequential(nn.Linear(width, width), nn.ReLU(), nn.Linear(width, width))
-            self.ln1 = nn.LayerNorm(width); self.ln2 = nn.LayerNorm(width)
+            self.ln1 = nn.LayerNorm(width)
+            self.ln2 = nn.LayerNorm(width)
             if kind == "isab":
                 self.inducing = nn.Parameter(torch.randn(n_inducing, width) * 0.1)
                 self.mha2 = _MHA(width, heads)
@@ -163,8 +174,8 @@ class _SetCore(nn.Module):
             m = self.inducing.shape[0]
             ind = self.inducing.unsqueeze(0).expand(n_sets, m, -1).reshape(n_sets * m, -1)
             ind_batch = torch.arange(n_sets, device=x.device).repeat_interleave(m)
-            hI = self.mha(ind, ind_batch, n_sets, kv=h, kv_batch=batch)     # inducing <- elements
-            out = self.mha2(h, batch, n_sets, kv=hI, kv_batch=ind_batch)    # elements <- inducing
+            hI = self.mha(ind, ind_batch, n_sets, kv=h, kv_batch=batch)  # inducing <- elements
+            out = self.mha2(h, batch, n_sets, kv=hI, kv_batch=ind_batch)  # elements <- inducing
             return self.ln2(out + self.ff(out))
         return h
 
@@ -172,6 +183,7 @@ class _SetCore(nn.Module):
 class _SetCell(nn.Module):
     """Softmax mixture over set primitives (permutation-equivariant), same relaxation as the other
     contracts. mixed_set(x, batch, n_sets) -> (N, width)."""
+
     def __init__(self, fin, width, primitives, heads=4):
         super().__init__()
         self.primitives = tuple(primitives)
@@ -184,7 +196,6 @@ class _SetCell(nn.Module):
         outs = torch.stack([c.forward_set(x, batch, n_sets) for c in self.cores], dim=0)  # (P,N,width)
         return (w.view(-1, 1, 1) * outs).sum(0)
 
-
     def mixed_set(self, x, batch, n_sets):  # backward-compatible alias
         return self.mixed(x, batch, n_sets)
 
@@ -196,11 +207,23 @@ class _SetCell(nn.Module):
 class SetSchema(nn.Module):
     """S_n-invariant set model: element embedding -> stacked set cells (equivariant) -> invariant pool
     -> per-set head. Permutation-invariant by construction."""
-    def __init__(self, fin, width=32, depth=2, n_out=1, primitives=("deepsets", "sab", "isab",
-                 "pma_block", "element_mlp", "norm"), readout="mean", heads=4, seed=0):
+
+    def __init__(
+        self,
+        fin,
+        width=32,
+        depth=2,
+        n_out=1,
+        primitives=("deepsets", "sab", "isab", "pma_block", "element_mlp", "norm"),
+        readout="mean",
+        heads=4,
+        seed=0,
+    ):
         super().__init__()
         torch.manual_seed(seed)
-        self.width = width; self.depth = depth; self.readout = readout
+        self.width = width
+        self.depth = depth
+        self.readout = readout
         self.cells = nn.ModuleList()
         f = fin
         for _ in range(depth):
@@ -212,13 +235,13 @@ class SetSchema(nn.Module):
         h = None
         for l, cell in enumerate(self.cells):
             out = cell.mixed(x if l == 0 else h, batch, n_sets)
-            h = out if l == 0 else h + out                       # residual (equivariant)
+            h = out if l == 0 else h + out  # residual (equivariant)
         return h
 
     def forward(self, x, batch, n_sets):
-        h = self.embed(x, batch, n_sets)                          # (N, width) equivariant
-        pooled = _set_pool(h, batch, n_sets, self.readout)        # (n_sets, width) INVARIANT
-        return self.rho(pooled)                                    # per-set prediction
+        h = self.embed(x, batch, n_sets)  # (N, width) equivariant
+        pooled = _set_pool(h, batch, n_sets, self.readout)  # (n_sets, width) INVARIANT
+        return self.rho(pooled)  # per-set prediction
 
     def update_peak(self):
         for cell in self.cells:
@@ -232,13 +255,23 @@ class SetSchema(nn.Module):
 
     def architecture(self):
         with torch.no_grad():
-            return {"primitives": [c.primitives[int(torch.argmax(c.alpha))] for c in self.cells],
-                    "readout": self.readout}
+            return {
+                "primitives": [c.primitives[int(torch.argmax(c.alpha))] for c in self.cells],
+                "readout": self.readout,
+            }
 
 
-def build_set_schema(n_in=None, width=32, depth=2, n_out=1,
-                                 primitives=("deepsets", "sab", "isab", "pma_block", "element_mlp",
-                                             "norm"), readout="mean", heads=4, seed=0, fin=None):
+def build_set_schema(
+    n_in=None,
+    width=32,
+    depth=2,
+    n_out=1,
+    primitives=("deepsets", "sab", "isab", "pma_block", "element_mlp", "norm"),
+    readout="mean",
+    heads=4,
+    seed=0,
+    fin=None,
+):
     # canonical param is n_in; fin kept as backward-compatible alias
     if n_in is None:
         n_in = fin

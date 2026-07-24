@@ -32,12 +32,12 @@ def effective_dimension(X):
     Xc = X - X.mean(axis=0, keepdims=True)
     # covariance eigenvalues via SVD (numerically stable)
     s = np.linalg.svd(Xc, full_matrices=False, compute_uv=False)
-    lam = s ** 2
+    lam = s**2
     tot = lam.sum()
     if tot <= 0:
         return 1.0, np.ones(1)
     p = lam / tot
-    d_eff = float(1.0 / np.sum(p ** 2))
+    d_eff = float(1.0 / np.sum(p**2))
     return d_eff, p
 
 
@@ -59,9 +59,9 @@ def reduce_redundancy(X, keep=None, var_target=None, min_keep=1):
     mean = X.mean(axis=0, keepdims=True)
     Xc = X - mean
     U, S, Vt = np.linalg.svd(Xc, full_matrices=False)
-    lam = S ** 2
+    lam = S**2
     ratios = lam / lam.sum() if lam.sum() > 0 else np.ones_like(lam) / len(lam)
-    d_eff = float(1.0 / np.sum(ratios ** 2)) if lam.sum() > 0 else 1.0
+    d_eff = float(1.0 / np.sum(ratios**2)) if lam.sum() > 0 else 1.0
 
     if keep is not None:
         k = int(keep)
@@ -72,11 +72,14 @@ def reduce_redundancy(X, keep=None, var_target=None, min_keep=1):
         k = int(np.ceil(d_eff))
     k = max(min_keep, min(k, X.shape[1]))
 
-    comps = Vt[:k]                     # (k, d) principal directions
-    Xr = Xc @ comps.T                  # (n, k) collective coordinates
+    comps = Vt[:k]  # (k, d) principal directions
+    Xr = Xc @ comps.T  # (n, k) collective coordinates
     return {
-        "Xr": Xr.astype(np.float32), "k": k, "d_eff": d_eff,
-        "components": comps, "mean": mean.ravel(),
+        "Xr": Xr.astype(np.float32),
+        "k": k,
+        "d_eff": d_eff,
+        "components": comps,
+        "mean": mean.ravel(),
         "explained_variance": float(ratios[:k].sum()),
         "variance_ratios": ratios,
     }
@@ -84,9 +87,11 @@ def reduce_redundancy(X, keep=None, var_target=None, min_keep=1):
 
 def format_reduction(result):
     """Short text report of a reduce_redundancy result."""
-    return ("REDUNDANCY REDUCTION (RG / keep-relevant-modes; effective-dimension by covariance IPR)\n"
-            f"  ambient dim -> kept {result['k']} collective coordinates "
-            f"(measured d_eff={result['d_eff']:.2f})\n"
-            f"  explained variance retained: {result['explained_variance']:.3f}\n"
-            f"  the kept axes are the top covariance eigenvectors; discarded axes are redundant "
-            f"(low-variance / correlated) directions.")
+    return (
+        "REDUNDANCY REDUCTION (RG / keep-relevant-modes; effective-dimension by covariance IPR)\n"
+        f"  ambient dim -> kept {result['k']} collective coordinates "
+        f"(measured d_eff={result['d_eff']:.2f})\n"
+        f"  explained variance retained: {result['explained_variance']:.3f}\n"
+        f"  the kept axes are the top covariance eigenvectors; discarded axes are redundant "
+        f"(low-variance / correlated) directions."
+    )

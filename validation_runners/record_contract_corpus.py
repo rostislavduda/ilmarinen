@@ -14,6 +14,7 @@ The premise for doing this (verified in tests/learned_contract_routing.md): the 
 geometric datasets FLIPS toward equivariant as budget grows (rMD17 R2 0.06->0.44, QM7 0.62->0.72 for
 equivariant while set/graph stay flat), so full-budget labels are materially better than reduced ones.
 """
+
 import argparse
 import sys
 import time
@@ -31,8 +32,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--epochs", type=int, default=90, help="bake-off budget per candidate contract")
     from ilmarinen.core.paths import cache_path
-    ap.add_argument("--out", default=cache_path("contract_corpus.json"),
-                    help="where to persist the corpus JSON (default: <cache>/contract_corpus.json)")
+
+    ap.add_argument(
+        "--out",
+        default=cache_path("contract_corpus.json"),
+        help="where to persist the corpus JSON (default: <cache>/contract_corpus.json)",
+    )
     ap.add_argument("--reduced", action="store_true", help="use reduced dataset subsets (faster)")
     ap.add_argument("--only", default=None, help="comma-separated dataset names")
     args = ap.parse_args()
@@ -64,7 +69,9 @@ def main():
             router.add(descriptor, winner)
             recorded += 1
             sc = {k: round(v, 3) for k, v in scores.items()}
-            print(f"[{name:16}] winner={winner:12} scores={sc}  desc={[round(float(x),2) for x in descriptor]}  ({time.time()-t0:.0f}s)")
+            print(
+                f"[{name:16}] winner={winner:12} scores={sc}  desc={[round(float(x), 2) for x in descriptor]}  ({time.time() - t0:.0f}s)"
+            )
         except FileNotFoundError:
             print(f"[{name:16}] SKIP -- data not present")
         except Exception as e:
@@ -81,9 +88,12 @@ def main():
             correct = 0
             for i in range(len(X)):
                 m = np.arange(len(X)) != i
-                sub = ContractRouter(); sub.X = X[m]; sub.y = list(y[m]); sub._fit()
+                sub = ContractRouter()
+                sub.X = X[m]
+                sub.y = list(y[m])
+                sub._fit()
                 pred, conf, _ = sub.predict(X[i])
-                correct += (pred == y[i])
+                correct += pred == y[i]
             print(f"leave-one-out over recorded corpus: {correct}/{len(X)}")
 
 

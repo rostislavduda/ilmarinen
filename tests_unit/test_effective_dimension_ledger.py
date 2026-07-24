@@ -7,6 +7,7 @@ sparsity_priced_alpha.participation on alpha) EXACTLY -- that identity is the wh
 unification; (2) the ledger assembles the available legs onto one axis with distinct, non-summed units;
 (3) partial and degenerate inputs are handled.
 """
+
 import numpy as np
 import pytest
 
@@ -84,8 +85,12 @@ def test_ledger_partial_inputs():
 
 def test_ledger_ib_flow_level():
     """An IB-RG flow dict contributes the supervised scale-resolved data-modes level."""
-    flow = {"d_IB": np.array([1, 2, 3, 3]), "transitions": [(0.5, 0), (0.7, 1)], "d_eff_static": 3.1,
-            "betas": np.array([1, 2, 3, 4])}
+    flow = {
+        "d_IB": np.array([1, 2, 3, 3]),
+        "transitions": [(0.5, 0), (0.7, 1)],
+        "d_eff_static": 3.1,
+        "betas": np.array([1, 2, 3, 4]),
+    }
     led = effective_dimension_ledger(ib_flow=flow)
     lv = led["levels"][0]
     assert lv["level"] == "data_modes_flow"

@@ -27,6 +27,7 @@ Design notes (fairness of the test):
   - both cells use criticality-aware init (sigma_w2) so neither is handicapped
     by bad initialization.
 """
+
 from __future__ import annotations
 
 import torch
@@ -52,10 +53,10 @@ class _PlainCellCore(nn.Module):
 class _GatedCellCore(nn.Module):
     """GRU-style gated recurrence (adds multiplicative gating, primitive #3).
 
-        z = sigmoid(W_xz x + W_hz h)          update gate
-        r = sigmoid(W_xr x + W_hr h)          reset gate
-        n = tanh(W_xn x + r * (W_hn h))       candidate  (multiplicative: r * ...)
-        h' = (1 - z) * h + z * n              (multiplicative: z * n, (1-z)*h)
+    z = sigmoid(W_xz x + W_hz h)          update gate
+    r = sigmoid(W_xr x + W_hr h)          reset gate
+    n = tanh(W_xn x + r * (W_hn h))       candidate  (multiplicative: r * ...)
+    h' = (1 - z) * h + z * n              (multiplicative: z * n, (1-z)*h)
     """
 
     def __init__(self, n_in, width, sigma_w2, sigma_b2=0.05):
@@ -162,8 +163,7 @@ class SuperGraphRNN(nn.Module):
     alpha_peak_report() is the honest selection signal.
     """
 
-    def __init__(self, depth, width, sigma_w2, sigma_b2=0.05,
-                 n_in=1, n_out=10, seed=0, deep_supervision=False):
+    def __init__(self, depth, width, sigma_w2, sigma_b2=0.05, n_in=1, n_out=10, seed=0, deep_supervision=False):
         super().__init__()
         if depth < 1:
             raise ValueError("depth must be >= 1")
@@ -245,7 +245,7 @@ class SuperGraphRNN(nn.Module):
         finals = self._run(x)
         w = torch.softmax(self.cells[-1].alpha, dim=0)
         outs = []
-        for (h_plain, h_gated) in finals[-K:]:
+        for h_plain, h_gated in finals[-K:]:
             outs.append(w[0] * self.head(h_plain) + w[1] * self.head(h_gated))
         return torch.stack(outs, dim=1)
 
@@ -322,8 +322,7 @@ class SuperGraphRNN(nn.Module):
         outs = []
         for l in range(self.depth):
             w = torch.softmax(self.cells[l].alpha, dim=0)
-            seq = [w[0] * self.aux_heads[l](a) + w[1] * self.aux_heads[l](g)
-                   for (a, g) in per_layer_steps[l]]
+            seq = [w[0] * self.aux_heads[l](a) + w[1] * self.aux_heads[l](g) for (a, g) in per_layer_steps[l]]
             outs.append(torch.stack(seq, dim=1))
         return outs
 
@@ -364,14 +363,14 @@ class DiscreteRNN(nn.Module):
         super().__init__()
         self.width = super_net.width
         self.depth = super_net.depth
-        self.choice = super_net.selected_primitive()   # last-layer peak-alpha argmax
+        self.choice = super_net.selected_primitive()  # last-layer peak-alpha argmax
         # inherit the winning primitive's FULL stack (product-paths: the chosen
         # primitive already ran as a clean stack across all layers)
         cells = []
         for cell in super_net.cells:
             cells.append(cell.gated if self.choice == "gated" else cell.plain)
         self.cells = nn.ModuleList(cells)
-        self.head = super_net.head    # shared head (inherited)
+        self.head = super_net.head  # shared head (inherited)
 
     def forward(self, x):
         b, T, _ = x.shape

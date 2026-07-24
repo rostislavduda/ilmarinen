@@ -21,6 +21,7 @@ well-conditioned and works for fractional p.
 Cost: a handful of Gauss-Hermite quadrature evaluations of R -- milliseconds,
 no training, no data. alpha is a pure property of the activation + init.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -33,22 +34,26 @@ from ..core.meanfield import MeanFieldTheory
 @dataclass
 class ExponentResult:
     activation: str
-    sigma_w2: float           # the (critical) init variance used
-    chi1: float               # should be ~1 at the critical point
-    p: float                  # leading nonlinear power of R near c=1
-    kappa: float              # its coefficient (sign/magnitude)
-    alpha: float              # alpha = 1/(p-1): depth decay (1-c) ~ l^{-alpha}
-    r2: float                 # log-log fit quality (closeness to a clean power law)
-    reliable: bool            # True only if the power-law fit is clean (R2 high)
-    method: str               # which extraction path produced the result
+    sigma_w2: float  # the (critical) init variance used
+    chi1: float  # should be ~1 at the critical point
+    p: float  # leading nonlinear power of R near c=1
+    kappa: float  # its coefficient (sign/magnitude)
+    alpha: float  # alpha = 1/(p-1): depth decay (1-c) ~ l^{-alpha}
+    r2: float  # log-log fit quality (closeness to a clean power law)
+    reliable: bool  # True only if the power-law fit is clean (R2 high)
+    method: str  # which extraction path produced the result
     eps_grid: np.ndarray
     g_vals: np.ndarray
 
 
-def critical_exponent(theory: MeanFieldTheory, sigma_b2: float = 0.05,
-                      sigma_w2: float | None = None,
-                      eps_lo: float = 1e-4, eps_hi: float = 1e-1,
-                      n_pts: int = 25) -> ExponentResult:
+def critical_exponent(
+    theory: MeanFieldTheory,
+    sigma_b2: float = 0.05,
+    sigma_w2: float | None = None,
+    eps_lo: float = 1e-4,
+    eps_hi: float = 1e-1,
+    n_pts: int = 25,
+) -> ExponentResult:
     """Compute alpha from the leading nonlinearity of R near c=1.
 
     If sigma_w2 is None, use the critical value (chi_1 = 1) located by bisection.
@@ -75,8 +80,7 @@ def critical_exponent(theory: MeanFieldTheory, sigma_b2: float = 0.05,
     absg = np.abs(g[mask])
     good = absg > 1e-14
     if good.sum() < 5:
-        return ExponentResult(theory.name, sigma_w2, chi1, np.nan, np.nan,
-                              np.nan, 0.0, False, "degenerate", eps, g)
+        return ExponentResult(theory.name, sigma_w2, chi1, np.nan, np.nan, np.nan, 0.0, False, "degenerate", eps, g)
     x = np.log(eps[mask][good])
     ly = np.log(absg[good])
     slope, intercept = np.polyfit(x, ly, 1)
@@ -88,24 +92,30 @@ def critical_exponent(theory: MeanFieldTheory, sigma_b2: float = 0.05,
     reliable = (r2 > 0.99) and (p > 1.0 + 1e-3)
     alpha = float(1.0 / (p - 1.0)) if (p - 1.0) > 1e-6 else np.inf
     method = "map-expansion" if reliable else "map-expansion (UNRELIABLE: use empirical)"
-    return ExponentResult(theory.name, sigma_w2, chi1, p, kappa, alpha, r2,
-                          reliable, method, eps, g)
+    return ExponentResult(theory.name, sigma_w2, chi1, p, kappa, alpha, r2, reliable, method, eps, g)
 
 
-def empirical_exponent(theory_name: str, sigma_w2: float, sigma_b2: float = 0.05,
-                       depth: int = 200, width: int = 2000, c0: float = 0.7,
-                       seed: int = 0):
+def empirical_exponent(
+    theory_name: str,
+    sigma_w2: float,
+    sigma_b2: float = 0.05,
+    depth: int = 200,
+    width: int = 2000,
+    c0: float = 0.7,
+    seed: int = 0,
+):
     """Cross-check: measure alpha from an actual deep random-net trajectory.
 
     Regress log(1 - c^(l)) on log(l) over the algebraic-decay window.
     One forward pass; ~seconds.
     """
     from ..core.meanfield import ACTIVATIONS
+
     rng = np.random.default_rng(seed)
     sigma, _ = ACTIVATIONS[theory_name]
     d = 200
     x1 = rng.standard_normal(d)
-    x2 = c0 * x1 + np.sqrt(1 - c0 ** 2) * rng.standard_normal(d)
+    x2 = c0 * x1 + np.sqrt(1 - c0**2) * rng.standard_normal(d)
     x1 /= np.linalg.norm(x1) / np.sqrt(d)
     x2 /= np.linalg.norm(x2) / np.sqrt(d)
     h1, h2 = x1, x2
@@ -117,7 +127,7 @@ def empirical_exponent(theory_name: str, sigma_w2: float, sigma_b2: float = 0.05
         h1 = sigma(W @ h1 + b)
         h2 = sigma(W @ h2 + b)
         nin = width
-        c = np.mean(h1 * h2) / np.sqrt(np.mean(h1 ** 2) * np.mean(h2 ** 2) + 1e-12)
+        c = np.mean(h1 * h2) / np.sqrt(np.mean(h1**2) * np.mean(h2**2) + 1e-12)
         eps_traj.append(1.0 - c)
     eps_traj = np.array(eps_traj)
     # fit on a mid-depth window where algebraic decay is clean and eps>0
@@ -127,4 +137,4 @@ def empirical_exponent(theory_name: str, sigma_w2: float, sigma_b2: float = 0.05
     if good.sum() < 5:
         return np.nan
     slope = np.polyfit(np.log(ls[good]), np.log(e[good]), 1)[0]
-    return float(-slope)   # eps ~ l^{-alpha}  ->  slope = -alpha
+    return float(-slope)  # eps ~ l^{-alpha}  ->  slope = -alpha

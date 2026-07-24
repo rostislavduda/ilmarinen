@@ -28,5 +28,5 @@ repos:
     hooks:
       # Lint — matches the enforced CI rule set. No --fix, so it never rewrites code.
       - id: ruff-check
-      # Formatter deferred (whole-repo reformat not adopted). Uncomment to enable:
-      # - id: ruff-format
+      # Format — enforced (matches CI's `ruff format --check`); reformats on commit.
+      - id: ruff-format

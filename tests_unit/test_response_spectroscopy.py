@@ -11,6 +11,7 @@ Fast, exact tests -- no training. Two channels with DIFFERENT analytic character
     slope jump. We check mu* against a hand-computed crossing, the relative-scale robustness verdict,
     and the cheapest-contract / best-fit boundary cases (no upward / no downward transition).
 """
+
 import numpy as np
 import pytest
 
@@ -49,8 +50,8 @@ def test_entropy_frac_monotone_decisive_below_soft():
 def test_entropy_extremes():
     """entropy_frac -> 0 as beta -> inf (frozen onto the winner); -> 1 as beta -> 0 (uniform)."""
     e = {"a": -0.9, "b": -0.5, "c": -0.4}
-    hot = gibbs_susceptibility(e, beta=1e-6)   # ~uniform
-    cold = gibbs_susceptibility(e, beta=1e6)   # ~frozen
+    hot = gibbs_susceptibility(e, beta=1e-6)  # ~uniform
+    cold = gibbs_susceptibility(e, beta=1e6)  # ~frozen
     assert hot["entropy_frac"] == pytest.approx(1.0, abs=1e-4)
     assert cold["entropy_frac"] == pytest.approx(0.0, abs=1e-6)
     # winner is the min-energy primitive regardless of beta
@@ -61,7 +62,7 @@ def test_energy_gap_and_winner():
     """energy_gap = Psi_runnerup - Psi_winner; winner is argmin energy."""
     r = gibbs_susceptibility({"x": -1.0, "y": -0.3, "z": -0.7}, beta=5.0)
     assert r["winner"] == "x"
-    assert r["runner_up"] == "z"           # second lowest energy
+    assert r["runner_up"] == "z"  # second lowest energy
     assert r["energy_gap"] == pytest.approx(-0.7 - (-1.0), rel=1e-12)  # 0.3
 
 
@@ -72,7 +73,7 @@ def test_contract_transition_locates_crossing():
     scores = {"dense": 0.740, "graph": 0.759, "equivariant": 0.756}
     omegas = {"dense": 0.0, "graph": 32.0, "equivariant": 127.0}
     c = contract_transition(scores, omegas, mu_c=0.05)
-    assert c["winner"] == "graph"          # at mu=0.05 graph wins on J
+    assert c["winner"] == "graph"  # at mu=0.05 graph wins on J
     assert c["runner_up"] == "dense"
     # graph (Omega_tilde=32/127) vs dense (Omega_tilde=0): crossing where
     # (1-0.759)+mu*32/127 == (1-0.740)  => mu = (0.260-0.241)*127/32 = 0.0754...

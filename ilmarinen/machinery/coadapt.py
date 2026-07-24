@@ -25,6 +25,7 @@ CHARACTERIZATION. measure_coadaptation compares the argmax-alpha choice to the s
 held-out split and returns the disagreement plus each op's mixture-weight vs solo-loss -- a direct
 quantification of the pathology.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -40,7 +41,7 @@ def perturb_alpha(alpha, scale=0.1):
 def alpha_reg_loss(alphas, weight=1e-3):
     """T2 (beta-DARTS): smooth L2 decay on the architecture logits to prevent logit runaway. alphas is
     a list of alpha parameters. Returns a scalar to add to the objective."""
-    return weight * sum((a ** 2).sum() for a in alphas)
+    return weight * sum((a**2).sum() for a in alphas)
 
 
 @torch.no_grad()
@@ -54,7 +55,8 @@ def solo_importances(server, eval_fn, cell, restore=True):
     n = cell.alpha.shape[0]
     losses = np.zeros(n)
     for i in range(n):
-        cell.alpha.zero_(); cell.alpha[i] = 20.0            # ~one-hot on op i
+        cell.alpha.zero_()
+        cell.alpha[i] = 20.0  # ~one-hot on op i
         losses[i] = float(eval_fn())
     if restore:
         cell.alpha.copy_(saved)
@@ -114,13 +116,24 @@ def measure_coadaptation(server, eval_fn):
         solo_best = cell.primitives[int(np.argmin(solo))]
         disagree = argmax_op != solo_best
         n_disagree += int(disagree)
-        report.append({"cell": ci, "argmax_alpha_op": argmax_op, "solo_best_op": solo_best,
-                       "disagree": disagree, "alpha_weights": w.round(3).tolist(),
-                       "solo_losses": solo.round(4).tolist()})
-    return {"per_cell": report, "n_cells": len(report), "n_disagree": n_disagree,
-            "disagreement_rate": n_disagree / max(1, len(report)),
-            "interpretation": "high disagreement_rate = co-adaptation (argmax-alpha != solo-best); "
-                              "use ablation_select instead of argmax for a robust discretization."}
+        report.append(
+            {
+                "cell": ci,
+                "argmax_alpha_op": argmax_op,
+                "solo_best_op": solo_best,
+                "disagree": disagree,
+                "alpha_weights": w.round(3).tolist(),
+                "solo_losses": solo.round(4).tolist(),
+            }
+        )
+    return {
+        "per_cell": report,
+        "n_cells": len(report),
+        "n_disagree": n_disagree,
+        "disagreement_rate": n_disagree / max(1, len(report)),
+        "interpretation": "high disagreement_rate = co-adaptation (argmax-alpha != solo-best); "
+        "use ablation_select instead of argmax for a robust discretization.",
+    }
 
 
 def robust_select(server, eval_fn, clean_solo_fn=None, disagreement_threshold=0.5, verbose=False):
@@ -148,13 +161,24 @@ def robust_select(server, eval_fn, clean_solo_fn=None, disagreement_threshold=0.
     ablation_sel = [c["solo_best_op"] for c in diag["per_cell"]]
     rate = diag["disagreement_rate"]
     if rate <= disagreement_threshold:
-        return {"selected": ablation_sel, "method": "ablation", "disagreement_rate": rate,
-                "argmax": argmax_sel, "diagnostic": diag}
+        return {
+            "selected": ablation_sel,
+            "method": "ablation",
+            "disagreement_rate": rate,
+            "argmax": argmax_sel,
+            "diagnostic": diag,
+        }
     # high disagreement: co-adaptation suspected. Arbitrate with clean-solo if available.
     if clean_solo_fn is None:
-        return {"selected": ablation_sel, "method": "ablation_flagged", "disagreement_rate": rate,
-                "argmax": argmax_sel, "clean_solo_recommended": True, "diagnostic": diag,
-                "note": "high co-adaptation; provide clean_solo_fn to arbitrate high-capacity ops."}
+        return {
+            "selected": ablation_sel,
+            "method": "ablation_flagged",
+            "disagreement_rate": rate,
+            "argmax": argmax_sel,
+            "clean_solo_recommended": True,
+            "diagnostic": diag,
+            "note": "high co-adaptation; provide clean_solo_fn to arbitrate high-capacity ops.",
+        }
     # clean-solo is per-primitive (not per-cell); apply its verdict to every cell that disagrees.
     primitives = server.net.cells[0].primitives
     best, scores = clean_solo_select(clean_solo_fn, primitives)
@@ -164,7 +188,14 @@ def robust_select(server, eval_fn, clean_solo_fn=None, disagreement_threshold=0.
         selected.append(best if c["disagree"] else c["solo_best_op"])
     if verbose:
         print(f"robust_select: disagreement {rate:.2f} > {disagreement_threshold} -> clean-solo arbitration")
-        print(f"  clean-solo scores: { {k: round(v,4) for k,v in scores.items()} }")
-    return {"selected": selected, "method": "clean_solo_arbitrated", "disagreement_rate": rate,
-            "argmax": argmax_sel, "ablation": ablation_sel, "clean_solo_best": best,
-            "clean_solo_scores": scores, "diagnostic": diag}
+        print(f"  clean-solo scores: { {k: round(v, 4) for k, v in scores.items()} }")
+    return {
+        "selected": selected,
+        "method": "clean_solo_arbitrated",
+        "disagreement_rate": rate,
+        "argmax": argmax_sel,
+        "ablation": ablation_sel,
+        "clean_solo_best": best,
+        "clean_solo_scores": scores,
+        "diagnostic": diag,
+    }

@@ -21,6 +21,7 @@ alpha-mixing within-type, conservative forces) mirrors the l<=1 module. The l<=1
 default/lighter option; this one trades cost for angular resolution. Not registered as a replacement
 -- an additional capability. See tests/l2_irrep_validation.md.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -67,7 +68,8 @@ class _EquivLinear2(nn.Module):
 
     def __init__(self, c0_in, c1_in, c2_in, c0_out, c1_out, c2_out):
         super().__init__()
-        self.Ws = nn.Parameter(torch.empty(c0_in, c0_out)); self.bs = nn.Parameter(torch.zeros(c0_out))
+        self.Ws = nn.Parameter(torch.empty(c0_in, c0_out))
+        self.bs = nn.Parameter(torch.zeros(c0_out))
         nn.init.normal_(self.Ws, 0, 1.0 / max(c0_in, 1) ** 0.5)
         self.Wv = nn.Parameter(torch.empty(c1_in, c1_out)) if c1_in and c1_out else None
         self.Wt = nn.Parameter(torch.empty(c2_in, c2_out)) if c2_in and c2_out else None
@@ -79,10 +81,12 @@ class _EquivLinear2(nn.Module):
 
     def forward(self, s, v, t):
         s2 = s @ self.Ws + self.bs
-        v2 = torch.einsum('ncj,cd->ndj', v, self.Wv) if self.Wv is not None \
-            else v.new_zeros(v.shape[0], self.c1_out, 3)
-        t2 = torch.einsum('ncij,cd->ndij', t, self.Wt) if self.Wt is not None \
+        v2 = torch.einsum("ncj,cd->ndj", v, self.Wv) if self.Wv is not None else v.new_zeros(v.shape[0], self.c1_out, 3)
+        t2 = (
+            torch.einsum("ncij,cd->ndij", t, self.Wt)
+            if self.Wt is not None
             else t.new_zeros(t.shape[0], self.c2_out, 3, 3)
+        )
         return s2, v2, t2
 
 
@@ -95,14 +99,15 @@ class _GatedNonlin2(nn.Module):
         super().__init__()
         self.gv = nn.Linear(c0, c1) if c1 else None
         self.gt = nn.Linear(c0, c2) if c2 else None
-        if self.gv is not None: _init_lin(self.gv)
-        if self.gt is not None: _init_lin(self.gt)
+        if self.gv is not None:
+            _init_lin(self.gv)
+        if self.gt is not None:
+            _init_lin(self.gt)
 
     def forward(self, s, v, t):
         s2 = torch.tanh(s)
         v2 = v * torch.sigmoid(self.gv(s)).unsqueeze(-1) if (self.gv is not None and v.shape[1]) else v
-        t2 = t * torch.sigmoid(self.gt(s)).unsqueeze(-1).unsqueeze(-1) \
-            if (self.gt is not None and t.shape[1]) else t
+        t2 = t * torch.sigmoid(self.gt(s)).unsqueeze(-1).unsqueeze(-1) if (self.gt is not None and t.shape[1]) else t
         return s2, v2, t2
 
 
@@ -119,7 +124,7 @@ class _EquivNorm2(nn.Module):
             sc = v.norm(dim=-1).pow(2).mean(1, keepdim=True).add(1e-6).rsqrt()
             v = v * sc.unsqueeze(-1)
         if t.shape[1]:
-            tn = t.pow(2).sum(dim=(-1, -2))                      # invariant (Frobenius^2) per channel
+            tn = t.pow(2).sum(dim=(-1, -2))  # invariant (Frobenius^2) per channel
             sc = tn.mean(1, keepdim=True).add(1e-6).rsqrt()
             t = t * sc.unsqueeze(-1).unsqueeze(-1)
         return s2, v, t
@@ -129,34 +134,34 @@ def _sph_harm_012(rhat):
     """l=0,1,2 spherical harmonics of unit vectors rhat (E,3): Y0=1, Y1=rhat, Y2=symtl(rhat⊗rhat)."""
     y0 = rhat.new_ones(rhat.shape[0], 1)
     y1 = rhat
-    y2 = _symtl(torch.einsum('ei,ej->eij', rhat, rhat))
+    y2 = _symtl(torch.einsum("ei,ej->eij", rhat, rhat))
     return y0, y1, y2
 
 
 def _tensor_product_message2(s, v, t, rhat):
     """CG tensor product of source features (s,v,t) with edge spherical harmonics -> (s,v,t) messages.
     All paths up to l=2. Returns concatenated-channel messages (caller mixes back)."""
-    y1 = rhat                                                    # (E,3)
-    Y2 = _symtl(torch.einsum('ei,ej->eij', rhat, rhat))         # (E,3,3)
+    y1 = rhat  # (E,3)
+    Y2 = _symtl(torch.einsum("ei,ej->eij", rhat, rhat))  # (E,3,3)
 
     # ---- scalar outputs (l=0) ----
-    s_self = s                                                   # 0x0->0
-    dot_v = torch.einsum('ecj,ej->ec', v, y1)                   # 1x1->0 (v . Y1)
-    tT = torch.einsum('ecij,eij->ec', t, Y2)                    # 2x2->0 (t : Y2)
+    s_self = s  # 0x0->0
+    dot_v = torch.einsum("ecj,ej->ec", v, y1)  # 1x1->0 (v . Y1)
+    tT = torch.einsum("ecij,eij->ec", t, Y2)  # 2x2->0 (t : Y2)
     s_msg = torch.cat([s_self, dot_v, tT], dim=1)
 
     # ---- vector outputs (l=1) ----
-    v_from_s = s.unsqueeze(-1) * y1.unsqueeze(1)               # 0x1->1
+    v_from_s = s.unsqueeze(-1) * y1.unsqueeze(1)  # 0x1->1
     cross = torch.cross(v, y1.unsqueeze(1).expand_as(v), dim=-1)  # 1x1->1
-    tv = torch.einsum('ecij,ej->eci', t, y1)                   # 2x1->1 (t . Y1)
+    tv = torch.einsum("ecij,ej->eci", t, y1)  # 2x1->1 (t . Y1)
     # 2x2->1 via epsilon contraction of (t · Y2)
-    prod = torch.einsum('ecia,eaj->ecij', t, Y2)              # (E,C2,3,3)
-    eps_c = torch.einsum('kij,ecij->eck', _EPS.to(t.device, t.dtype), prod)
+    prod = torch.einsum("ecia,eaj->ecij", t, Y2)  # (E,C2,3,3)
+    eps_c = torch.einsum("kij,ecij->eck", _EPS.to(t.device, t.dtype), prod)
     v_msg = torch.cat([v_from_s, cross, tv, eps_c], dim=1)
 
     # ---- tensor outputs (l=2) ----
     t_from_s = s.unsqueeze(-1).unsqueeze(-1) * Y2.unsqueeze(1)  # 0x2->2
-    vv = _symtl(torch.einsum('eci,ej->ecij', v, y1))           # 1x1->2 (v ⊗ Y1, sym-traceless)
+    vv = _symtl(torch.einsum("eci,ej->ecij", v, y1))  # 1x1->2 (v ⊗ Y1, sym-traceless)
     # 2x2->2: symmetric-traceless of (t · Y2)
     tt2 = _symtl(prod)
     t_msg = torch.cat([t_from_s, vv, tt2], dim=1)
@@ -166,45 +171,55 @@ def _tensor_product_message2(s, v, t, rhat):
 
 def _msg_channel_counts(c0, c1, c2):
     """Channel counts produced by _tensor_product_message2 for each output irrep."""
-    s_ch = c0 + c1 + c2            # 0x0, 1x1->0, 2x2->0
-    v_ch = c0 + c1 + c2 + c2       # 0x1, 1x1->1, 2x1->1, 2x2->1
-    t_ch = c0 + c1 + c2            # 0x2, 1x1->2, 2x2->2
+    s_ch = c0 + c1 + c2  # 0x0, 1x1->0, 2x2->0
+    v_ch = c0 + c1 + c2 + c2  # 0x1, 1x1->1, 2x1->1, 2x2->1
+    t_ch = c0 + c1 + c2  # 0x2, 1x1->2, 2x2->2
     return s_ch, v_ch, t_ch
 
 
 # --------------------------------------------------------------------------- primitive cores (l<=2)
 class _TPMessage2(nn.Module):
     """Radial-weighted tensor-product message passing (l<=2). The star primitive."""
+
     name = "e_tp"
 
     def __init__(self, c0, c1, c2, n_rbf=8, rbf_cutoff=3.5):
         super().__init__()
         self.c0, self.c1, self.c2 = c0, c1, c2
         sc, vc, tc = _msg_channel_counts(c0, c1, c2)
-        self.rbf_s = nn.Linear(n_rbf, sc); self.rbf_v = nn.Linear(n_rbf, vc); self.rbf_t = nn.Linear(n_rbf, tc)
-        for m in (self.rbf_s, self.rbf_v, self.rbf_t): _init_lin(m)
+        self.rbf_s = nn.Linear(n_rbf, sc)
+        self.rbf_v = nn.Linear(n_rbf, vc)
+        self.rbf_t = nn.Linear(n_rbf, tc)
+        for m in (self.rbf_s, self.rbf_v, self.rbf_t):
+            _init_lin(m)
         self.mix = _EquivLinear2(sc, vc, tc, c0, c1, c2)
         # RBF range matched to the graph edge cutoff, Gaussian width derived from center spacing
         self.register_buffer("centers", torch.linspace(0.0, rbf_cutoff, n_rbf))
         self.rbf_width = (rbf_cutoff / max(n_rbf - 1, 1)) ** 2
 
     def _rbf(self, dist):
-        return torch.exp(-(dist.unsqueeze(-1) - self.centers) ** 2 / self.rbf_width)
+        return torch.exp(-((dist.unsqueeze(-1) - self.centers) ** 2) / self.rbf_width)
 
     def forward_equiv(self, s, v, t, pos, edge_index):
-        n = s.shape[0]; src, dst = edge_index[0], edge_index[1]
-        rel = pos[dst] - pos[src]; dist = rel.norm(dim=-1); rhat = rel / (dist.unsqueeze(-1) + 1e-9)
+        n = s.shape[0]
+        src, dst = edge_index[0], edge_index[1]
+        rel = pos[dst] - pos[src]
+        dist = rel.norm(dim=-1)
+        rhat = rel / (dist.unsqueeze(-1) + 1e-9)
         s_m, v_m, t_m = _tensor_product_message2(s[src], v[src], t[src], rhat)
         rb = self._rbf(dist)
         s_m = s_m * self.rbf_s(rb)
         v_m = v_m * self.rbf_v(rb).unsqueeze(-1)
         t_m = t_m * self.rbf_t(rb).unsqueeze(-1).unsqueeze(-1)
-        s_a = _scatter_sum(s_m, dst, n); v_a = _scatter_sum(v_m, dst, n); t_a = _scatter_sum(t_m, dst, n)
+        s_a = _scatter_sum(s_m, dst, n)
+        v_a = _scatter_sum(v_m, dst, n)
+        t_a = _scatter_sum(t_m, dst, n)
         return self.mix(s_a, v_a, t_a)
 
 
 class _MeanMessage2(nn.Module):
     """Degree-normalized (isotropic) tensor-product message passing (l<=2) -- the equivariant 'gcn'."""
+
     name = "e_mean"
 
     def __init__(self, c0, c1, c2):
@@ -213,8 +228,10 @@ class _MeanMessage2(nn.Module):
         self.mix = _EquivLinear2(sc, vc, tc, c0, c1, c2)
 
     def forward_equiv(self, s, v, t, pos, edge_index):
-        n = s.shape[0]; src, dst = edge_index[0], edge_index[1]
-        rel = pos[dst] - pos[src]; rhat = rel / (rel.norm(dim=-1, keepdim=True) + 1e-9)
+        n = s.shape[0]
+        src, dst = edge_index[0], edge_index[1]
+        rel = pos[dst] - pos[src]
+        rhat = rel / (rel.norm(dim=-1, keepdim=True) + 1e-9)
         s_m, v_m, t_m = _tensor_product_message2(s[src], v[src], t[src], rhat)
         deg = _scatter_sum(torch.ones_like(dst, dtype=s.dtype), dst, n).clamp(min=1)
         s_a = _scatter_sum(s_m, dst, n) / deg.unsqueeze(1)
@@ -227,7 +244,8 @@ class _Self2(nn.Module):
     name = "e_linear"
 
     def __init__(self, c0, c1, c2):
-        super().__init__(); self.lin = _EquivLinear2(c0, c1, c2, c0, c1, c2)
+        super().__init__()
+        self.lin = _EquivLinear2(c0, c1, c2, c0, c1, c2)
 
     def forward_equiv(self, s, v, t, pos, edge_index):
         return self.lin(s, v, t)
@@ -237,7 +255,9 @@ class _Gate2(nn.Module):
     name = "e_gate"
 
     def __init__(self, c0, c1, c2):
-        super().__init__(); self.lin = _EquivLinear2(c0, c1, c2, c0, c1, c2); self.g = _GatedNonlin2(c0, c1, c2)
+        super().__init__()
+        self.lin = _EquivLinear2(c0, c1, c2, c0, c1, c2)
+        self.g = _GatedNonlin2(c0, c1, c2)
 
     def forward_equiv(self, s, v, t, pos, edge_index):
         return self.g(*self.lin(s, v, t))
@@ -247,15 +267,20 @@ class _NormCore2(nn.Module):
     name = "e_norm"
 
     def __init__(self, c0, c1, c2):
-        super().__init__(); self.lin = _EquivLinear2(c0, c1, c2, c0, c1, c2); self.norm = _EquivNorm2(c0, c1, c2)
+        super().__init__()
+        self.lin = _EquivLinear2(c0, c1, c2, c0, c1, c2)
+        self.norm = _EquivNorm2(c0, c1, c2)
 
     def forward_equiv(self, s, v, t, pos, edge_index):
         return self.norm(*self.lin(s, v, t))
 
 
 _EQUIV_CORES2 = {
-    "e_tp": _TPMessage2, "e_mean": _MeanMessage2,
-    "e_linear": _Self2, "e_gate": _Gate2, "e_norm": _NormCore2,
+    "e_tp": _TPMessage2,
+    "e_mean": _MeanMessage2,
+    "e_linear": _Self2,
+    "e_gate": _Gate2,
+    "e_norm": _NormCore2,
 }
 
 
@@ -272,11 +297,13 @@ class _EquivCell2(nn.Module):
         so_, vo_, to_ = [], [], []
         for c in self.cores:
             a, b, cc = c.forward_equiv(s, v, t, pos, edge_index)
-            so_.append(a); vo_.append(b); to_.append(cc)
+            so_.append(a)
+            vo_.append(b)
+            to_.append(cc)
         w = torch.softmax(self.alpha, dim=0)
-        s_mix = torch.einsum('p,pnc->nc', w, torch.stack(so_, 0)) + s
-        v_mix = torch.einsum('p,pncj->ncj', w, torch.stack(vo_, 0)) + v
-        t_mix = torch.einsum('p,pncij->ncij', w, torch.stack(to_, 0)) + t
+        s_mix = torch.einsum("p,pnc->nc", w, torch.stack(so_, 0)) + s
+        v_mix = torch.einsum("p,pncj->ncj", w, torch.stack(vo_, 0)) + v
+        t_mix = torch.einsum("p,pncij->ncij", w, torch.stack(to_, 0)) + t
         return self.post(s_mix, v_mix, t_mix)
 
     def update_peak(self):
@@ -287,17 +314,29 @@ class _EquivCell2(nn.Module):
 class EquivariantGraphSchemaL2(nn.Module):
     """SO(3)-equivariant message-passing schema with l<=2 irreps (scalars+vectors+tensors)."""
 
-    def __init__(self, fin, c0=16, c1=8, c2=4, depth=3, n_out=1, seed=0,
-                 primitives=("e_tp", "e_mean", "e_linear", "e_gate", "e_norm"), readout="mean"):
+    def __init__(
+        self,
+        fin,
+        c0=16,
+        c1=8,
+        c2=4,
+        depth=3,
+        n_out=1,
+        seed=0,
+        primitives=("e_tp", "e_mean", "e_linear", "e_gate", "e_norm"),
+        readout="mean",
+    ):
         super().__init__()
         if readout not in ("mean", "sum"):
             raise ValueError("readout must be 'mean' or 'sum'")
         torch.manual_seed(seed)
         self.primitives = tuple(primitives)
         self.c0, self.c1, self.c2, self.depth, self.readout = c0, c1, c2, depth, readout
-        self.embed = nn.Linear(fin, c0); _init_lin(self.embed)
+        self.embed = nn.Linear(fin, c0)
+        _init_lin(self.embed)
         self.cells = nn.ModuleList([_EquivCell2(c0, c1, c2, self.primitives) for _ in range(depth)])
-        self.head = nn.Linear(c0, n_out); _init_lin(self.head)
+        self.head = nn.Linear(c0, n_out)
+        _init_lin(self.head)
 
     def _encode(self, x, pos, edge_index):
         s = self.embed(x)
@@ -307,7 +346,7 @@ class EquivariantGraphSchemaL2(nn.Module):
         for cell in self.cells:
             s, v, t = cell(s, v, t, pos, edge_index)
             if scale is not None:
-                t = t * scale                      # joint-search max-l gate: scale the l=2 block
+                t = t * scale  # joint-search max-l gate: scale the l=2 block
         return s, v, t
 
     def set_l2_scale(self, scale):
@@ -346,17 +385,26 @@ class EquivariantGraphSchemaL2(nn.Module):
         return [c.alpha_peak.detach().cpu().numpy() for c in self.cells]
 
     def architecture(self):
-        return [self.primitives[int(np.argmax(c.alpha_peak.detach().cpu().numpy()))]
-                for c in self.cells]
+        return [self.primitives[int(np.argmax(c.alpha_peak.detach().cpu().numpy()))] for c in self.cells]
 
 
-def build_equivariant_graph_schema_l2(n_in=None, c0=16, c1=8, c2=4, depth=3, n_out=1, seed=0,
-                                                  primitives=("e_tp", "e_mean", "e_linear", "e_gate",
-                                                              "e_norm"), readout="mean", fin=None):
+def build_equivariant_graph_schema_l2(
+    n_in=None,
+    c0=16,
+    c1=8,
+    c2=4,
+    depth=3,
+    n_out=1,
+    seed=0,
+    primitives=("e_tp", "e_mean", "e_linear", "e_gate", "e_norm"),
+    readout="mean",
+    fin=None,
+):
     # canonical param is n_in; fin kept as a backward-compatible alias (matches build_equivariant_graph_schema)
     if n_in is None:
         n_in = fin
     if n_in is None:
         raise TypeError("build_equivariant_graph_schema_l2 requires n_in")
-    return EquivariantGraphSchemaL2(fin=n_in, c0=c0, c1=c1, c2=c2, depth=depth, n_out=n_out,
-                                               seed=seed, primitives=primitives, readout=readout)
+    return EquivariantGraphSchemaL2(
+        fin=n_in, c0=c0, c1=c1, c2=c2, depth=depth, n_out=n_out, seed=seed, primitives=primitives, readout=readout
+    )

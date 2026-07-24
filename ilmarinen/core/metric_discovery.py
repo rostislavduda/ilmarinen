@@ -24,6 +24,7 @@ signatures from DATA-discovered noisy generators (Lorentz metric recovered to ~3
 split-signature group recovered from data -- a group neither the Euclidean nor Lorentz menu entry can
 reach.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -58,7 +59,7 @@ def invariant_metric(gens, tol=1e-6, allow_approx=True):
         cand = [Vt[i].reshape(d, d, order="F") for i in idxs]
         g = max(cand, key=lambda G: np.abs((G + G.T) / 2).max())
     elif allow_approx:
-        g = Vt[-1].reshape(d, d, order="F")           # smallest singular direction (approx metric)
+        g = Vt[-1].reshape(d, d, order="F")  # smallest singular direction (approx metric)
     else:
         return None, 0, float("inf")
     g = (g + g.T) / 2
@@ -81,16 +82,16 @@ def metric_signature(g, tol=0.15, rel_tol=0.25):
     npos = int((ev > zero_thr).sum())
     nneg = int((ev < -zero_thr).sum())
     nzero = int((np.abs(ev) <= zero_thr).sum())
-    p, q = max(npos, nneg), min(npos, nneg)          # overall sign is gauge
+    p, q = max(npos, nneg), min(npos, nneg)  # overall sign is gauge
     d = len(ev)
     if q == 0 and nzero == 0:
-        name = "O(%d)" % d                            # definite -> Euclidean orthogonal
+        name = "O(%d)" % d  # definite -> Euclidean orthogonal
     elif nzero > 0:
-        name = "O(%d,%d)+deg%d" % (p, q, nzero)       # degenerate directions (scaling/conformal-like)
+        name = "O(%d,%d)+deg%d" % (p, q, nzero)  # degenerate directions (scaling/conformal-like)
     elif q == 1:
-        name = "O(1,%d)" % (d - 1)                    # Lorentz
+        name = "O(1,%d)" % (d - 1)  # Lorentz
     else:
-        name = "O(%d,%d)" % (p, q)                    # general split signature
+        name = "O(%d,%d)" % (p, q)  # general split signature
     return {"signature": (p, q), "n_zero": nzero, "eigenvalues": np.round(ev, 3).tolist(), "name": name}
 
 
@@ -113,10 +114,19 @@ def discover_metric_group(gens, tol=1e-6):
     # pad/trim to d (numerical safety)
     diag = (diag + [1.0] * d)[:d]
     metric = np.diag(diag)
-    spec = {"gens": [np.asarray(A, float) for A in gens], "vec_dim": d, "metric": metric,
-            "name": sig["name"], "scale_norm": False}
-    detail = {"recovered_metric_diag": np.round(np.diag(g), 3).tolist(), "nullity": nullity,
-              "residual": round(residual, 4), **sig}
+    spec = {
+        "gens": [np.asarray(A, float) for A in gens],
+        "vec_dim": d,
+        "metric": metric,
+        "name": sig["name"],
+        "scale_norm": False,
+    }
+    detail = {
+        "recovered_metric_diag": np.round(np.diag(g), 3).tolist(),
+        "nullity": nullity,
+        "residual": round(residual, 4),
+        **sig,
+    }
     return spec, detail
 
 
@@ -135,16 +145,16 @@ def fit_metric_regression(vectors, y, standardize=True):
     if standardize:
         sc = np.abs(S).std() + 1e-12
         S = S / sc
-        y = y / (sc ** 2)
+        y = y / (sc**2)
     cols, idx = [], []
     for a in range(d):
         for b in range(a, d):
-            coef = 1.0 if a == b else 2.0            # off-diagonal entries appear twice in s^T g s
+            coef = 1.0 if a == b else 2.0  # off-diagonal entries appear twice in s^T g s
             cols.append(coef * S[:, a] * S[:, b])
             idx.append((a, b))
-    cols.append(np.ones(n))                          # intercept: makes the fit invariant to an affine
-    Phi = np.stack(cols, 1)                          # shift of the target (y -> a*y + b); the recovered g
-    w, *_ = np.linalg.lstsq(Phi, y, rcond=None)      # is the quadratic part, unaffected by standardisation
+    cols.append(np.ones(n))  # intercept: makes the fit invariant to an affine
+    Phi = np.stack(cols, 1)  # shift of the target (y -> a*y + b); the recovered g
+    w, *_ = np.linalg.lstsq(Phi, y, rcond=None)  # is the quadratic part, unaffected by standardisation
     g = np.zeros((d, d))
     for (a, b), wi in zip(idx, w[:-1]):
         g[a, b] = wi
@@ -197,12 +207,14 @@ def _train_vector_reference(vectors, y, seed=0, epochs=300, width=64):
     the continuous symmetry (and hence the invariant metric) the target respects on the vector space."""
     import torch
     import torch.nn as nn
+
     torch.manual_seed(seed)
     X = torch.tensor(np.asarray(vectors), dtype=torch.float32)
     yt = torch.tensor(np.asarray(y), dtype=torch.float32).reshape(-1, 1)
     yt = (yt - yt.mean()) / (yt.std() + 1e-9)
-    net = nn.Sequential(nn.Linear(X.shape[1], width), nn.Tanh(),
-                        nn.Linear(width, width), nn.Tanh(), nn.Linear(width, 1))
+    net = nn.Sequential(
+        nn.Linear(X.shape[1], width), nn.Tanh(), nn.Linear(width, width), nn.Tanh(), nn.Linear(width, 1)
+    )
     opt = torch.optim.Adam(net.parameters(), lr=3e-3)
     for _ in range(epochs):
         opt.zero_grad()
@@ -223,6 +235,7 @@ def discover_metric_from_data(data, min_samples=200, epochs=300, tol_ratio=1.5, 
     import torch
 
     from .symmetry_discovery import discover_symmetries
+
     if getattr(data, "positions", None) is None:
         return None, {"reason": "no coordinate vectors"}
     clouds = [np.asarray(P, float) for P in data.positions if np.asarray(P).ndim == 2 and len(P) >= 1]
@@ -236,7 +249,7 @@ def discover_metric_from_data(data, min_samples=200, epochs=300, tol_ratio=1.5, 
     vecs, tgt = [], []
     for i, P in enumerate(clouds):
         s = P.sum(0)
-        proj = P @ s                                  # per-vector projection onto the pooled direction
+        proj = P @ s  # per-vector projection onto the pooled direction
         base = float(y[i]) if (y is not None and i < len(y)) else 1.0
         for k, v in enumerate(P):
             vecs.append(v)
@@ -286,6 +299,8 @@ def generators_for_metric(metric):
     gens = []
     for i in range(d):
         for j in range(i + 1, d):
-            S = np.zeros((d, d)); S[i, j] = 1.0; S[j, i] = -1.0
+            S = np.zeros((d, d))
+            S[i, j] = 1.0
+            S[j, i] = -1.0
             gens.append(ginv @ S)
     return gens

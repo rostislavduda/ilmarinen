@@ -1,4 +1,5 @@
 """Small shared value types for the AllGraph controller and its mixins."""
+
 from collections import namedtuple
 
 # Sweep-invariant context for training one candidate contract on a held-out split. Bundles the eight args

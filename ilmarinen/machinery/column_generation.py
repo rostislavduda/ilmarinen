@@ -23,6 +23,7 @@ This is the honest realization: instead of assuming a small K, we let the
 certificate tell us the true support size, and we stop only when the solution
 is genuinely certified rather than merely dictionary-optimal.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -36,13 +37,13 @@ from .tv_solver import lasso_coordinate_descent
 class ColGenResult:
     lam1: float
     n_rounds: int
-    K_active: int                    # certified support size
-    dictionary_size: int             # total atoms generated
-    sup_eta_history: list            # sup|eta| after each round (should -> ~1)
-    Kactive_history: list            # active support size after each round
+    K_active: int  # certified support size
+    dictionary_size: int  # total atoms generated
+    sup_eta_history: list  # sup|eta| after each round (should -> ~1)
+    Kactive_history: list  # active support size after each round
     train_acc: float
     test_acc: float
-    certified: bool                  # sup|eta| <= 1 + tol at termination
+    certified: bool  # sup|eta| <= 1 + tol at termination
     neurons: list = field(default_factory=list)
     amplitudes: np.ndarray | None = None
     active_mask: np.ndarray | None = None
@@ -53,13 +54,16 @@ def _sample_candidates(X, n_candidates, rng):
     n, d = X.shape
     W = rng.standard_normal((d, n_candidates)) * (1.0 / np.sqrt(d))
     idx = rng.integers(0, n, n_candidates // 2)
-    W[:, :n_candidates // 2] = (X[idx].T / (np.linalg.norm(X[idx], axis=1) + 1e-6))
+    W[:, : n_candidates // 2] = X[idx].T / (np.linalg.norm(X[idx], axis=1) + 1e-6)
     B = rng.standard_normal(n_candidates) * 0.5
     return W, B
 
 
 def column_generation_solve(
-    X, y, Xt, yt,
+    X,
+    y,
+    Xt,
+    yt,
     lam1: float = 20.0,
     init_atoms: int = 40,
     add_per_round: int = 20,
@@ -98,14 +102,14 @@ def column_generation_solve(
     sup_eta = np.inf
 
     for rnd in range(max_rounds):
-        Phi = np.column_stack([np.tanh(X @ w + b) for (w, b) in neurons])   # (n, K)
+        Phi = np.column_stack([np.tanh(X @ w + b) for (w, b) in neurons])  # (n, K)
         a = lasso_coordinate_descent(Phi, y, lam1)
         active = np.abs(a) > 1e-6
         resid = y - Phi @ a
 
         # global certificate: sample fresh Theta, find worst violators
         Wp, Bp = _sample_candidates(X, n_probe, rng)
-        Fp = np.tanh(X @ Wp + Bp)                        # (n, n_probe)
+        Fp = np.tanh(X @ Wp + Bp)  # (n, n_probe)
         eta_probe = (resid @ Fp) / lam1
         abs_eta = np.abs(eta_probe)
         # include current selected atoms in the sup
@@ -115,8 +119,7 @@ def column_generation_solve(
         kact_hist.append(int(active.sum()))
 
         if verbose:
-            print(f"    round {rnd:2d}: dict={len(neurons):3d} active={int(active.sum()):3d} "
-                  f"sup|eta|={sup_eta:6.3f}")
+            print(f"    round {rnd:2d}: dict={len(neurons):3d} active={int(active.sum()):3d} sup|eta|={sup_eta:6.3f}")
 
         if sup_eta <= 1.0 + tol:
             certified = True
@@ -136,10 +139,18 @@ def column_generation_solve(
     te_acc = float(np.mean(np.sign(Phi_te @ a) == yt))
 
     return ColGenResult(
-        lam1=lam1, n_rounds=len(sup_hist), K_active=int(active.sum()),
-        dictionary_size=len(neurons), sup_eta_history=sup_hist,
-        Kactive_history=kact_hist, train_acc=tr_acc, test_acc=te_acc,
-        certified=certified, neurons=neurons, amplitudes=a, active_mask=active,
+        lam1=lam1,
+        n_rounds=len(sup_hist),
+        K_active=int(active.sum()),
+        dictionary_size=len(neurons),
+        sup_eta_history=sup_hist,
+        Kactive_history=kact_hist,
+        train_acc=tr_acc,
+        test_acc=te_acc,
+        certified=certified,
+        neurons=neurons,
+        amplitudes=a,
+        active_mask=active,
         final_sup_eta=sup_eta,
     )
 
@@ -147,10 +158,11 @@ def column_generation_solve(
 def format_colgen(res: ColGenResult) -> str:
     hist = "  ".join(f"{s:.2f}" for s in res.sup_eta_history)
     status = "CERTIFIED" if res.certified else f"not certified (sup|eta|={res.final_sup_eta:.2f})"
-    return "\n".join([
-        f"  Column generation (lam1={res.lam1:.1f}):",
-        f"    rounds={res.n_rounds}  final dictionary={res.dictionary_size}  "
-        f"certified support K={res.K_active}",
-        f"    sup|eta| per round: {hist}",
-        f"    test_acc={res.test_acc:.3f}   ==> {status}",
-    ])
+    return "\n".join(
+        [
+            f"  Column generation (lam1={res.lam1:.1f}):",
+            f"    rounds={res.n_rounds}  final dictionary={res.dictionary_size}  certified support K={res.K_active}",
+            f"    sup|eta| per round: {hist}",
+            f"    test_acc={res.test_acc:.3f}   ==> {status}",
+        ]
+    )

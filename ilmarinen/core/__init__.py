@@ -36,7 +36,9 @@ _LAZY_TRAINING = {"train_and_eval", "train_and_eval_rnn", "gradient_norms_at_ini
 def __getattr__(name):
     if name in _LAZY_TRAINING:
         from .._deprecation import warn_legacy
+
         warn_legacy(name, "ilmarinen.legacy.training")
         from ..legacy import training  # training utils moved to the quarantined legacy island
+
         return getattr(training, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

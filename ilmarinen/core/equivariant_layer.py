@@ -25,6 +25,7 @@ invariants), and it is that emlp_layer path -- not this module -- that the live 
 deploys as the `generated_equivariant` contract. Retained as the documented, validated Family-2
 realization; exported but no longer invoked by fit(). See core/equivariant_supergraph.py.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -42,14 +43,13 @@ def commutant_basis(L, tol=1e-8):
     L = np.asarray(L, dtype=np.float64)
     n = L.shape[0]
     I = np.eye(n)
-    A = np.kron(L.T, I) - np.kron(I, L)          # A vec(W) = vec([W,L])
+    A = np.kron(L.T, I) - np.kron(I, L)  # A vec(W) = vec([W,L])
     U, S, Vt = np.linalg.svd(A)
     thresh = tol * max(1.0, S.max() if S.size else 1.0)
     # nullspace = right-singular vectors whose singular value is ~0. SVD returns S of length
     # min(rows,cols)=n^2; any index with S<=thresh, plus the fully-zero tail, is nullspace.
     null_idx = [i for i in range(len(S)) if S[i] <= thresh]
-    basis = np.stack([Vt[i].reshape(n, n) for i in null_idx], axis=0) if null_idx else \
-        np.zeros((0, n, n))
+    basis = np.stack([Vt[i].reshape(n, n) for i in null_idx], axis=0) if null_idx else np.zeros((0, n, n))
     return basis
 
 
@@ -65,7 +65,7 @@ class EquivariantLayer(nn.Module):
 
     def __init__(self, L, in_channels=1, out_channels=1, seed=0):
         super().__init__()
-        basis = commutant_basis(L)                       # (K, n, n)
+        basis = commutant_basis(L)  # (K, n, n)
         self.n = int(L.shape[0])
         self.K = int(basis.shape[0])
         self.in_ch, self.out_ch = in_channels, out_channels
@@ -89,7 +89,7 @@ class EquivariantLayer(nn.Module):
     def forward(self, x):
         # x: (batch, in_channels, n)  ->  (batch, out_channels, n)
         # y_{n,b,i} = sum_{a,j} W_{b,a,i,j} x_{n,a,j}
-        W = self.weight_blocks()                          # (out, in, n, n)
+        W = self.weight_blocks()  # (out, in, n, n)
         return torch.einsum("baij,naj->nbi", W, x)
 
     def equivariance_error(self, L, theta=0.5, n_samples=64):

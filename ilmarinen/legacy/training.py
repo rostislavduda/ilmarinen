@@ -1,4 +1,5 @@
 """Training and evaluation utilities shared across validation pipelines."""
+
 from __future__ import annotations
 
 import torch
@@ -20,9 +21,19 @@ def gradient_norms_at_init(model, X, y, batch: int = 256):
     return float(w_first.grad.norm()), float(w_last.grad.norm())
 
 
-def train_and_eval(model, Xtr, ytr, Xval, yval, epochs: int = 15, lr: float = 0.05,
-                   bs: int = 128, momentum: float = 0.9, cosine: bool = True,
-                   grad_clip: float = 1e4):
+def train_and_eval(
+    model,
+    Xtr,
+    ytr,
+    Xval,
+    yval,
+    epochs: int = 15,
+    lr: float = 0.05,
+    bs: int = 128,
+    momentum: float = 0.9,
+    cosine: bool = True,
+    grad_clip: float = 1e4,
+):
     """Train with SGD(+momentum), return (val_loss, val_acc, train_acc).
 
     Plain SGD (not Adam) and optional cosine schedule; grad_clip only catches
@@ -35,7 +46,7 @@ def train_and_eval(model, Xtr, ytr, Xval, yval, epochs: int = 15, lr: float = 0.
     for _ in range(epochs):
         perm = torch.randperm(n)
         for i in range(0, n, bs):
-            bi = perm[i:i + bs]
+            bi = perm[i : i + bs]
             opt.zero_grad()
             loss = lossf(model(Xtr[bi]), ytr[bi])
             if not torch.isfinite(loss):
@@ -56,8 +67,9 @@ def to_tensor(X, y):
     return torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.long)
 
 
-def train_and_eval_rnn(model, Xtr, ytr, Xval, yval, epochs: int = 15, lr: float = 0.005,
-                       bs: int = 64, grad_clip: float = 5.0):
+def train_and_eval_rnn(
+    model, Xtr, ytr, Xval, yval, epochs: int = 15, lr: float = 0.005, bs: int = 64, grad_clip: float = 5.0
+):
     """Train a recurrent model with Adam + gradient clipping (RNN-appropriate).
 
     Separate from train_and_eval so the validated MLP/SGD path is untouched.
@@ -72,7 +84,7 @@ def train_and_eval_rnn(model, Xtr, ytr, Xval, yval, epochs: int = 15, lr: float 
     for _ in range(epochs):
         perm = torch.randperm(n)
         for i in range(0, n, bs):
-            bi = perm[i:i + bs]
+            bi = perm[i : i + bs]
             opt.zero_grad()
             loss = lossf(model(Xtr[bi]), ytr[bi])
             if not torch.isfinite(loss):

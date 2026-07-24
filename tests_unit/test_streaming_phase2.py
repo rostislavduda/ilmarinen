@@ -41,7 +41,9 @@ def _graphs(n=24, nn=6, seed=0):
     for _ in range(n):
         f = rng.randn(nn, 4).astype(np.float32)
         e = [(i, (i + 1) % nn) for i in range(nn)] + [(0, nn // 2)]
-        nf.append(f); ed.append(np.array(e, dtype=np.int64).T); ys.append(int(f[:, 0].sum() > 0))
+        nf.append(f)
+        ed.append(np.array(e, dtype=np.int64).T)
+        ys.append(int(f[:, 0].sum() > 0))
     return nf, ed, np.array(ys, dtype=np.int64)
 
 
@@ -56,50 +58,64 @@ def _op(n=40, grid=16, seed=0):
 # ========================================================================= item 2: bounded LRU
 def test_lru_cache_semantics():
     c = _LRUCache(2)
-    c.put("a", 1); c.put("b", 2); c.put("c", 3)          # evicts 'a'
+    c.put("a", 1)
+    c.put("b", 2)
+    c.put("c", 3)  # evicts 'a'
     assert c.get("a") is None and c.get("b") == 2 and c.get("c") == 3
-    c.get("b"); c.put("d", 4)                            # 'c' is now oldest -> evicted
+    c.get("b")
+    c.put("d", 4)  # 'c' is now oldest -> evicted
     assert c.get("c") is None and c.get("b") == 2 and c.get("d") == 4
-    d = _LRUCache(0); d.put("x", 1); assert d.get("x") is None   # capacity 0 disables
+    d = _LRUCache(0)
+    d.put("x", 1)
+    assert d.get("x") is None  # capacity 0 disables
     # byte budget: an item larger than the whole budget is never stored
-    e = _LRUCache(10); e.put("big", "v", cost=100); assert e.get("big") is None
+    e = _LRUCache(10)
+    e.put("big", "v", cost=100)
+    assert e.get("big") is None
 
 
 @pytest.mark.parametrize("cap", [0, 4, 100000])
 def test_memmap_dense_cache_parity(tmp_path, cap):
     rng = np.random.RandomState(0)
     A = rng.randn(50, 3, 4).astype(np.float32)
-    p = tmp_path / "A.npy"; np.save(p, A)
+    p = tmp_path / "A.npy"
+    np.save(p, A)
     src = MemmapDenseSource(str(p), cache_size=cap)
     for _ in range(20):
         ids = rng.randint(0, 50, size=rng.randint(1, 10))
-        assert np.array_equal(src.get(ids).numpy(), A[ids])   # cache-state-independent, unsorted+repeat
+        assert np.array_equal(src.get(ids).numpy(), A[ids])  # cache-state-independent, unsorted+repeat
 
 
 def test_memmap_dense_cache_deploy_bit_identical(tmp_path):
     X, y = _spatial(n=200)
-    p = tmp_path / "X.npy"; np.save(p, X)
+    p = tmp_path / "X.npy"
+    np.save(p, X)
 
     def fit(cs):
         mg = AllGraph(width=8, depth=1, epochs=4, verbose=False, seed=0)
         mg.fit(AllData.dense_stream(MemmapDenseSource(str(p), cache_size=cs), y=y, kind_hint="spatial"), n_out=2)
         return _wsd(mg.net)
-    assert _ident(fit(0), fit(500))                       # cache on vs off -> identical weights
+
+    assert _ident(fit(0), fit(500))  # cache on vs off -> identical weights
 
 
 def test_memmap_operator_cache_independent_and_bit_identical(tmp_path):
     a, u = _op(n=48)
-    pa, pu = tmp_path / "a.npy", tmp_path / "u.npy"; np.save(pa, a); np.save(pu, u)
+    pa, pu = tmp_path / "a.npy", tmp_path / "u.npy"
+    np.save(pa, a)
+    np.save(pu, u)
     src = MemmapOperatorSource(str(pa), str(pu), cache_bytes=1_000_000)
     ids = np.array([5, 1, 5, 9, 0])
-    assert np.array_equal(src.a(ids).numpy(), a[ids])    # a-cache
-    assert np.array_equal(src.u(ids).numpy(), u[ids])    # u-cache, independent of a-cache
+    assert np.array_equal(src.a(ids).numpy(), a[ids])  # a-cache
+    assert np.array_equal(src.u(ids).numpy(), u[ids])  # u-cache, independent of a-cache
 
     def fit(cb):
         mg = AllGraph(width=8, depth=1, epochs=5, verbose=False, seed=0)
-        mg.fit(AllData.functions_stream(MemmapOperatorSource(str(pa), str(pu), cache_bytes=cb)),
-               task="regression", n_out=1)
+        mg.fit(
+            AllData.functions_stream(MemmapOperatorSource(str(pa), str(pu), cache_bytes=cb)), task="regression", n_out=1
+        )
         return _wsd(mg.net)
+
     assert _ident(fit(0), fit(2_000_000))
 
 
@@ -110,12 +126,15 @@ def test_lazy_graph_cache_default_is_memo():
     def loader(i):
         calls["n"] += 1
         return {"node": nf[i], "edge": ed[i]}
-    s = LazyGraphSource(loader, n=8, n_in=4, has_edges=True)     # default cache_size=1
-    s.node(3); s.edge(3)                                 # same i, consecutive -> 1 loader call
+
+    s = LazyGraphSource(loader, n=8, n_in=4, has_edges=True)  # default cache_size=1
+    s.node(3)
+    s.edge(3)  # same i, consecutive -> 1 loader call
     assert calls["n"] == 1
-    s.node(3)                                            # still cached
+    s.node(3)  # still cached
     assert calls["n"] == 1
-    s.node(4); s.node(3)                                 # cache_size=1: 4 evicts 3 -> reload
+    s.node(4)
+    s.node(3)  # cache_size=1: 4 evicts 3 -> reload
     assert calls["n"] == 3
 
 
@@ -126,17 +145,19 @@ def test_lazy_graph_cache_keeps_k_recent():
     def loader(i):
         calls["n"] += 1
         return {"node": nf[i]}
+
     s = LazyGraphSource(loader, n=8, n_in=4, cache_size=4)
     for i in [0, 1, 2, 3]:
         s.node(i)
     assert calls["n"] == 4
-    for i in [0, 1, 2, 3]:                               # all still cached
+    for i in [0, 1, 2, 3]:  # all still cached
         s.node(i)
     assert calls["n"] == 4
 
 
 def test_cache_threadsafe_smoke():
     import threading
+
     c = _LRUCache(64, threadsafe=True)
     errors = []
 
@@ -145,11 +166,14 @@ def test_cache_threadsafe_smoke():
             for i in range(200):
                 c.put((base, i % 80), i)
                 c.get((base, i % 80))
-        except Exception as e:                           # pragma: no cover
+        except Exception as e:  # pragma: no cover
             errors.append(e)
+
     ts = [threading.Thread(target=worker, args=(b,)) for b in range(6)]
-    for t in ts: t.start()
-    for t in ts: t.join()
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
     assert not errors
     assert _LRUCache(4, threadsafe=False)._lock is None
 
@@ -172,11 +196,11 @@ def test_dense_select_size_streaming_deterministic(select_size):
 
     def run():
         mg = AllGraph(width=32, depth=2, epochs=3, verbose=False, seed=0)
-        mg.fit(AllData.dense_stream(InMemoryDenseSource(X), y=y, kind_hint="spatial"),
-               n_out=2, select_size=select_size)
+        mg.fit(AllData.dense_stream(InMemoryDenseSource(X), y=y, kind_hint="spatial"), n_out=2, select_size=select_size)
         return mg.width, mg.depth, _wsd(mg.net)
+
     a, b = run(), run()
-    assert (a[0], a[1]) == (b[0], b[1]) and _ident(a[2], b[2])   # deterministic-given-seed
+    assert (a[0], a[1]) == (b[0], b[1]) and _ident(a[2], b[2])  # deterministic-given-seed
 
 
 def test_graph_gibbs_streaming_deterministic():
@@ -184,9 +208,11 @@ def test_graph_gibbs_streaming_deterministic():
 
     def run():
         mg = AllGraph(width=8, depth=2, epochs=4, verbose=False, seed=0)
-        r = mg.fit(AllData.graph_stream(InMemoryGraphSource(nf, edges=ed), y=y, kind_hint="graph"),
-                   n_out=2, select="gibbs")
+        r = mg.fit(
+            AllData.graph_stream(InMemoryGraphSource(nf, edges=ed), y=y, kind_hint="graph"), n_out=2, select="gibbs"
+        )
         return r, _wsd(mg.net)
+
     (r1, w1), (r2, w2) = run(), run()
     assert r1.get("architecture_gibbs") == r2.get("architecture_gibbs")
     assert _ident(w1, w2)
@@ -204,8 +230,11 @@ def test_reservoir_subsample_rng_isolation():
     """Drawing the selection subsample uses an isolated RandomState(seed+23) and never perturbs the global
     numpy/torch RNG -> the deploy fit's shuffle (and weights) are unaffected."""
     from ilmarinen.core.allgraph_streaming import _reservoir_ids
-    np.random.seed(123); torch.manual_seed(123)
-    np_state = np.random.get_state()[1].copy(); torch_state = torch.get_rng_state().clone()
+
+    np.random.seed(123)
+    torch.manual_seed(123)
+    np_state = np.random.get_state()[1].copy()
+    torch_state = torch.get_rng_state().clone()
     ids = _reservoir_ids(1000, 64, seed=23)
     assert len(ids) == 64 and list(ids) == sorted(ids)
     assert np.array_equal(np.random.get_state()[1], np_state)
@@ -221,6 +250,7 @@ def test_prefetch_dense_bit_identical(depth):
         mg = AllGraph(width=8, depth=1, epochs=4, verbose=False, seed=0, stream_prefetch=pf)
         mg.fit(AllData.dense_stream(InMemoryDenseSource(X), y=y, kind_hint="spatial"), n_out=2)
         return _wsd(mg.net)
+
     assert _ident(fit(0), fit(depth))
 
 
@@ -229,18 +259,29 @@ def test_prefetch_all_families_bit_identical():
     a, u = _op(n=60)
     X, y = _spatial(n=80)
     cases = [
-        lambda pf: (AllGraph(width=8, depth=1, epochs=3, verbose=False, seed=0, stream_prefetch=pf),
-                    AllData.graph_stream(InMemoryGraphSource(nf, edges=ed), y=yg, kind_hint="graph"), dict(n_out=2)),
-        lambda pf: (AllGraph(width=8, depth=1, epochs=3, verbose=False, seed=0, stream_prefetch=pf),
-                    AllData.graph_stream(InMemoryGraphSource(nf), y=yg, kind_hint="set"), dict(n_out=2)),
-        lambda pf: (AllGraph(width=8, depth=1, epochs=4, verbose=False, seed=0, stream_prefetch=pf),
-                    AllData.functions_stream(InMemoryOperatorSource(a, u)), dict(task="regression", n_out=1)),
+        lambda pf: (
+            AllGraph(width=8, depth=1, epochs=3, verbose=False, seed=0, stream_prefetch=pf),
+            AllData.graph_stream(InMemoryGraphSource(nf, edges=ed), y=yg, kind_hint="graph"),
+            dict(n_out=2),
+        ),
+        lambda pf: (
+            AllGraph(width=8, depth=1, epochs=3, verbose=False, seed=0, stream_prefetch=pf),
+            AllData.graph_stream(InMemoryGraphSource(nf), y=yg, kind_hint="set"),
+            dict(n_out=2),
+        ),
+        lambda pf: (
+            AllGraph(width=8, depth=1, epochs=4, verbose=False, seed=0, stream_prefetch=pf),
+            AllData.functions_stream(InMemoryOperatorSource(a, u)),
+            dict(task="regression", n_out=1),
+        ),
     ]
     for case in cases:
+
         def fit(pf, case=case):
             mg, data, kw = case(pf)
             mg.fit(data, **kw)
             return _wsd(mg.net)
+
         assert _ident(fit(0), fit(3))
 
 
@@ -252,6 +293,7 @@ def test_prefetch_resident_inert():
         mg = AllGraph(width=8, depth=1, epochs=4, verbose=False, seed=0, stream_prefetch=pf)
         mg.fit(AllData.dense_tensor(X, y, kind_hint="spatial"), n_out=2)
         return _wsd(mg.net)
+
     assert _ident(fit(0), fit(4))
 
 
@@ -259,18 +301,21 @@ def test_prefetch_lazy_graph_threadsafe():
     """A LazyGraphSource (with a threadsafe cache) driven under prefetch trains bit-identically to no prefetch --
     the background producer is the only in-loop source consumer and the cache lock is the defensive belt."""
     import time
+
     nf, ed, yg = _graphs(n=40)
 
     def make(threadsafe):
         def loader(i):
-            time.sleep(0.0005)                           # simulate I/O latency to actually overlap
+            time.sleep(0.0005)  # simulate I/O latency to actually overlap
             return {"node": nf[i], "edge": ed[i]}
+
         return LazyGraphSource(loader, n=40, n_in=4, has_edges=True, cache_size=8, cache_threadsafe=threadsafe)
 
     def fit(pf, ts):
         mg = AllGraph(width=8, depth=1, epochs=3, verbose=False, seed=0, stream_prefetch=pf)
         mg.fit(AllData.graph_stream(make(ts), y=yg, kind_hint="graph"), n_out=2)
         return _wsd(mg.net)
+
     assert _ident(fit(0, False), fit(4, True))
 
 
@@ -281,6 +326,7 @@ def test_prefetch_worker_exception_propagates():
     class _Boom(InMemoryDenseSource):
         def get(self, ids):
             raise RuntimeError("fetch boom")
+
     mg = AllGraph(width=8, depth=1, epochs=2, verbose=False, seed=0, stream_prefetch=2)
     with pytest.raises(RuntimeError, match="boom"):
         mg.fit(AllData.dense_stream(_Boom(X), y=y, kind_hint="spatial"), n_out=2)
@@ -302,7 +348,9 @@ def test_assemble_batch_refactor_parity():
     nf = [torch.randn(5, 4), torch.randn(7, 4)]
     ed = [torch.tensor([[0, 1], [1, 0]]), torch.tensor([[0, 2], [2, 0]])]
     pos = [torch.randn(5, 3), torch.randn(7, 3)]
-    node_t = lambda i: nf[i]; edge_t = lambda i: ed[i]; pos_t = lambda i: pos[i]
+    node_t = lambda i: nf[i]
+    edge_t = lambda i: ed[i]
+    pos_t = lambda i: pos[i]
     ids = [0, 1]
     x, ei, p, b, ng = mg._assemble_batch(ids, node_t, edge_t, pos_t)
     cpu = mg._collate_cpu(ids, node_t, edge_t, pos_t)
@@ -331,7 +379,7 @@ def test_generalized_subsample_builders_correct():
 # ========================================================================= item 4: iterable regime
 def _iter_spatial(n=200, seed=0):
     rng = np.random.RandomState(seed)
-    X = rng.randn(n, 1, 8, 8).astype(np.float32)         # channeled (rank-4) samples: no _as_grid fix-up
+    X = rng.randn(n, 1, 8, 8).astype(np.float32)  # channeled (rank-4) samples: no _as_grid fix-up
     y = (X.sum((1, 2, 3)) > 0).astype(np.int64)
     return X, y
 
@@ -341,21 +389,28 @@ def test_iterable_deterministic_given_seed_and_seed_sensitive():
 
     def fit(seed):
         mg = AllGraph(width=8, depth=1, epochs=5, verbose=False, seed=seed)
-        mg.fit(AllData.dense_iter(InMemoryIterableDenseSource(X, y, n_out=2), kind_hint="spatial"),
-               task="classification", n_out=2)
+        mg.fit(
+            AllData.dense_iter(InMemoryIterableDenseSource(X, y, n_out=2), kind_hint="spatial"),
+            task="classification",
+            n_out=2,
+        )
         return _wsd(mg.net)
-    assert _ident(fit(0), fit(0))                        # deterministic given seed
-    assert not _ident(fit(0), fit(1))                    # seed-sensitive (shuffle + hash split both reseed)
+
+    assert _ident(fit(0), fit(0))  # deterministic given seed
+    assert not _ident(fit(0), fit(1))  # seed-sensitive (shuffle + hash split both reseed)
 
 
 def test_iterable_not_bit_identical_to_resident_but_valid():
     X, y = _iter_spatial()
     mg_i = AllGraph(width=8, depth=1, epochs=5, verbose=False, seed=0)
-    r_i = mg_i.fit(AllData.dense_iter(InMemoryIterableDenseSource(X, y, n_out=2), kind_hint="spatial"),
-                   task="classification", n_out=2)
+    r_i = mg_i.fit(
+        AllData.dense_iter(InMemoryIterableDenseSource(X, y, n_out=2), kind_hint="spatial"),
+        task="classification",
+        n_out=2,
+    )
     mg_r = AllGraph(width=8, depth=1, epochs=5, verbose=False, seed=0)
     mg_r.fit(AllData.dense_tensor(X, y, kind_hint="spatial"), n_out=2)
-    assert not _ident(_wsd(mg_i.net), _wsd(mg_r.net))    # different shuffle/split by construction
+    assert not _ident(_wsd(mg_i.net), _wsd(mg_r.net))  # different shuffle/split by construction
     assert np.isfinite(r_i["value"])
 
 
@@ -364,21 +419,27 @@ def test_iterable_sequence_and_auto_epoch_val():
     Xs = rng.randn(150, 12, 1).astype(np.float32)
     ys = (Xs[:, :, 0].mean(1) > 0).astype(np.int64)
     mg = AllGraph(width=8, depth=1, epochs=4, verbose=False, seed=0)
-    r = mg.fit(AllData.dense_iter(InMemoryIterableDenseSource(Xs, ys, n_out=2), kind_hint="sequence"),
-               task="classification", n_out=2)
+    r = mg.fit(
+        AllData.dense_iter(InMemoryIterableDenseSource(Xs, ys, n_out=2), kind_hint="sequence"),
+        task="classification",
+        n_out=2,
+    )
     assert r["readout"] == "mean" and np.isfinite(r["value"])
     X, y = _iter_spatial()
     mgv = AllGraph(width=8, depth=1, epochs=20, verbose=False, seed=0, auto_epoch="val")
-    rv = mgv.fit(AllData.dense_iter(InMemoryIterableDenseSource(X, y, n_out=2), kind_hint="spatial"),
-                 task="classification", n_out=2)
+    rv = mgv.fit(
+        AllData.dense_iter(InMemoryIterableDenseSource(X, y, n_out=2), kind_hint="spatial"),
+        task="classification",
+        n_out=2,
+    )
     assert np.isfinite(rv["value"])
 
 
 def test_iterable_hash_split_stable_and_balanced():
     buckets = [_iter_val_key(i, 0) % 1000 < 150 for i in range(10000)]
-    assert 0.12 < sum(buckets) / 10000 < 0.18            # ~15% val
-    assert _iter_val_key(5, 0) != _iter_val_key(5, 1)    # seed reshuffles the split
-    assert _iter_val_key(5, 0) == _iter_val_key(5, 0)    # stable (process-independent blake2b, not salted hash)
+    assert 0.12 < sum(buckets) / 10000 < 0.18  # ~15% val
+    assert _iter_val_key(5, 0) != _iter_val_key(5, 1)  # seed reshuffles the split
+    assert _iter_val_key(5, 0) == _iter_val_key(5, 0)  # stable (process-independent blake2b, not salted hash)
 
 
 def test_iter_metric_matches_metric():
@@ -390,7 +451,7 @@ def test_iter_metric_matches_metric():
         ref = AllGraph(verbose=False)._metric(out, y, task)
         acc = _IterMetric(task)
         for j in range(0, 37, 7):
-            acc.update(out[j:j + 7], y[j:j + 7])
+            acc.update(out[j : j + 7], y[j : j + 7])
         assert acc.result()[0] == ref[0]
         assert acc.result()[1] == pytest.approx(ref[1], abs=1e-4)
 
@@ -405,20 +466,23 @@ def test_iterable_restartable_multiple_epochs():
             self.iters = 0
 
         def __iter__(self):
-            self.iters += 1                              # __iter__ is resolved on the TYPE, so subclass it
+            self.iters += 1  # __iter__ is resolved on the TYPE, so subclass it
             return super().__iter__()
 
     src = _CountingIter(X, y, n_out=2)
     mg = AllGraph(width=8, depth=1, epochs=3, verbose=False, seed=0)
     mg.fit(AllData.dense_iter(src, kind_hint="spatial"), task="classification", n_out=2)
-    assert src.iters >= 3                                # at least one restart per epoch (3 train epochs)
+    assert src.iters >= 3  # at least one restart per epoch (3 train epochs)
 
 
-@pytest.mark.parametrize("bad", [
-    {"select_size": "variable"},
-    {"select": "gibbs"},
-    {"tiebreak": True},
-])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"select_size": "variable"},
+        {"select": "gibbs"},
+        {"tiebreak": True},
+    ],
+)
 def test_iterable_selection_blocked(bad):
     X, y = _iter_spatial(n=40)
     data = AllData.dense_iter(InMemoryIterableDenseSource(X, y, n_out=2), kind_hint="spatial")
@@ -437,11 +501,11 @@ def test_iterable_classification_needs_n_out():
 def test_iterable_constructor_guards():
     X, y = _iter_spatial(n=20)
     with pytest.raises(TypeError):
-        AllData.dense_iter(X, kind_hint="spatial")                     # not an IterableDenseSource
+        AllData.dense_iter(X, kind_hint="spatial")  # not an IterableDenseSource
     with pytest.raises(ValueError):
-        AllData.dense_iter(InMemoryIterableDenseSource(X, y))          # missing kind_hint
+        AllData.dense_iter(InMemoryIterableDenseSource(X, y))  # missing kind_hint
     with pytest.raises(ValueError):
-        AllData.dense_iter(InMemoryIterableDenseSource(X, y), kind_hint="graph")   # non-dense
+        AllData.dense_iter(InMemoryIterableDenseSource(X, y), kind_hint="graph")  # non-dense
 
 
 # ========================================================================= review fixes (phase-2)
@@ -449,10 +513,11 @@ def test_lru_cached_row_is_standalone_copy(tmp_path):
     """Review fix: a cached row must be an independent COPY, not a view into the whole minibatch read buffer
     (a view would pin the whole buffer and blow the cache's memory budget)."""
     A = np.random.RandomState(0).randn(40, 30, 30).astype(np.float32)
-    p = tmp_path / "A.npy"; np.save(p, A)
+    p = tmp_path / "A.npy"
+    np.save(p, A)
     src = MemmapDenseSource(str(p), cache_size=8)
-    src.get(np.array([0, 1, 2, 3]))                      # populate the cache with a 4-row read
-    row = src._cache.get(3)                              # still-cached, most-recent
+    src.get(np.array([0, 1, 2, 3]))  # populate the cache with a 4-row read
+    row = src._cache.get(3)  # still-cached, most-recent
     assert row is not None and row.nbytes == 30 * 30 * 4  # one sample, not the whole 4-row buffer
     assert not np.shares_memory(row, src.get(np.array([0, 1, 2, 3, 4, 5])).numpy())
 
@@ -462,10 +527,11 @@ def test_prefetch_consumer_exception_no_deadlock():
     deadlock -- the generator signals stop, drains, and joins."""
     import threading
     import time
+
     mg = AllGraph(verbose=False, seed=0, stream_prefetch=2)
 
     def fetch(ids):
-        time.sleep(0.005)                                # slow enough that the producer fills the queue
+        time.sleep(0.005)  # slow enough that the producer fills the queue
         return ("payload", ids)
 
     def run():
@@ -482,6 +548,7 @@ def test_prefetch_consumer_exception_no_deadlock():
 def test_iter_metric_empty_is_nan():
     """Review fix: an empty / exhausted scoring stream reports nan, not a fabricated perfect R2=1.0 / acc=0.0."""
     import math
+
     assert math.isnan(_IterMetric("regression").result()[1])
     assert math.isnan(_IterMetric("classification").result()[1])
 
@@ -513,8 +580,10 @@ def test_gibbs_nondefault_train_batch_deterministic():
 
     def run():
         mg = AllGraph(width=8, depth=1, epochs=2, verbose=False, seed=0, train_batch=7, stream_subsample_cap=16)
-        r = mg.fit(AllData.graph_stream(InMemoryGraphSource(nf, edges=ed), y=y, kind_hint="graph"),
-                   n_out=2, select="gibbs")
+        r = mg.fit(
+            AllData.graph_stream(InMemoryGraphSource(nf, edges=ed), y=y, kind_hint="graph"), n_out=2, select="gibbs"
+        )
         return r["value"], _wsd(mg.net)
+
     (v1, w1), (_, w2) = run(), run()
     assert np.isfinite(v1) and _ident(w1, w2)

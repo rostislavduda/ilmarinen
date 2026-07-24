@@ -38,6 +38,7 @@ picture (Gordon et al. 2026) and thermodynamic susceptibility of the posterior (
 the single thermodynamic potential of D2 (this module measures second derivatives of the very same
 Level-A and Level-C free energies that D2 documents).
 """
+
 from __future__ import annotations
 
 import math
@@ -87,9 +88,18 @@ def gibbs_susceptibility(energies: dict[str, float], beta: float) -> dict:
     """
     prims = list(energies)
     if len(prims) == 0:
-        return {"chi": 0.0, "specific_heat": 0.0, "entropy": 0.0, "entropy_frac": 0.0,
-                "alpha": {}, "winner": None, "runner_up": None, "energy_gap": float("inf"),
-                "beta": float(beta), "note": "no primitives"}
+        return {
+            "chi": 0.0,
+            "specific_heat": 0.0,
+            "entropy": 0.0,
+            "entropy_frac": 0.0,
+            "alpha": {},
+            "winner": None,
+            "runner_up": None,
+            "energy_gap": float("inf"),
+            "beta": float(beta),
+            "note": "no primitives",
+        }
     psi = np.array([float(energies[p]) for p in prims], float)
     b = float(beta)
     # numerically-stable softmax of -beta*psi
@@ -117,8 +127,8 @@ def gibbs_susceptibility(energies: dict[str, float], beta: float) -> dict:
         "energy_gap": gap,
         "beta": b,
         "note": "chi = Var_alpha(Psi) = d^2(-log Z)/d beta^2 is the specific heat (a real "
-                "susceptibility, but NON-MONOTONE in beta -- peaks at the melting point). Use "
-                "entropy_frac (0 decisive, 1 ambiguous) and energy_gap for the decisiveness read.",
+        "susceptibility, but NON-MONOTONE in beta -- peaks at the melting point). Use "
+        "entropy_frac (0 decisive, 1 ambiguous) and energy_gap for the decisiveness read.",
     }
 
 
@@ -133,8 +143,7 @@ def _normalized_omega(omegas: dict[str, float]) -> dict[str, float]:
     return {c: float(v) for c, v in zip(cs, omn)}
 
 
-def contract_transition(scores: dict[str, float], omegas: dict[str, float],
-                        mu_c: float) -> dict:
+def contract_transition(scores: dict[str, float], omegas: dict[str, float], mu_c: float) -> dict:
     """First-order transition spectroscopy of the priced contract selection.
 
     Replicates select_contract_mdl's objective  J_c(mu) = (1 - score_c) + mu * Omega_tilde_c  (with
@@ -228,8 +237,7 @@ def contract_transition(scores: dict[str, float], omegas: dict[str, float],
     # is the operating price mu_c itself (a margin of 0.005 is negligible if mu_c=0.2 but decisive if
     # mu_c=0.05). Use a relative band of 25% of mu_c, with a tiny absolute floor for mu_c -> 0.
     band = max(0.25 * abs(mu_c), 1e-4)
-    near_transition = (margin_up is not None and margin_up < band) or \
-                      (margin_down is not None and margin_down < band)
+    near_transition = (margin_up is not None and margin_up < band) or (margin_down is not None and margin_down < band)
     robust = (not near_transition) and (J_gap > 1e-3)
 
     return {
@@ -244,20 +252,23 @@ def contract_transition(scores: dict[str, float], omegas: dict[str, float],
         "robust": bool(robust),
         "J": {c: float(Jc[c]) for c in cs},
         "note": "J_c(mu) is piecewise-LINEAR in mu, so d^2J*/dmu^2 = 0 in the interior; the "
-                "curvature lives at the winner-switch kinks. Reported: nearest critical price mu*, "
-                "the price margins to flip, and the slope jump (finite susceptibility of the "
-                "first-order line). Selection in mu is a sequence of first-order transitions.",
+        "curvature lives at the winner-switch kinks. Reported: nearest critical price mu*, "
+        "the price margins to flip, and the slope jump (finite susceptibility of the "
+        "first-order line). Selection in mu is a sequence of first-order transitions.",
     }
 
 
 # --------------------------------------------------------------------------------------------------
 # Bundle -- both channels + a plain-language robustness read
 # --------------------------------------------------------------------------------------------------
-def response_spectrum(*, energies: dict[str, float] | None = None,
-                      beta: float | None = None,
-                      scores: dict[str, float] | None = None,
-                      omegas: dict[str, float] | None = None,
-                      mu_c: float | None = None) -> dict:
+def response_spectrum(
+    *,
+    energies: dict[str, float] | None = None,
+    beta: float | None = None,
+    scores: dict[str, float] | None = None,
+    omegas: dict[str, float] | None = None,
+    mu_c: float | None = None,
+) -> dict:
     """Assemble whichever channels are available into one response read-out.
 
     Provide (energies, beta) for the Level-A readout channel and/or (scores, omegas, mu_c) for the
@@ -280,8 +291,10 @@ def response_spectrum(*, energies: dict[str, float] | None = None,
     if r is not None and r["runner_up"] is not None:
         amb = r["entropy_frac"]  # 0 decisive, 1 ambiguous (monotone)
         verdict = "decisive" if amb < 0.4 else ("moderate" if amb < 0.8 else "soft")
-        bits.append(f"primitive readout {verdict} (H(alpha)/log k={amb:.2f}, specific heat "
-                    f"chi={r['chi']:.4f}, energy gap {r['energy_gap']:.3f} nats over '{r['runner_up']}')")
+        bits.append(
+            f"primitive readout {verdict} (H(alpha)/log k={amb:.2f}, specific heat "
+            f"chi={r['chi']:.4f}, energy gap {r['energy_gap']:.3f} nats over '{r['runner_up']}')"
+        )
     c = out["contract"]
     if c is not None and c["runner_up"] is not None:
         mtxt = []
@@ -289,9 +302,16 @@ def response_spectrum(*, energies: dict[str, float] | None = None,
             mtxt.append(f"+{c['margin_up']:.3f} to prefer a cheaper contract")
         if c["margin_down"] is not None:
             mtxt.append(f"-{c['margin_down']:.3f} to prefer a richer one")
-        mstr = ("; price margins " + ", ".join(mtxt)) if mtxt else "; winner stable for all mu>=0" \
-            if (c["margin_up"] is None and c["margin_down"] is None) else ""
-        bits.append(f"contract choice '{c['winner']}' {'robust' if c['robust'] else 'near a transition'} "
-                    f"(J-gap {c['J_gap']:.4f} over '{c['runner_up']}'{mstr})")
+        mstr = (
+            ("; price margins " + ", ".join(mtxt))
+            if mtxt
+            else "; winner stable for all mu>=0"
+            if (c["margin_up"] is None and c["margin_down"] is None)
+            else ""
+        )
+        bits.append(
+            f"contract choice '{c['winner']}' {'robust' if c['robust'] else 'near a transition'} "
+            f"(J-gap {c['J_gap']:.4f} over '{c['runner_up']}'{mstr})"
+        )
     out["summary"] = "; ".join(bits) if bits else "no perturbable selection to report"
     return out

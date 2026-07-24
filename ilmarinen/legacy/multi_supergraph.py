@@ -23,6 +23,7 @@ Primitive interface (each *Core implements):
   step(x, state)            -> (output, state) (output is the h that feeds forward)
   readout_h(state)          -> h               (the vector the head reads; = output)
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -77,8 +78,8 @@ class _GatedCore(nn.Module):
         # Fused projections: one input matmul (3*width out) and one hidden matmul.
         # Gate order in the fused output: [z, r, n]. Per-gate init preserved by
         # initializing each width-block exactly as the unfused version did.
-        self.Wx = nn.Linear(n_in, 3 * width, bias=False)   # input -> [z, r, n]
-        self.Wh = nn.Linear(width, 3 * width, bias=True)   # hidden -> [z, r, n]
+        self.Wx = nn.Linear(n_in, 3 * width, bias=False)  # input -> [z, r, n]
+        self.Wh = nn.Linear(width, 3 * width, bias=True)  # hidden -> [z, r, n]
         _init_linear(self.Wx, 1.0, 0.0)
         _init_linear(self.Wh, sigma_w2, sigma_b2)
 
@@ -86,15 +87,15 @@ class _GatedCore(nn.Module):
         return torch.zeros(b, self.width, device=device)
 
     def project_inputs(self, x_seq):
-        return self.Wx(x_seq)   # (b, T, 3*width)
+        return self.Wx(x_seq)  # (b, T, 3*width)
 
     def _combine(self, xp, h):
         w = self.width
         gx = xp
         gh = self.Wh(h)
         z = torch.sigmoid(gx[..., :w] + gh[..., :w])
-        r = torch.sigmoid(gx[..., w:2 * w] + gh[..., w:2 * w])
-        n = torch.tanh(gx[..., 2 * w:] + r * gh[..., 2 * w:])
+        r = torch.sigmoid(gx[..., w : 2 * w] + gh[..., w : 2 * w])
+        n = torch.tanh(gx[..., 2 * w :] + r * gh[..., 2 * w :])
         h = (1 - z) * h + z * n
         return h
 
@@ -131,8 +132,8 @@ class _LSTMCore(nn.Module):
         super().__init__()
         self.width = width
         # Fused: one input matmul and one hidden matmul, gate order [i, f, o, g].
-        self.Wx = nn.Linear(n_in, 4 * width, bias=False)   # input -> [i, f, o, g]
-        self.Wh = nn.Linear(width, 4 * width, bias=True)   # hidden -> [i, f, o, g]
+        self.Wx = nn.Linear(n_in, 4 * width, bias=False)  # input -> [i, f, o, g]
+        self.Wh = nn.Linear(width, 4 * width, bias=True)  # hidden -> [i, f, o, g]
         _init_linear(self.Wx, 1.0, 0.0)
         _init_linear(self.Wh, sigma_w2, sigma_b2)
         with torch.no_grad():
@@ -143,29 +144,29 @@ class _LSTMCore(nn.Module):
                 # default. Couple the input-gate bias b_i = -b_f (the derivation's
                 # input/forget coupling). This is the ingredient vanilla LSTM needs to
                 # converge on long-range tasks (forget-bias +1.0 alone is insufficient).
-                u = torch.rand(width) * (chrono_tmax - 1.0) + 1.0   # U(1, T_max)
+                u = torch.rand(width) * (chrono_tmax - 1.0) + 1.0  # U(1, T_max)
                 b_f = torch.log(u)
-                self.Wh.bias[width:2 * width].copy_(b_f)            # forget block
-                self.Wh.bias[0:width].copy_(-b_f)                   # input block
+                self.Wh.bias[width : 2 * width].copy_(b_f)  # forget block
+                self.Wh.bias[0:width].copy_(-b_f)  # input block
             else:
                 # Standard init: forget-gate bias +1.0 (f is the SECOND width-block).
-                self.Wh.bias[width:2 * width].fill_(1.0)
+                self.Wh.bias[width : 2 * width].fill_(1.0)
 
     def init_state(self, b, device):
         z = torch.zeros(b, self.width, device=device)
         return (z, z.clone())
 
     def project_inputs(self, x_seq):
-        return self.Wx(x_seq)   # (b, T, 4*width)
+        return self.Wx(x_seq)  # (b, T, 4*width)
 
     def _combine(self, xp, state):
         h, c = state
         w = self.width
         g_all = xp + self.Wh(h)
         i = torch.sigmoid(g_all[..., :w])
-        f = torch.sigmoid(g_all[..., w:2 * w])
-        o = torch.sigmoid(g_all[..., 2 * w:3 * w])
-        g = torch.tanh(g_all[..., 3 * w:])
+        f = torch.sigmoid(g_all[..., w : 2 * w])
+        o = torch.sigmoid(g_all[..., 2 * w : 3 * w])
+        g = torch.tanh(g_all[..., 3 * w :])
         c = f * c + i * g
         h = o * torch.tanh(c)
         return h, (h, c)
@@ -198,14 +199,12 @@ class MultiCell(nn.Module):
         cores = []
         for p in primitives:
             if p == "lstm":
-                cores.append(_PRIMITIVE_CORES[p](n_in, width, sigma_w2, sigma_b2,
-                                                 chrono_tmax=chrono_tmax))
+                cores.append(_PRIMITIVE_CORES[p](n_in, width, sigma_w2, sigma_b2, chrono_tmax=chrono_tmax))
             else:
                 cores.append(_PRIMITIVE_CORES[p](n_in, width, sigma_w2, sigma_b2))
         self.cores = nn.ModuleList(cores)
         self.alpha = nn.Parameter(torch.zeros(len(primitives)))  # uniform -> unbiased
-        self.register_buffer("_alpha_peak", torch.full((len(primitives),),
-                                                        1.0 / len(primitives)))
+        self.register_buffer("_alpha_peak", torch.full((len(primitives),), 1.0 / len(primitives)))
 
     def init_states(self, b, device):
         return [core.init_state(b, device) for core in self.cores]
@@ -216,7 +215,8 @@ class MultiCell(nn.Module):
         new_states, outputs = [], []
         for core, x, st in zip(self.cores, inputs, states):
             out, ns = core.step(x, st)
-            new_states.append(ns); outputs.append(out)
+            new_states.append(ns)
+            outputs.append(out)
         return new_states, outputs
 
     def project_seq(self, x_seq):
@@ -229,7 +229,8 @@ class MultiCell(nn.Module):
         new_states, outputs = [], []
         for core, xp, st in zip(self.cores, xps_t, states):
             out, ns = core.step_pre(xp, st)
-            new_states.append(ns); outputs.append(out)
+            new_states.append(ns)
+            outputs.append(out)
         return new_states, outputs
 
     def update_peak(self):
@@ -255,9 +256,19 @@ class MultiSuperGraphRNN(nn.Module):
     head is the readout.
     """
 
-    def __init__(self, depth, width, sigma_w2, sigma_b2=0.05, n_in=1, n_out=10,
-                 seed=0, deep_supervision=False, primitives=("plain", "gated", "lstm"),
-                 chrono_tmax=None):
+    def __init__(
+        self,
+        depth,
+        width,
+        sigma_w2,
+        sigma_b2=0.05,
+        n_in=1,
+        n_out=10,
+        seed=0,
+        deep_supervision=False,
+        primitives=("plain", "gated", "lstm"),
+        chrono_tmax=None,
+    ):
         super().__init__()
         if depth < 1:
             raise ValueError("depth must be >= 1")
@@ -271,15 +282,15 @@ class MultiSuperGraphRNN(nn.Module):
         cells = []
         din = n_in
         for _ in range(depth):
-            cells.append(MultiCell(din, width, sigma_w2, sigma_b2, primitives,
-                                   chrono_tmax=chrono_tmax))
+            cells.append(MultiCell(din, width, sigma_w2, sigma_b2, primitives, chrono_tmax=chrono_tmax))
             din = width
         self.cells = nn.ModuleList(cells)
         self.head = nn.Linear(width, n_out)
         _init_linear(self.head, 1.0, 0.0)
         if deep_supervision:
             early = [nn.Linear(width, n_out) for _ in range(depth - 1)]
-            for h in early: _init_linear(h, 1.0, 0.0)
+            for h in early:
+                _init_linear(h, 1.0, 0.0)
             self._early_aux = nn.ModuleList(early)
             self.aux_heads = list(self._early_aux) + [self.head]
         else:

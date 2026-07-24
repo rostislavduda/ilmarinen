@@ -20,6 +20,7 @@ a non-example ABSTAINS rather than being force-fit:
 Validated in tests/extended_groups.md: exact recovery on constructed examples for each class, correct
 abstention on non-examples.
 """
+
 from __future__ import annotations
 
 from itertools import permutations
@@ -54,16 +55,21 @@ def detect_unitary(vectors, y, min_fit=0.6, comm_tol=0.1):
     sig = metric_signature(gn)
     J = complex_structure(n)
     comm = float(np.abs(g @ J - J @ g).max() / (np.abs(g).max() + 1e-12))
-    detail = {"regression_r2": round(r2, 4), "metric_name": sig["name"],
-              "J_commutator": round(comm, 4), "n_complex": n}
+    detail = {"regression_r2": round(r2, 4), "metric_name": sig["name"], "J_commutator": round(comm, 4), "n_complex": n}
     if r2 < min_fit:
         return None, {**detail, "reason": "target is not a metric norm"}
     if sig["signature"][1] != 0:
         return None, {**detail, "reason": "metric is not definite (not a unitary/Euclidean form)"}
     if comm > comm_tol:
         return None, {**detail, "reason": "metric does not commute with J -> O(%d), not U(%d)" % (D, n)}
-    spec = {"gens": None, "vec_dim": D, "metric": np.eye(D), "complex_structure": J,
-            "name": "U(%d)" % n, "scale_norm": False}
+    spec = {
+        "gens": None,
+        "vec_dim": D,
+        "metric": np.eye(D),
+        "complex_structure": J,
+        "name": "U(%d)" % n,
+        "scale_norm": False,
+    }
     detail["name"] = "U(%d)" % n
     return spec, detail
 
@@ -83,7 +89,7 @@ def detect_symplectic(u_vectors, v_vectors, y, min_fit=0.6, skew_ratio=3.0):
         for b in range(D):
             cols.append(U[:, a] * V[:, b])
             idx.append((a, b))
-    cols.append(np.ones(len(y)))                    # intercept: affine-shift invariance of the target
+    cols.append(np.ones(len(y)))  # intercept: affine-shift invariance of the target
     Phi = np.stack(cols, 1)
     w, *_ = np.linalg.lstsq(Phi, y, rcond=None)
     W = np.zeros((D, D))
@@ -96,8 +102,12 @@ def detect_symplectic(u_vectors, v_vectors, y, min_fit=0.6, skew_ratio=3.0):
     sym_mag = float(np.abs(Wsym).max())
     skew_mag = float(np.abs(Wskew).max())
     rank = int(np.linalg.matrix_rank(Wskew, tol=1e-6 * max(skew_mag, 1e-12)))
-    detail = {"regression_r2": round(r2, 4), "skew_mag": round(skew_mag, 4),
-              "sym_mag": round(sym_mag, 4), "skew_rank": rank}
+    detail = {
+        "regression_r2": round(r2, 4),
+        "skew_mag": round(skew_mag, 4),
+        "sym_mag": round(sym_mag, 4),
+        "skew_rank": rank,
+    }
     if r2 < min_fit:
         return None, {**detail, "reason": "pairwise target not a bilinear form"}
     if skew_mag < skew_ratio * sym_mag:
@@ -152,6 +162,7 @@ def detect_conformal(points, y_pairs, pair_index, min_fit=0.6):
     Callers with pairwise targets (e.g. a molecular distance-matrix task) invoke it directly.
     """
     from .emlp_layer import null_cone_lift
+
     X = np.asarray(points, float)
     d = X.shape[1]
     D = d + 2
@@ -163,7 +174,7 @@ def detect_conformal(points, y_pairs, pair_index, min_fit=0.6):
             coef = 0.5 if k == l else 1.0
             cols.append(coef * np.array([L[i][k] * L[j][l] + L[i][l] * L[j][k] for (i, j) in pair_index]))
             idx.append((k, l))
-    cols.append(np.ones(len(y)))                    # intercept: affine-shift invariance of the target
+    cols.append(np.ones(len(y)))  # intercept: affine-shift invariance of the target
     Phi = np.stack(cols, 1)
     w, *_ = np.linalg.lstsq(Phi, y, rcond=None)
     g = np.zeros((D, D))
@@ -179,8 +190,14 @@ def detect_conformal(points, y_pairs, pair_index, min_fit=0.6):
     is_conformal = (r2 >= min_fit) and (min(p, q) == 1) and (max(p, q) == d + 1)
     if not is_conformal:
         return None, {**detail, "reason": "lifted target lacks the (d+1,1) light-cone signature"}
-    spec = {"gens": None, "vec_dim": d, "lift": "null_cone", "metric_signature": (d + 1, 1),
-            "name": "Conf(%d)=O(%d,1)" % (d, d + 1), "scale_norm": False}
+    spec = {
+        "gens": None,
+        "vec_dim": d,
+        "lift": "null_cone",
+        "metric_signature": (d + 1, 1),
+        "name": "Conf(%d)=O(%d,1)" % (d, d + 1),
+        "scale_norm": False,
+    }
     detail["name"] = spec["name"]
     return spec, detail
 
@@ -193,12 +210,13 @@ def _phase_drift(S, g, J, n_angle=4):
     commutator |gJ - Jg| is vacuous for g = I (identity commutes with every J), so we test actual phase
     invariance of the recovered form instead."""
     from scipy.linalg import expm
-    pred = np.einsum('ni,ij,nj->n', S, g, S)
+
+    pred = np.einsum("ni,ij,nj->n", S, g, S)
     scale = np.abs(pred).std() + 1e-9
     drifts = []
     for th in np.linspace(0.3, 2.5, n_angle):
         Sr = S @ expm(th * J).T
-        predr = np.einsum('ni,ij,nj->n', Sr, g, Sr)
+        predr = np.einsum("ni,ij,nj->n", Sr, g, Sr)
         drifts.append(float(np.abs(pred - predr).max() / scale))
     return float(np.mean(drifts))
 
@@ -223,6 +241,7 @@ def discover_group(data, min_fit=0.6, phase_tol=0.05):
     returns None (abstains rather than fabricating a symmetry).
     """
     from .metric_discovery import discover_metric_by_regression
+
     report = {}
     if getattr(data, "positions", None) is None:
         return None, {"reason": "no coordinate vectors"}
@@ -231,7 +250,7 @@ def discover_group(data, min_fit=0.6, phase_tol=0.05):
     if not clouds or y is None or np.std(y) < 1e-9:
         return None, {"reason": "no usable target"}
     m = min(len(clouds), len(y))
-    S = np.array([clouds[i].sum(0) for i in range(m)])          # pooled per-datum vectors
+    S = np.array([clouds[i].sum(0) for i in range(m)])  # pooled per-datum vectors
     yv = y[:m]
     d = S.shape[1]
     candidates = []
@@ -254,8 +273,14 @@ def discover_group(data, min_fit=0.6, phase_tol=0.05):
                 drift = _phase_drift(S, g_rec, J)
                 report["unitary"] = {"phase_drift": round(drift, 4)}
                 if drift <= phase_tol:
-                    uspec = {"gens": None, "vec_dim": d, "metric": np.eye(d),
-                             "complex_structure": J, "name": "U(%d)" % n, "scale_norm": False}
+                    uspec = {
+                        "gens": None,
+                        "vec_dim": d,
+                        "metric": np.eye(d),
+                        "complex_structure": J,
+                        "name": "U(%d)" % n,
+                        "scale_norm": False,
+                    }
                     report["unitary"]["name"] = "U(%d)" % n
                     candidates.append(("U(%d)" % n, fit, uspec))
 
@@ -264,7 +289,9 @@ def discover_group(data, min_fit=0.6, phase_tol=0.05):
         U = np.array([clouds[i][0] for i in range(m)])
         V = np.array([clouds[i][1] for i in range(m)])
         spspec, spdet = detect_symplectic(U, V, yv, min_fit=min_fit)
-        report["symplectic"] = {k: spdet.get(k) for k in ("regression_r2", "skew_mag", "sym_mag", "name", "reason") if k in spdet}
+        report["symplectic"] = {
+            k: spdet.get(k) for k in ("regression_r2", "skew_mag", "sym_mag", "name", "reason") if k in spdet
+        }
         if spspec is not None:
             candidates.append((spspec["name"], spdet.get("regression_r2", 0.0), spspec))
 
@@ -273,7 +300,9 @@ def discover_group(data, min_fit=0.6, phase_tol=0.05):
     yf = [yv[i] for i in range(m) if len(clouds[i]) >= d]
     if len(frames) >= 20:
         slspec, sldet = detect_special_linear(np.array(frames), np.array(yf), min_fit=min_fit)
-        report["special_linear"] = {k: sldet.get(k) for k in ("regression_r2", "matches_levicivita", "name", "reason") if k in sldet}
+        report["special_linear"] = {
+            k: sldet.get(k) for k in ("regression_r2", "matches_levicivita", "name", "reason") if k in sldet
+        }
         if slspec is not None:
             candidates.append((slspec["name"], sldet.get("regression_r2", 0.0), slspec))
 
@@ -282,6 +311,7 @@ def discover_group(data, min_fit=0.6, phase_tol=0.05):
 
     def richness(name):
         return 1 if name.startswith(("U(", "SU(", "Sp(", "SL(", "Conf")) else 0
+
     best = max(candidates, key=lambda c: (round(c[1], 3), richness(c[0])))
     report["selected"] = best[0]
     return best[2], report

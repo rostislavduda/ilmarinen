@@ -16,6 +16,7 @@ Primitives on the alpha-simplex are operator layers that differ in their spectra
 whether a pointwise/local skip is included), so the metaoptimizer selects the operator's spectral capacity
 the same way it selects primitives elsewhere. All are discretization-invariant by construction.
 """
+
 from __future__ import annotations
 
 import torch
@@ -66,15 +67,16 @@ class _SpectralConv1d(nn.Module):
     def forward(self, x):  # x: (b, cin, N)
         def _spec(x):
             b, cin, N = x.shape
-            xf = torch.fft.rfft(x, dim=-1)                          # (b, cin, N//2+1) complex
+            xf = torch.fft.rfft(x, dim=-1)  # (b, cin, N//2+1) complex
             m = min(self.modes, xf.shape[-1])
-            wc = torch.view_as_complex(self.weight)[:, :, :m]       # (cin, cout, m)
+            wc = torch.view_as_complex(self.weight)[:, :, :m]  # (cin, cout, m)
             out = torch.zeros(b, self.cout, xf.shape[-1], dtype=torch.cfloat, device=x.device)
             out[..., :m] = torch.einsum("bim,iom->bom", xf[..., :m], wc)
             # MPS rfft/irfft can silently emit non-finite values on some PyTorch/macOS versions (CPU stays
             # finite); keep the returned field finite so training does not diverge on a NaN. Mirrors the
             # sequence spectral primitive's guard (models/schema.py). No-op on CPU/CUDA (already finite).
             return torch.nan_to_num(torch.fft.irfft(out, n=N, dim=-1))  # (b, cout, N) -- a FUNCTION at res N
+
         return _fft_safe(_spec, x)
 
 
@@ -94,14 +96,16 @@ class _SpectralConv2d(nn.Module):
     def forward(self, x):  # (b, cin, H, W)
         def _spec(x):
             b, cin, H, W = x.shape
-            xf = torch.fft.rfft2(x, dim=(-2, -1))                  # (b, cin, H, W//2+1)
+            xf = torch.fft.rfft2(x, dim=(-2, -1))  # (b, cin, H, W//2+1)
             out = torch.zeros(b, self.cout, H, W // 2 + 1, dtype=torch.cfloat, device=x.device)
-            m1 = min(self.m1, H // 2); m2 = min(self.m2, W // 2 + 1)
+            m1 = min(self.m1, H // 2)
+            m2 = min(self.m2, W // 2 + 1)
             w1 = torch.view_as_complex(self.w1)[:, :, :m1, :m2]
             w2 = torch.view_as_complex(self.w2)[:, :, :m1, :m2]
             out[:, :, :m1, :m2] = torch.einsum("bihw,iohw->bohw", xf[:, :, :m1, :m2], w1)
             out[:, :, -m1:, :m2] = torch.einsum("bihw,iohw->bohw", xf[:, :, -m1:, :m2], w2)
             return torch.nan_to_num(torch.fft.irfft2(out, s=(H, W), dim=(-2, -1)))  # keep field finite (MPS FFT guard)
+
         return _fft_safe(_spec, x)
 
 
@@ -115,26 +119,30 @@ class _SpectralConv3d(nn.Module):
         self.cin, self.cout, self.m1, self.m2, self.m3 = cin, cout, m1, m2, m3
         scale = 1.0 / (cin * cout)
         # four blocks for the (+/- kx, +/- ky) sign combinations; kz is the rfft half-axis (low only)
-        self.ws = nn.ParameterList([nn.Parameter(scale * torch.randn(cin, cout, m1, m2, m3, 2))
-                                    for _ in range(4)])
+        self.ws = nn.ParameterList([nn.Parameter(scale * torch.randn(cin, cout, m1, m2, m3, 2)) for _ in range(4)])
 
     def forward(self, x):  # (b, cin, D, H, W)
         def _spec(x):
             b, cin, D, H, W = x.shape
-            xf = torch.fft.rfftn(x, dim=(-3, -2, -1))             # (b, cin, D, H, W//2+1)
+            xf = torch.fft.rfftn(x, dim=(-3, -2, -1))  # (b, cin, D, H, W//2+1)
             out = torch.zeros(b, self.cout, D, H, W // 2 + 1, dtype=torch.cfloat, device=x.device)
-            m1 = min(self.m1, D // 2); m2 = min(self.m2, H // 2); m3 = min(self.m3, W // 2 + 1)
-            slices = [(slice(None, m1), slice(None, m2)),
-                      (slice(None, m1), slice(-m2, None)),
-                      (slice(-m1, None), slice(None, m2)),
-                      (slice(-m1, None), slice(-m2, None))]
+            m1 = min(self.m1, D // 2)
+            m2 = min(self.m2, H // 2)
+            m3 = min(self.m3, W // 2 + 1)
+            slices = [
+                (slice(None, m1), slice(None, m2)),
+                (slice(None, m1), slice(-m2, None)),
+                (slice(-m1, None), slice(None, m2)),
+                (slice(-m1, None), slice(-m2, None)),
+            ]
             for k, (sx, sy) in enumerate(slices):
                 w = torch.view_as_complex(self.ws[k])[:, :, :m1, :m2, :m3]
                 out[:, :, sx, sy, :m3] = torch.einsum("bidhw,iodhw->bodhw", xf[:, :, sx, sy, :m3], w)
-            return torch.nan_to_num(torch.fft.irfftn(out, s=(D, H, W), dim=(-3, -2, -1)))  # keep field finite (MPS FFT guard)
+            return torch.nan_to_num(
+                torch.fft.irfftn(out, s=(D, H, W), dim=(-3, -2, -1))
+            )  # keep field finite (MPS FFT guard)
+
         return _fft_safe(_spec, x)
-
-
 
 
 def _make_spectral(width, modes, sdims):
@@ -156,6 +164,7 @@ def _make_pointwise(width, sdims):
 class _FourierOp(nn.Module):
     """Standard FNO layer (any spatial rank): spectral conv (global, low-mode) + pointwise 1x1 conv (local
     skip), summed then activated. Both parts are resolution-independent."""
+
     name = "fourier"
 
     def __init__(self, width, modes=12, sdims=1):
@@ -170,6 +179,7 @@ class _FourierOp(nn.Module):
 class _FourierWideOp(nn.Module):
     """FNO layer with MORE spectral modes (higher spectral capacity) for less-smooth kernels. A distinct
     point on the alpha-simplex from `fourier`."""
+
     name = "fourier_wide"
 
     def __init__(self, width, modes=24, sdims=1):
@@ -185,6 +195,7 @@ class _LocalOp(nn.Module):
     """Pointwise-only operator layer (no spectral mixing): a resolution-independent local (Nemytskii)
     operator u(x)=sigma(W a(x)). The 'no global coupling' baseline; lets the metaoptimizer discover when a
     task needs global spectral coupling vs only a local nonlinearity."""
+
     name = "local"
 
     def __init__(self, width, modes=None, sdims=1):
@@ -208,6 +219,7 @@ class _DeepONetOp(nn.Module):
     the coordinate, so it is MESH-FREE (evaluable at query points off the training grid), unlike the FFT-
     bound spectral primitives. The metaoptimizer selects it when the operator is better captured by a few
     global modes + a learned coordinate basis than by low Fourier modes."""
+
     name = "deeponet"
 
     def __init__(self, width, modes=None, sdims=1, p=24):
@@ -216,23 +228,26 @@ class _DeepONetOp(nn.Module):
         # branch: per-channel global-coefficient generator from the pooled field (invariant to grid size)
         self.branch = nn.Sequential(nn.Linear(width, width), nn.ReLU(), nn.Linear(width, width * p))
         # trunk: coordinate -> p-dim basis (a continuous, mesh-free function of position)
-        self.trunk = nn.Sequential(nn.Linear(sdims, 64), nn.Tanh(), nn.Linear(64, 64), nn.Tanh(),
-                                   nn.Linear(64, p))
-        self.mix = nn.Conv1d(width, width, 1) if sdims == 1 else (
-            nn.Conv2d(width, width, 1) if sdims == 2 else nn.Conv3d(width, width, 1))
+        self.trunk = nn.Sequential(nn.Linear(sdims, 64), nn.Tanh(), nn.Linear(64, 64), nn.Tanh(), nn.Linear(64, p))
+        self.mix = (
+            nn.Conv1d(width, width, 1)
+            if sdims == 1
+            else (nn.Conv2d(width, width, 1) if sdims == 2 else nn.Conv3d(width, width, 1))
+        )
 
     def forward(self, h, coords):
         # h: (b, width, *grid); coords: (b, *grid, sdims)
-        b = h.shape[0]; grid = h.shape[2:]
+        b = h.shape[0]
+        grid = h.shape[2:]
         # BRANCH: global mean-pool over the grid -> (b, width) -> per-channel coeffs (b, width, p)
-        pooled = h.flatten(2).mean(-1)                               # (b, width)
-        coeff = self.branch(pooled).view(b, self.width, self.p)     # (b, width, p)
+        pooled = h.flatten(2).mean(-1)  # (b, width)
+        coeff = self.branch(pooled).view(b, self.width, self.p)  # (b, width, p)
         # TRUNK: coordinate basis (b, *grid, p) -- continuous in the coordinate (mesh-free)
-        basis = self.trunk(coords)                                   # (b, *grid, p)
+        basis = self.trunk(coords)  # (b, *grid, p)
         # combine: u[b,c,*grid] = sum_p coeff[b,c,p] * basis[b,*grid,p]
-        basis_flat = basis.flatten(1, len(grid))                     # (b, G, p)
-        out = torch.einsum("bcp,bgp->bcg", coeff, basis_flat)       # (b, width, G)
-        out = out.view(b, self.width, *grid)                        # (b, width, *grid)
+        basis_flat = basis.flatten(1, len(grid))  # (b, G, p)
+        out = torch.einsum("bcp,bgp->bcg", coeff, basis_flat)  # (b, width, G)
+        out = out.view(b, self.width, *grid)  # (b, width, *grid)
         return torch.relu(self.mix(out))
 
 
@@ -254,6 +269,7 @@ class _OperatorCell(nn.Module):
     def __init__(self, width, primitives, modes=12, sdims=1, mode_override=None):
         super().__init__()
         self.primitives = tuple(primitives)
+
         # mode_override (B7): when set, all mode-using primitives (fourier, fourier_wide) use THIS budget
         # instead of their hardcoded _OP_MODES defaults -- so a priced mode selection actually controls the
         # spectral d.o.f. local/deeponet ignore modes regardless.
@@ -263,9 +279,8 @@ class _OperatorCell(nn.Module):
             if mode_override is not None and _OP_MODES[p] is not None:
                 return int(mode_override)
             return _OP_MODES[p] if _OP_MODES[p] is not None else modes
-        self.cores = nn.ModuleList([
-            _OP_CORES[p](width, _pmodes(p), sdims)
-            for p in self.primitives])
+
+        self.cores = nn.ModuleList([_OP_CORES[p](width, _pmodes(p), sdims) for p in self.primitives])
         self.alpha = nn.Parameter(torch.zeros(len(self.primitives)))
         self.register_buffer("alpha_peak", torch.zeros(len(self.primitives)))
 
@@ -283,25 +298,37 @@ class OperatorSchema(nn.Module):
     Discretization-invariant: train at one resolution, evaluate at any other, in every spatial axis. Depth =
     number of operator cells; width = channel lifting dim; spatial_dims in {1,2,3}."""
 
-    def __init__(self, width=32, depth=2, n_out=1, primitives=("fourier", "fourier_wide", "local", "deeponet"),
-                 modes=12, in_channels=1, spatial_dims=1, mode_override=None):
+    def __init__(
+        self,
+        width=32,
+        depth=2,
+        n_out=1,
+        primitives=("fourier", "fourier_wide", "local", "deeponet"),
+        modes=12,
+        in_channels=1,
+        spatial_dims=1,
+        mode_override=None,
+    ):
         super().__init__()
         self.width = width
         self.spatial_dims = spatial_dims
-        self.lift = nn.Linear(in_channels + spatial_dims, width)   # (a(x), coords) -> width
-        self.cells = nn.ModuleList([_OperatorCell(width, primitives, modes, spatial_dims, mode_override=mode_override)
-                                    for _ in range(depth)])
+        self.lift = nn.Linear(in_channels + spatial_dims, width)  # (a(x), coords) -> width
+        self.cells = nn.ModuleList(
+            [_OperatorCell(width, primitives, modes, spatial_dims, mode_override=mode_override) for _ in range(depth)]
+        )
         self.proj1 = nn.Linear(width, 64)
         self.proj2 = nn.Linear(64, n_out)
-        _init_linear(self.lift); _init_linear(self.proj1); _init_linear(self.proj2)
+        _init_linear(self.lift)
+        _init_linear(self.proj1)
+        _init_linear(self.proj2)
 
     def forward(self, a, coords):
         """a: (b, *grid, in_channels) or (b, *grid); coords: (b, *grid, spatial_dims). grid is N (1D),
         (H,W) (2D), or (D,H,W) (3D)."""
         sd = self.spatial_dims
-        if a.dim() == 1 + sd:                                    # no channel axis -> add one
+        if a.dim() == 1 + sd:  # no channel axis -> add one
             a = a.unsqueeze(-1)
-        h = torch.cat([a, coords], dim=-1)                      # (b, *grid, in_ch+sd)
+        h = torch.cat([a, coords], dim=-1)  # (b, *grid, in_ch+sd)
         # move channels to position 1: (b, C, *grid)
         perm = [0, h.dim() - 1] + list(range(1, h.dim() - 1))
         h = self.lift(h).permute(*perm).contiguous()
@@ -310,7 +337,7 @@ class OperatorSchema(nn.Module):
         # move channels back to last: (b, *grid, width)
         inv = [0] + list(range(2, h.dim())) + [1]
         h = h.permute(*inv).contiguous()
-        u = self.proj2(torch.relu(self.proj1(h)))               # (b, *grid, n_out)
+        u = self.proj2(torch.relu(self.proj1(h)))  # (b, *grid, n_out)
         return u.squeeze(-1)
 
     def alpha_weights(self):
@@ -323,19 +350,34 @@ class OperatorSchema(nn.Module):
     def architecture(self):
         # per-cell selected primitive by peak alpha over training, matching the other schemas
         import numpy as _np
-        return [c.primitives[int(_np.argmax(c.alpha_peak.detach().cpu().numpy()))]
-                for c in self.cells]
+
+        return [c.primitives[int(_np.argmax(c.alpha_peak.detach().cpu().numpy()))] for c in self.cells]
 
 
-def build_operator_schema(width=32, depth=2, n_out=1,
-                                      primitives=("fourier", "fourier_wide", "local", "deeponet"),
-                                      modes=12, in_channels=1, spatial_dims=1, mode_override=None, n_in=None):
+def build_operator_schema(
+    width=32,
+    depth=2,
+    n_out=1,
+    primitives=("fourier", "fourier_wide", "local", "deeponet"),
+    modes=12,
+    in_channels=1,
+    spatial_dims=1,
+    mode_override=None,
+    n_in=None,
+):
     # the operator contract's input width is its channel count; accept the family-canonical n_in as an alias
     if n_in is not None:
         in_channels = n_in
-    return OperatorSchema(width=width, depth=depth, n_out=n_out,
-                                     primitives=primitives, modes=modes, in_channels=in_channels,
-                                     spatial_dims=spatial_dims, mode_override=mode_override)
+    return OperatorSchema(
+        width=width,
+        depth=depth,
+        n_out=n_out,
+        primitives=primitives,
+        modes=modes,
+        in_channels=in_channels,
+        spatial_dims=spatial_dims,
+        mode_override=mode_override,
+    )
 
 
 # --------------------------------------------------------------------------- standalone mesh-free DeepONet
@@ -352,20 +394,28 @@ class StandaloneDeepONet(nn.Module):
     def __init__(self, n_sensors, sdims=1, p=40, branch_hidden=128, trunk_hidden=128):
         super().__init__()
         self.p = p
-        self.branch = nn.Sequential(nn.Linear(n_sensors, branch_hidden), nn.ReLU(),
-                                    nn.Linear(branch_hidden, branch_hidden), nn.ReLU(),
-                                    nn.Linear(branch_hidden, p))
-        self.trunk = nn.Sequential(nn.Linear(sdims, trunk_hidden), nn.ReLU(),
-                                   nn.Linear(trunk_hidden, trunk_hidden), nn.ReLU(),
-                                   nn.Linear(trunk_hidden, p))
+        self.branch = nn.Sequential(
+            nn.Linear(n_sensors, branch_hidden),
+            nn.ReLU(),
+            nn.Linear(branch_hidden, branch_hidden),
+            nn.ReLU(),
+            nn.Linear(branch_hidden, p),
+        )
+        self.trunk = nn.Sequential(
+            nn.Linear(sdims, trunk_hidden),
+            nn.ReLU(),
+            nn.Linear(trunk_hidden, trunk_hidden),
+            nn.ReLU(),
+            nn.Linear(trunk_hidden, p),
+        )
         self.b0 = nn.Parameter(torch.zeros(1))
 
     def forward(self, f, y):
         """f: (b, m) input function at the m sensors; y: (Q, sdims) query coordinates (ANY points).
         Returns (b, Q): the output function evaluated at each query coordinate for each input."""
-        b = self.branch(f)                       # (b, p)
-        t = self.trunk(y)                        # (Q, p)
-        return b @ t.T + self.b0                 # (b, Q) -- mesh-free evaluation
+        b = self.branch(f)  # (b, p)
+        t = self.trunk(y)  # (Q, p)
+        return b @ t.T + self.b0  # (b, Q) -- mesh-free evaluation
 
 
 def build_standalone_deeponet(n_sensors, sdims=1, p=40):

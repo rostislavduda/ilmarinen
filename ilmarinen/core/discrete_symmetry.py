@@ -19,6 +19,7 @@ This module handles Z_2 (involutions: g^2 = I) first -- reflections and parity, 
 second-most-common discrete symmetry after permutation. S_n (permutation) is a separate, larger
 search built on the same equivariance-testing primitive.
 """
+
 from __future__ import annotations
 
 import itertools
@@ -66,7 +67,7 @@ def grad_weighted_equivariance_error(net, g, X, output_index=None, eps=1e-6):
     Xr = X.clone().detach().requires_grad_(True)
     fXr = net(Xr)
     fXo = fXr[:, output_index] if (fXr.dim() > 1 and output_index is not None) else fXr.squeeze(-1)
-    grad, = torch.autograd.grad(fXo.sum(), Xr)                 # (n, d) = df/dx per sample
+    (grad,) = torch.autograd.grad(fXo.sum(), Xr)  # (n, d) = df/dx per sample
     with torch.no_grad():
         fX = net(X)
         fgX = net(X @ gt.T)
@@ -74,8 +75,8 @@ def grad_weighted_equivariance_error(net, g, X, output_index=None, eps=1e-6):
             fX, fgX = fX[:, output_index], fgX[:, output_index]
         num = float((fgX - fX).abs().mean())
         gsize = float(np.linalg.norm(g - np.eye(g.shape[0])))
-        gsub = grad[:, coords]                                 # sensitivity on the acted-on subspace only
-        sens = float(gsub.pow(2).sum(1).sqrt().mean())         # rms ||grad|_coords|| over samples
+        gsub = grad[:, coords]  # sensitivity on the acted-on subspace only
+        sens = float(gsub.pow(2).sum(1).sqrt().mean())  # rms ||grad|_coords|| over samples
         den = gsize * sens + eps
     return num / den
 
@@ -124,7 +125,7 @@ def scale_aware_equivariance_error(net, g, X, n_rand=8, output_index=None, seed=
         num = float((fgX - fX).abs().mean())
     coords = _affected_coords(np.asarray(g))
     if not coords:
-        return 1.0                                    # g moves nothing -> vacuous, not a symmetry
+        return 1.0  # g moves nothing -> vacuous, not a symmetry
     try:
         from scipy.linalg import expm
     except Exception:
@@ -134,7 +135,7 @@ def scale_aware_equivariance_error(net, g, X, n_rand=8, output_index=None, seed=
     for _ in range(n_rand):
         P = np.eye(d)
         A = np.random.randn(len(coords), len(coords))
-        A = A - A.T                                    # antisymmetric -> generic rotation on subspace
+        A = A - A.T  # antisymmetric -> generic rotation on subspace
         Rsub = expm((gsize / (np.linalg.norm(A) + 1e-9)) * A)
         for a, i in enumerate(coords):
             for b, j in enumerate(coords):
@@ -151,7 +152,8 @@ def axis_reflections(n):
     """The n single-axis reflections R_i (flip coordinate i), each an involution R_i^2 = I."""
     refs = {}
     for i in range(n):
-        R = np.eye(n); R[i, i] = -1.0
+        R = np.eye(n)
+        R[i, i] = -1.0
         refs[f"reflect_x{i}"] = R
     return refs
 
@@ -166,7 +168,9 @@ def swap_reflections(n):
     These are the transpositions -- the Z_2 building blocks of permutation symmetry S_n."""
     swaps = {}
     for i, j in itertools.combinations(range(n), 2):
-        S = np.eye(n); S[i, i] = S[j, j] = 0.0; S[i, j] = S[j, i] = 1.0
+        S = np.eye(n)
+        S[i, i] = S[j, j] = 0.0
+        S[i, j] = S[j, i] = 1.0
         swaps[f"swap_{i}{j}"] = S
     return swaps
 
@@ -178,9 +182,11 @@ def _select_err_fn(scale_aware, error_mode):
     equally rejects flatness false-positives by calibrating against f's own gradient in the acted-on
     directions."""
     mode = error_mode if error_mode is not None else ("scale_aware" if scale_aware else "standard")
-    return {"standard": equivariance_error,
-            "scale_aware": scale_aware_equivariance_error,
-            "grad_weighted": grad_weighted_equivariance_error}[mode]
+    return {
+        "standard": equivariance_error,
+        "scale_aware": scale_aware_equivariance_error,
+        "grad_weighted": grad_weighted_equivariance_error,
+    }[mode]
 
 
 def discover_z2(net, X, candidates=None, tol=0.15, output_index=None, scale_aware=False, error_mode=None):
@@ -205,13 +211,14 @@ def discover_z2(net, X, candidates=None, tol=0.15, output_index=None, scale_awar
     err_fn = _select_err_fn(scale_aware, error_mode)
     errors = {name: err_fn(net, g, X, output_index=output_index) for name, g in candidates.items()}
     syms = sorted([(k, v) for k, v in errors.items() if v < tol], key=lambda kv: kv[1])
-    return {"errors": errors, "symmetries": syms, "n_symmetries": len(syms),
-            "candidates": candidates}
+    return {"errors": errors, "symmetries": syms, "n_symmetries": len(syms), "candidates": candidates}
 
 
 def transposition(n, i, j):
     """The transposition (i j): a permutation matrix swapping coordinates i and j. Involution."""
-    S = np.eye(n); S[i, i] = S[j, j] = 0.0; S[i, j] = S[j, i] = 1.0
+    S = np.eye(n)
+    S[i, i] = S[j, j] = 0.0
+    S[i, j] = S[j, i] = 1.0
     return S
 
 
@@ -269,9 +276,9 @@ def build_permutation_invariant_features(X, blocks, moments=(1, 2, 3)):
     feats = []
     for blk in blocks:
         idx = torch.tensor(blk)
-        Xb = X[:, idx]                                   # (b, |block|)
+        Xb = X[:, idx]  # (b, |block|)
         for p in moments:
-            feats.append((Xb ** p).sum(dim=1, keepdim=True))   # power-sum: permutation-invariant
+            feats.append((Xb**p).sum(dim=1, keepdim=True))  # power-sum: permutation-invariant
         in_block.update(blk)
     passthrough = [c for c in range(n) if c not in in_block]
     if passthrough:
@@ -308,10 +315,10 @@ def discover_cyclic_dihedral(net, X, max_order=8, plane=(0, 1), tol=0.06, output
     passes = {}
     for order in range(2, max_order + 1):
         # C_order present iff EVERY nontrivial rotation 2pi*k/order is a symmetry.
-        errs = [equivariance_error(net, embed(_rot2d(2 * np.pi * k / order)), X, output_index)
-                for k in range(1, order)]
+        errs = [equivariance_error(net, embed(_rot2d(2 * np.pi * k / order)), X, output_index) for k in range(1, order)]
         errors_by_order[order] = float(max(errs))
         passes[order] = max(errs) < tol
+
     # The genuine cyclic order is the largest n that passes AND whose every proper divisor > 1 also
     # passes (a real C_n contains all C_d for d | n). This rejects isolated threshold-noise
     # false-positives (e.g. a spurious C_7 pass) that lack the divisor lattice a true group has.
@@ -320,12 +327,14 @@ def discover_cyclic_dihedral(net, X, max_order=8, plane=(0, 1), tol=0.06, output
             if n % d == 0 and not passes.get(d, False):
                 return False
         return passes.get(n, False)
+
     best = 1
     for order in range(2, max_order + 1):
         if divisors_consistent(order):
             best = max(best, order)
     # test a reflection in the same plane (flip axis i) -> dihedral if present with the rotation
-    refl = np.eye(n_dim); refl[i, i] = -1.0
+    refl = np.eye(n_dim)
+    refl[i, i] = -1.0
     refl_err = equivariance_error(net, refl, X, output_index)
     dihedral = (best >= 2) and (refl_err < tol)
     if best <= 1:
@@ -334,8 +343,13 @@ def discover_cyclic_dihedral(net, X, max_order=8, plane=(0, 1), tol=0.06, output
         group = f"D_{best}"
     else:
         group = f"C_{best}"
-    return {"cyclic_order": best, "dihedral": dihedral, "reflection_error": float(refl_err),
-            "group": group, "errors_by_order": errors_by_order}
+    return {
+        "cyclic_order": best,
+        "dihedral": dihedral,
+        "reflection_error": float(refl_err),
+        "group": group,
+        "errors_by_order": errors_by_order,
+    }
 
 
 def build_z2_invariant_features(X, g):

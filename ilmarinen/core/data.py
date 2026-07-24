@@ -5,6 +5,7 @@ networks where OpenML is blocked) and caches locally. Provides standardized
 tensors plus convenient subset / binary-task helpers used by the validation
 pipelines.
 """
+
 from __future__ import annotations
 
 import gzip
@@ -18,8 +19,8 @@ _MIRROR = "https://raw.githubusercontent.com/zalandoresearch/fashion-mnist/maste
 _FILES = {
     "train_images": "train-images-idx3-ubyte.gz",
     "train_labels": "train-labels-idx1-ubyte.gz",
-    "test_images":  "t10k-images-idx3-ubyte.gz",
-    "test_labels":  "t10k-labels-idx1-ubyte.gz",
+    "test_images": "t10k-images-idx3-ubyte.gz",
+    "test_labels": "t10k-labels-idx1-ubyte.gz",
 }
 
 
@@ -60,6 +61,7 @@ class FashionMNIST:
     def __init__(self, cache_dir: str | None = None):
         if cache_dir is None:
             from .paths import cache_path
+
             cache_dir = cache_path("fmnist")
         _download(cache_dir)
         Xtr = _read_images(os.path.join(cache_dir, _FILES["train_images"]))
@@ -93,7 +95,6 @@ class FashionMNIST:
         Xte = np.vstack([self.Xte[iate], self.Xte[ibte]])
         yte = np.concatenate([np.ones(len(iate)), -np.ones(len(ibte))])
         return Xtr, ytr, Xte, yte
-
 
     def sequential_subset(self, per_class: int = 500, split: str = "train"):
         """Return (X_seq, y) with X_seq shaped (n, 784, 1): pixels as a timestep

@@ -34,11 +34,7 @@ _MPS_FALLBACK_NOTED = False
 
 def mps_available() -> bool:
     """True iff a usable Apple-Silicon MPS backend is present."""
-    return (
-        hasattr(torch.backends, "mps")
-        and torch.backends.mps.is_available()
-        and torch.backends.mps.is_built()
-    )
+    return hasattr(torch.backends, "mps") and torch.backends.mps.is_available() and torch.backends.mps.is_built()
 
 
 def best_device(prefer: str = "auto", verbose: bool = True) -> torch.device:

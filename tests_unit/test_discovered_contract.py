@@ -36,13 +36,13 @@ def _lorentz_sets(n=160, kmin=3, kmax=8, seed=0):
     sets, y = [], []
     for _ in range(n):
         k = rng.randint(kmin, kmax + 1)
-        p = rng.randn(k, 3).astype(np.float32)                          # 3-momenta
-        m = rng.uniform(0.5, 2.0, size=k).astype(np.float32)            # masses
-        E = np.sqrt(m ** 2 + (p ** 2).sum(1)).astype(np.float32)        # energy (timelike: E > |p|)
+        p = rng.randn(k, 3).astype(np.float32)  # 3-momenta
+        m = rng.uniform(0.5, 2.0, size=k).astype(np.float32)  # masses
+        E = np.sqrt(m**2 + (p**2).sum(1)).astype(np.float32)  # energy (timelike: E > |p|)
         four = np.concatenate([E[:, None], p], axis=1).astype(np.float32)  # [E, px, py, pz]
         sets.append(four)
         S = four.sum(0)
-        y.append(float(S[0] ** 2 - (S[1] ** 2 + S[2] ** 2 + S[3] ** 2)))   # Minkowski norm^2 of pooled vec
+        y.append(float(S[0] ** 2 - (S[1] ** 2 + S[2] ** 2 + S[3] ** 2)))  # Minkowski norm^2 of pooled vec
     y = np.array(y, np.float32)
     y = (y - y.mean()) / (y.std() + 1e-8)
     return AllData.point_sets(sets, y=y, positions=sets)
@@ -53,8 +53,9 @@ def test_forward_generated_raises_without_a_discovered_fit():
     raises a clear RuntimeError, not an obscure crash. `_geq_forward` is published only by the generated-
     group fits and is reset to None at the start of every fit, so an unfitted (or normally-fitted) model has
     none. Fast tier -- no fit needed, the guard is checked before anything else."""
-    dummy = AllData.point_sets([np.zeros((2, 4), np.float32)], y=np.zeros(1, np.float32),
-                               positions=[np.zeros((2, 4), np.float32)])
+    dummy = AllData.point_sets(
+        [np.zeros((2, 4), np.float32)], y=np.zeros(1, np.float32), positions=[np.zeros((2, 4), np.float32)]
+    )
     mg = AllGraph(width=8, depth=1, epochs=1, device="cpu", seed=0)
     with pytest.raises(RuntimeError):
         mg.forward_generated_equivariant(dummy)
@@ -68,10 +69,11 @@ class TestDiscoveredLorentzContract:
     @pytest.fixture(scope="class")
     def fitted(self):
         """Fit ONCE and share (all assertions below are read-only). Seed-fixed and CPU, ~1s."""
-        mg = AllGraph(width=8, depth=1, epochs=3, device="cpu", verbose=False, seed=0,
-                      discover_equivariant_contract="extended")
+        mg = AllGraph(
+            width=8, depth=1, epochs=3, device="cpu", verbose=False, seed=0, discover_equivariant_contract="extended"
+        )
         res = mg.fit(_lorentz_sets(n=160, seed=0), task="regression")
-        test = _lorentz_sets(n=40, seed=1)                              # unseen sets for the eval path
+        test = _lorentz_sets(n=40, seed=1)  # unseen sets for the eval path
         return mg, res, test
 
     def test_routes_to_generated_equivariant_lorentz(self, fitted):
@@ -122,7 +124,7 @@ class TestDiscoveredLorentzContract:
         raises a clear ValueError rather than dereferencing None. Uses the FITTED model (so it is past the
         RuntimeError guard) and hands it edgeless point sets built without positions."""
         mg, _, test = fitted
-        no_pos = AllData.point_sets(list(test.node_feats), y=np.asarray(test.y))   # positions omitted -> None
+        no_pos = AllData.point_sets(list(test.node_feats), y=np.asarray(test.y))  # positions omitted -> None
         assert no_pos.positions is None
         with pytest.raises(ValueError):
             mg.forward_generated_equivariant(no_pos)
@@ -139,13 +141,14 @@ def _phase_space_sets(n, vec_dim, seed=0):
     for _ in range(n):
         k = rng.randint(4, 9)
         P = rng.randn(k, vec_dim).astype(np.float32)
-        F = np.eye(vec_dim, dtype=np.float32)[rng.randint(0, vec_dim, k)]   # canonical per-point labels
-        pos.append(P); sets.append(F)
+        F = np.eye(vec_dim, dtype=np.float32)[rng.randint(0, vec_dim, k)]  # canonical per-point labels
+        pos.append(P)
+        sets.append(F)
         S = P.sum(0)
         if vec_dim == 4:
-            y.append(float(S[0] * S[2] - S[1] * S[3]))                      # a symplectic pairing omega(q,p)
+            y.append(float(S[0] * S[2] - S[1] * S[3]))  # a symplectic pairing omega(q,p)
         else:
-            y.append(float(np.prod(S[:3])))                                 # a smooth SL-flavoured scalar
+            y.append(float(np.prod(S[:3])))  # a smooth SL-flavoured scalar
     y = np.array(y, np.float32)
     y = (y - y.mean()) / (y.std() + 1e-8)
     return AllData.point_sets(sets, y=y, positions=pos)
@@ -172,8 +175,9 @@ class TestSkewVolumeContract:
     def fitted(self, request):
         spec = _skew_group_spec(request.param)
         vec_dim = spec["vec_dim"]
-        mg = AllGraph(width=16, depth=1, epochs=3, device="cpu", verbose=False, seed=0,
-                      generated_equivariant_group=spec)
+        mg = AllGraph(
+            width=16, depth=1, epochs=3, device="cpu", verbose=False, seed=0, generated_equivariant_group=spec
+        )
         res = mg.fit(_phase_space_sets(200, vec_dim, seed=0), task="regression")
         test = _phase_space_sets(40, vec_dim, seed=1)
         return spec, mg, res, test
@@ -215,7 +219,7 @@ def _geom_regression(n=40, m=4, seed=0, task="regression"):
         P = rng.randn(m, 3).astype(np.float32)
         nf.append(np.ones((m, 1), np.float32))
         po.append(P)
-        y.append(float((P ** 2).sum()))
+        y.append(float((P**2).sum()))
     y = np.array(y, np.float32)
     if task == "classification":
         y = (y > np.median(y)).astype(np.int64)
@@ -231,16 +235,33 @@ def _fake_confirmed(task_model, X, latent_dim=None, **kw):
     d = X.shape[1]
     ld = latent_dim or 2
     enc = nn.Sequential(nn.Linear(d, ld))
-    g = np.zeros((ld, ld), np.float32); g[0, 1] = -1.0; g[1, 0] = 1.0
-    return {"ae": SimpleNamespace(enc=enc), "generators_latent": [torch.tensor(g)],
-            "learned_generator": g, "confirmed_by_null": True, "sym_violation": 1e-3,
-            "null_violation": 1.0, "_null_ratio": 1.5, "latent_dim": ld, "n_symmetries": 1}
+    g = np.zeros((ld, ld), np.float32)
+    g[0, 1] = -1.0
+    g[1, 0] = 1.0
+    return {
+        "ae": SimpleNamespace(enc=enc),
+        "generators_latent": [torch.tensor(g)],
+        "learned_generator": g,
+        "confirmed_by_null": True,
+        "sym_violation": 1e-3,
+        "null_violation": 1.0,
+        "_null_ratio": 1.5,
+        "latent_dim": ld,
+        "n_symmetries": 1,
+    }
 
 
 def _fake_rejected(task_model, X, latent_dim=None, **kw):
     """Stand-in returning a NON-confirmed result (null guard fails), so the confirmation gate rejects it."""
-    return {"confirmed_by_null": False, "sym_violation": 0.5, "null_violation": 0.5, "_null_ratio": 1.5,
-            "generators_latent": [], "learned_generator": None, "n_symmetries": 0}
+    return {
+        "confirmed_by_null": False,
+        "sym_violation": 0.5,
+        "null_violation": 0.5,
+        "_null_ratio": 1.5,
+        "generators_latent": [],
+        "learned_generator": None,
+        "n_symmetries": 0,
+    }
 
 
 class TestNonlinearLatentContract:
@@ -254,18 +275,15 @@ class TestNonlinearLatentContract:
     def test_no_positions_returns_none(self):
         """T-DG-10: _fit_nonlinear_contract is a no-op (returns None) when the data carries no positions,
         so a positions-less fit falls through to the normal route. Fast: guarded before any discovery."""
-        d = AllData.dense_tensor(np.random.RandomState(0).randn(40, 6).astype(np.float32),
-                                 y=np.zeros(40, np.float32))
+        d = AllData.dense_tensor(np.random.RandomState(0).randn(40, 6).astype(np.float32), y=np.zeros(40, np.float32))
         mg = AllGraph(width=8, depth=1, epochs=2, device="cpu", seed=0, deploy_nonlinear_contract=True)
         assert mg._fit_nonlinear_contract(d, "regression", 1) is None
 
     def test_unconfirmed_symmetry_falls_back(self, monkeypatch):
         """T-DG-11: when discovery does NOT confirm a deployable symmetry, the contract is NOT deployed --
         the fit falls back to the normal route and records why in route_detail."""
-        monkeypatch.setattr("ilmarinen.core.nonlinear_symmetry.discover_nonlinear_symmetries_joint",
-                            _fake_rejected)
-        mg = AllGraph(width=8, depth=1, epochs=3, device="cpu", verbose=False, seed=0,
-                      deploy_nonlinear_contract=True)
+        monkeypatch.setattr("ilmarinen.core.nonlinear_symmetry.discover_nonlinear_symmetries_joint", _fake_rejected)
+        mg = AllGraph(width=8, depth=1, epochs=3, device="cpu", verbose=False, seed=0, deploy_nonlinear_contract=True)
         mg.fit(_geom_regression(), task="regression", n_out=1)
         assert mg.contract != "latent_equivariant"
         assert "nonlinear_contract" in (mg.route_detail or {})
@@ -273,10 +291,8 @@ class TestNonlinearLatentContract:
     def test_confirmed_symmetry_deploys_latent_contract(self, monkeypatch):
         """T-DG-12: a confirmed latent symmetry deploys the latent-equivariant contract -- a real nn.Module
         (encoder + latent EMLP head) with a finite trained fit value."""
-        monkeypatch.setattr("ilmarinen.core.nonlinear_symmetry.discover_nonlinear_symmetries_joint",
-                            _fake_confirmed)
-        mg = AllGraph(width=8, depth=1, epochs=3, device="cpu", verbose=False, seed=0,
-                      deploy_nonlinear_contract=True)
+        monkeypatch.setattr("ilmarinen.core.nonlinear_symmetry.discover_nonlinear_symmetries_joint", _fake_confirmed)
+        mg = AllGraph(width=8, depth=1, epochs=3, device="cpu", verbose=False, seed=0, deploy_nonlinear_contract=True)
         res = mg.fit(_geom_regression(), task="regression", n_out=1)
         assert mg.contract == "latent_equivariant"
         assert res["contract"] == "latent_equivariant"
@@ -290,14 +306,14 @@ class TestNonlinearLatentContract:
         Regression guard for the fixed inference routing: this path previously raised
         'LatentEquivariantContract.forward() takes 2 positional arguments' because _forward_new had no
         latent_equivariant branch and called the net with the 5 relational args."""
-        monkeypatch.setattr("ilmarinen.core.nonlinear_symmetry.discover_nonlinear_symmetries_joint",
-                            _fake_confirmed)
-        mg = AllGraph(width=8, depth=1, epochs=3, device="cpu", verbose=False, seed=0,
-                      deploy_nonlinear_contract=True)
+        monkeypatch.setattr("ilmarinen.core.nonlinear_symmetry.discover_nonlinear_symmetries_joint", _fake_confirmed)
+        mg = AllGraph(width=8, depth=1, epochs=3, device="cpu", verbose=False, seed=0, deploy_nonlinear_contract=True)
         mg.fit(_geom_regression(n=40, m=4, seed=0), task="regression", n_out=1)
-        for label, te in (("same", _geom_regression(n=12, m=4, seed=1)),
-                          ("bigger", _geom_regression(n=8, m=6, seed=2)),     # longer clouds -> truncated
-                          ("smaller", _geom_regression(n=6, m=2, seed=3))):   # shorter clouds -> zero-padded
+        for label, te in (
+            ("same", _geom_regression(n=12, m=4, seed=1)),
+            ("bigger", _geom_regression(n=8, m=6, seed=2)),  # longer clouds -> truncated
+            ("smaller", _geom_regression(n=6, m=2, seed=3)),
+        ):  # shorter clouds -> zero-padded
             pred = mg.predict(te)
             assert pred.shape == (len(np.asarray(te.y)),), label
             assert np.isfinite(pred).all(), label
@@ -307,10 +323,8 @@ class TestNonlinearLatentContract:
         predict_proba a per-row simplex. Guards the second half of the bug: the nonlinear deploy early-returns
         before fit()'s STAGE-4 tail, so _infer_task was never set and predict silently treated every latent
         model as regression."""
-        monkeypatch.setattr("ilmarinen.core.nonlinear_symmetry.discover_nonlinear_symmetries_joint",
-                            _fake_confirmed)
-        mg = AllGraph(width=8, depth=1, epochs=3, device="cpu", verbose=False, seed=0,
-                      deploy_nonlinear_contract=True)
+        monkeypatch.setattr("ilmarinen.core.nonlinear_symmetry.discover_nonlinear_symmetries_joint", _fake_confirmed)
+        mg = AllGraph(width=8, depth=1, epochs=3, device="cpu", verbose=False, seed=0, deploy_nonlinear_contract=True)
         mg.fit(_geom_regression(task="classification"), task="classification", n_out=2)
         assert mg._infer_task == "classification"
         te = _geom_regression(n=12, seed=1, task="classification")

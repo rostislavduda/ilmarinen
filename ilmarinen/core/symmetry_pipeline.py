@@ -43,6 +43,7 @@ FALSE-POSITIVE GUARDS (numerical robustness -- the practical crux):
    (G4) NOISE SWEEP: re-detect under added input/label noise; a real symmetry degrades gracefully,
         a false one flips. Exposed via `noise_sweep=True`.
 """
+
 from __future__ import annotations
 
 from collections import Counter
@@ -54,9 +55,9 @@ import torch.nn as nn
 from .symmetry_discovery import discover_affine_symmetries
 
 # --- named thresholds for the symmetry-discovery cascade (see discover_and_reduce docstring) ---
-_ANTISYM_THRESHOLD = 0.3   # magnitude above which an antisymmetric (rotation-like) signal is real
-_SCALE_AWARE_TOL = 0.08    # scale-aware ratio separating genuine symmetry (~0.01) from flatness (~0.2)
-_NULL_EXCESS_FACTOR = 3    # discovered permutation count must exceed this multiple of the shuffled null
+_ANTISYM_THRESHOLD = 0.3  # magnitude above which an antisymmetric (rotation-like) signal is real
+_SCALE_AWARE_TOL = 0.08  # scale-aware ratio separating genuine symmetry (~0.01) from flatness (~0.2)
+_NULL_EXCESS_FACTOR = 3  # discovered permutation count must exceed this multiple of the shuffled null
 from .discrete_symmetry import (
     build_permutation_invariant_features,
     discover_cyclic_dihedral,
@@ -83,7 +84,7 @@ def continuous_invariant_features(X, generators):
     seen = set()
     for g in generators:
         L = g["L"] if isinstance(g, dict) else np.asarray(g)
-        A = 0.5 * (L - L.T)                       # antisymmetric (rotation) part
+        A = 0.5 * (L - L.T)  # antisymmetric (rotation) part
         ij = np.unravel_index(np.argmax(np.abs(A)), A.shape)
         i, j = int(ij[0]), int(ij[1])
         if abs(A[i, j]) > _ANTISYM_THRESHOLD and i != j and i not in seen and j not in seen:
@@ -92,13 +93,13 @@ def continuous_invariant_features(X, generators):
     if not radial_pairs:
         return X, [("axis", c) for c in range(n)]
     feats, kept_axes, used = [], [], set()
-    for (i, j) in radial_pairs:
+    for i, j in radial_pairs:
         feats.append(torch.sqrt(X[:, i] ** 2 + X[:, j] ** 2 + 1e-9).unsqueeze(-1))
         kept_axes.append(("radius", (i, j)))
         used.update([i, j])
     for c in range(n):
         if c not in used:
-            feats.append(X[:, c:c + 1])
+            feats.append(X[:, c : c + 1])
             kept_axes.append(("axis", c))
     return torch.cat(feats, dim=-1), kept_axes
 
@@ -108,8 +109,7 @@ def _fit_reference(X, y, seed, epochs=300, width=96, lr=3e-3):
     torch.manual_seed(seed)
     d = X.shape[1]
     out_dim = 1 if y.dim() == 1 else y.shape[1]
-    net = nn.Sequential(nn.Linear(d, width), nn.Tanh(), nn.Linear(width, width), nn.Tanh(),
-                        nn.Linear(width, out_dim))
+    net = nn.Sequential(nn.Linear(d, width), nn.Tanh(), nn.Linear(width, width), nn.Tanh(), nn.Linear(width, out_dim))
     op = torch.optim.Adam(net.parameters(), lr=lr)
     lf = nn.MSELoss()
     yt = y if y.dim() > 1 else y.unsqueeze(-1)
@@ -127,8 +127,7 @@ def _discover_cyclic(refs, Xeval, d_eff, need, max_cyclic, tol):
     per-group frequency dict for the report)."""
     if d_eff < 2:
         return None, {}
-    cyc_groups = Counter(discover_cyclic_dihedral(net, Xeval, max_order=max_cyclic, tol=tol)["group"]
-                         for net in refs)
+    cyc_groups = Counter(discover_cyclic_dihedral(net, Xeval, max_order=max_cyclic, tol=tol)["group"] for net in refs)
     cyclic = cyc_groups.most_common(1)[0][0] if cyc_groups else None
     if cyclic and (cyc_groups[cyclic] < need or cyclic.startswith("trivial")):
         cyclic = None
@@ -144,8 +143,7 @@ def _discover_z2(refs, Xeval, consensus_frac, sa, sa_tol, error_mode, hard_block
         for k, _v in discover_z2(net, Xeval, tol=sa_tol, scale_aware=sa, error_mode=error_mode)["symmetries"]:
             counts[k] += 1
     need = int(np.ceil(consensus_frac * len(refs)))
-    accepted = [k for k, c in counts.items()
-                if c >= need and not (hard_block_swaps and k.startswith("swap_"))]
+    accepted = [k for k, c in counts.items() if c >= need and not (hard_block_swaps and k.startswith("swap_"))]
     return accepted, dict(counts)
 
 
@@ -155,7 +153,8 @@ def _union_find_blocks(stable_trans, d_eff):
 
     def find(a):
         while parent[a] != a:
-            parent[a] = parent[parent[a]]; a = parent[a]
+            parent[a] = parent[parent[a]]
+            a = parent[a]
         return a
 
     for i, j in stable_trans:
@@ -166,10 +165,24 @@ def _union_find_blocks(stable_trans, d_eff):
     return sorted([sorted(v) for v in comp.values() if len(v) > 1])
 
 
-def discover_and_reduce(X, y, *, n_refits=3, consensus_frac=0.67, min_gap=1.8, margin_frac=0.7,
-                        tol_discrete=0.10, max_cyclic=8, epochs=300, noise_sweep=False,
-                        coordinate_structure="unknown", null_test=True, scale_aware=True,
-                        error_mode=None, verbose=True):
+def discover_and_reduce(
+    X,
+    y,
+    *,
+    n_refits=3,
+    consensus_frac=0.67,
+    min_gap=1.8,
+    margin_frac=0.7,
+    tol_discrete=0.10,
+    max_cyclic=8,
+    epochs=300,
+    noise_sweep=False,
+    coordinate_structure="unknown",
+    null_test=True,
+    scale_aware=True,
+    error_mode=None,
+    verbose=True,
+):
     """Run the robust symmetry-discovery cascade and return discovered symmetries + reduced features.
 
     coordinate_structure : one of
@@ -202,7 +215,7 @@ def discover_and_reduce(X, y, *, n_refits=3, consensus_frac=0.67, min_gap=1.8, m
     Xg = X if isinstance(X, torch.Tensor) else torch.tensor(X, dtype=torch.float32)
     yg = y if isinstance(y, torch.Tensor) else torch.tensor(y, dtype=torch.float32)
     d = Xg.shape[1]
-    Xeval = Xg[torch.randperm(len(Xg))[:min(2500, len(Xg))]]
+    Xeval = Xg[torch.randperm(len(Xg))[: min(2500, len(Xg))]]
 
     # fit the reference models once (shared across detectors for each seed)
     refs = [_fit_reference(Xg, yg, seed=s, epochs=epochs)[0] for s in range(n_refits)]
@@ -216,10 +229,11 @@ def discover_and_reduce(X, y, *, n_refits=3, consensus_frac=0.67, min_gap=1.8, m
     cont_accepted = []
     cont_freq = {}
     from collections import Counter
+
     ck = Counter()
     for net in refs:
         r = cont_detect(net)
-        if r["gap_ratio"] >= min_gap:                       # G2: clear spectral gap required
+        if r["gap_ratio"] >= min_gap:  # G2: clear spectral gap required
             for g in r["generators"]:
                 # label each generator by kind + a coarse signature so refits can be matched
                 sig = f"{g['kind']}"
@@ -237,16 +251,14 @@ def discover_and_reduce(X, y, *, n_refits=3, consensus_frac=0.67, min_gap=1.8, m
     # ---- RE-CASCADE: if a continuous rotation was found, run discrete detection on the
     # continuous-INVARIANT features so only the genuine residual pi_0(G) survives (not shadows of
     # the continuous group). We rebuild the reference models on the invariant features.
-    rotation_gens = [g for (k, g) in cont_accepted
-                     if np.linalg.norm(0.5 * (g["L"] - g["L"].T)) > _ANTISYM_THRESHOLD]
+    rotation_gens = [g for (k, g) in cont_accepted if np.linalg.norm(0.5 * (g["L"] - g["L"].T)) > _ANTISYM_THRESHOLD]
     recascaded = False
     if rotation_gens:
         Xinv_full, kept_axes = continuous_invariant_features(Xg, rotation_gens)
-        if Xinv_full.shape[1] < d:                          # a genuine reduction happened
+        if Xinv_full.shape[1] < d:  # a genuine reduction happened
             recascaded = True
-            refs = [_fit_reference(Xinv_full, yg, seed=s, epochs=epochs)[0]
-                    for s in range(n_refits)]
-            Xeval = Xinv_full[torch.randperm(len(Xinv_full))[:min(2500, len(Xinv_full))]]
+            refs = [_fit_reference(Xinv_full, yg, seed=s, epochs=epochs)[0] for s in range(n_refits)]
+            Xeval = Xinv_full[torch.randperm(len(Xinv_full))[: min(2500, len(Xinv_full))]]
             d_eff = Xinv_full.shape[1]
             report["recascade_axes"] = [str(a) for a in kept_axes]
         else:
@@ -256,8 +268,9 @@ def discover_and_reduce(X, y, *, n_refits=3, consensus_frac=0.67, min_gap=1.8, m
 
     # ---- 2a. C_n / D_n (G1 + G3 divisor-consistency built in + G2 margin via tighter tol) ----
     # skip if the (possibly re-cascaded) space is <2D -- no rotation plane exists there
-    cyclic, report["cyclic"] = _discover_cyclic(refs, Xeval, d_eff, need, max_cyclic,
-                                                tol_discrete * margin_frac)   # G2 margin
+    cyclic, report["cyclic"] = _discover_cyclic(
+        refs, Xeval, d_eff, need, max_cyclic, tol_discrete * margin_frac
+    )  # G2 margin
 
     # ---- 2b. Z_2 residual (G1 + G2 margin + SCALE-AWARE robustness) ----
     # The scale-aware equivariance test distinguishes a genuine symmetry from FLATNESS by
@@ -270,24 +283,25 @@ def discover_and_reduce(X, y, *, n_refits=3, consensus_frac=0.67, min_gap=1.8, m
     sa_tol = _SCALE_AWARE_TOL if (sa or error_mode in ("scale_aware", "grad_weighted")) else tol_discrete * margin_frac
     # coordinate_structure is now OPTIONAL extra safety, not required: 'ordered' still hard-disables
     # swaps as a belt-and-suspenders measure, but with scale_aware the default 'unknown' is safe.
-    hard_block_swaps = (coordinate_structure == "ordered")
+    hard_block_swaps = coordinate_structure == "ordered"
 
-    z2_accepted, report["z2"] = _discover_z2(refs, Xeval, consensus_frac, sa, sa_tol, error_mode,
-                                             hard_block_swaps)
+    z2_accepted, report["z2"] = _discover_z2(refs, Xeval, consensus_frac, sa, sa_tol, error_mode, hard_block_swaps)
 
     # ---- 2c. S_n permutation (G1 + SCALE-AWARE + optional null-test) ----
     # With scale_aware=True the flatness false-positive is handled data-drivenly, so permutation
     # search is safe to run regardless of coordinate_structure (except a hard 'ordered' block).
     perm_blocks = []
     report["permutation_transpositions"] = {}
-    perm_enabled = (coordinate_structure != "ordered")
+    perm_enabled = coordinate_structure != "ordered"
     if perm_enabled:
+
         def perm_detect(net):
             return discover_permutation_subgroup(net, Xeval, tol=sa_tol, scale_aware=sa, error_mode=error_mode)
+
         perm_results = [perm_detect(net) for net in refs]
         tp = Counter()
         for r in perm_results:
-            for (i, j, _e) in r["transpositions"]:
+            for i, j, _e in r["transpositions"]:
                 tp[(i, j)] += 1
         stable_trans = [(i, j) for (i, j), c in tp.items() if c >= need]
         report["permutation_transpositions"] = {f"{i}{j}": c for (i, j), c in tp.items()}
@@ -298,10 +312,12 @@ def discover_and_reduce(X, y, *, n_refits=3, consensus_frac=0.67, min_gap=1.8, m
             null_counts = []
             base_X = Xg if not recascaded else continuous_invariant_features(Xg, rotation_gens)[0]
             for s in range(2):
-                net_null, _ = _fit_reference(base_X, yg[torch.randperm(len(yg))], seed=s,
-                                             epochs=epochs)
-                null_counts.append(len(discover_permutation_subgroup(
-                    net_null, Xeval, tol=tol_discrete * margin_frac)["transpositions"]))
+                net_null, _ = _fit_reference(base_X, yg[torch.randperm(len(yg))], seed=s, epochs=epochs)
+                null_counts.append(
+                    len(
+                        discover_permutation_subgroup(net_null, Xeval, tol=tol_discrete * margin_frac)["transpositions"]
+                    )
+                )
             real_count = len(stable_trans)
             null_mean = float(np.mean(null_counts)) if null_counts else 0.0
             report["permutation_null"] = {"real": real_count, "null_mean": null_mean}
@@ -339,9 +355,10 @@ def discover_and_reduce(X, y, *, n_refits=3, consensus_frac=0.67, min_gap=1.8, m
         "continuous": cont_accepted,
         "cyclic": cyclic,
         "z2": z2_accepted,
-        "permutation": {"blocks": perm_blocks,
-                        "young_subgroup": " x ".join(f"S_{len(b)}" for b in perm_blocks)
-                        if perm_blocks else "trivial"},
+        "permutation": {
+            "blocks": perm_blocks,
+            "young_subgroup": " x ".join(f"S_{len(b)}" for b in perm_blocks) if perm_blocks else "trivial",
+        },
         "report": report,
         "reduce_fn": reduce_fn,
     }
@@ -350,14 +367,17 @@ def discover_and_reduce(X, y, *, n_refits=3, consensus_frac=0.67, min_gap=1.8, m
     # GENUINE residual pi_0(G) structure, not consequences of the continuous part. We note whether
     # the re-cascade ran so the result is transparent about which space the discrete findings live in.
     if recascaded:
-        result["recascade"] = ("discrete detection ran on continuous-INVARIANT features; discrete "
-                               "findings are genuine residual structure, with continuous shadows "
-                               "removed. Axis map in report['recascade_axes'].")
+        result["recascade"] = (
+            "discrete detection ran on continuous-INVARIANT features; discrete "
+            "findings are genuine residual structure, with continuous shadows "
+            "removed. Axis map in report['recascade_axes']."
+        )
     elif cont_accepted and (cyclic or z2_accepted or perm_blocks):
         result["subsumption_warning"] = (
             "continuous symmetry present but re-cascade did not reduce dimension; discrete findings "
             "in the same coordinates may be consequences of it -- treat the continuous generator as "
-            "primary.")
+            "primary."
+        )
     if verbose:
         print("discover_and_reduce summary (guards: G1 refit-consensus, G2 gap-margin, G3 divisors):")
         print(f"  continuous : {[k for k, _ in cont_accepted]}  (freq {cont_freq})")

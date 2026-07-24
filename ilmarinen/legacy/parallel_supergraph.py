@@ -25,6 +25,7 @@ Design invariants (carried over from the validated recurrent supergraph):
 - Deep supervision option so BOTH fields get a bare field (else the first layer's field is
   screened by the second -- the coupled-Ising field-screening effect).
 """
+
 from __future__ import annotations
 
 import torch
@@ -49,7 +50,7 @@ class _ConvCore(nn.Module):
         self.n_in, self.width = n_in, width
 
     def forward(self, x):  # x: (b, n_in)
-        c = torch.relu(self.conv(x.unsqueeze(1)))          # (b, n_chan, n_in)
+        c = torch.relu(self.conv(x.unsqueeze(1)))  # (b, n_chan, n_in)
         feat = torch.cat([c.mean(dim=2), c.amax(dim=2)], dim=1)  # (b, 2*n_chan); amax = MPS-safe over NaN
         return torch.tanh(self.proj(feat))
 
@@ -72,7 +73,7 @@ class _SpectralCore(nn.Module):
 
     def forward(self, x):  # x: (b, n_in)
         Xf = torch.fft.rfft(x, dim=1)
-        power = Xf.real ** 2 + Xf.imag ** 2                # (b, nf), position-invariant
+        power = Xf.real**2 + Xf.imag**2  # (b, nf), position-invariant
         return torch.tanh(self.proj(torch.log1p(power)))
 
 
@@ -87,7 +88,7 @@ class HeteroCellPar(nn.Module):
         super().__init__()
         self.conv = _ConvCore(n_in, width)
         self.spec = _SpectralCore(n_in, width)
-        self.alpha = nn.Parameter(torch.zeros(2))   # [conv, spectral]; uniform -> unbiased
+        self.alpha = nn.Parameter(torch.zeros(2))  # [conv, spectral]; uniform -> unbiased
         self.register_buffer("_alpha_peak", torch.tensor([0.5, 0.5]))
 
     def outputs(self, x_conv, x_spec):

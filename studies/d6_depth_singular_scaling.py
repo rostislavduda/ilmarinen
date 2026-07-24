@@ -72,8 +72,9 @@ def _mlp(depth, d, H=16):
     return torch.nn.Sequential(*layers)
 
 
-def measure_lambda_vs_depth(depths=(1, 2, 3, 4, 5), H=16, steps=1500, seed=0, n_seeds=1,
-                            lr=0.02, report_convergence=True):
+def measure_lambda_vs_depth(
+    depths=(1, 2, 3, 4, 5), H=16, steps=1500, seed=0, n_seeds=1, lr=0.02, report_convergence=True
+):
     """Fit each depth to convergence and estimate lambda; return per-depth lambda, omega_func, and the
     per-layer functional marginal Delta(omega_func).
 
@@ -106,16 +107,26 @@ def measure_lambda_vs_depth(depths=(1, 2, 3, 4, 5), H=16, steps=1500, seed=0, n_
         lam_mean = float(np.mean(lam_samples)) if lam_samples else float("nan")
         lam_std = float(np.std(lam_samples)) if len(lam_samples) > 1 else 0.0
         of = omega_func(lam_mean, n) if lam_samples else float("nan")
-        rows.append({"depth": L, "k": k, "lambda": lam_mean, "lambda_std": lam_std,
-                     "omega_func": of, "n_valid": len(lam_samples),
-                     "loss": float(np.mean(final_losses))})
+        rows.append(
+            {
+                "depth": L,
+                "k": k,
+                "lambda": lam_mean,
+                "lambda_std": lam_std,
+                "omega_func": of,
+                "n_valid": len(lam_samples),
+                "loss": float(np.mean(final_losses)),
+            }
+        )
     # per-layer functional marginal
     for i in range(1, len(rows)):
         rows[i]["d_omega_func"] = rows[i]["omega_func"] - rows[i - 1]["omega_func"]
     rows[0]["d_omega_func"] = rows[0]["omega_func"]  # cost of the first layer vs a depth-0 baseline (0)
 
-    print(f"lambda / functional complexity vs depth (rank-1 target, {steps} steps"
-          f"{f', {n_seeds} seeds' if n_seeds > 1 else ''}):")
+    print(
+        f"lambda / functional complexity vs depth (rank-1 target, {steps} steps"
+        f"{f', {n_seeds} seeds' if n_seeds > 1 else ''}):"
+    )
     hdr = f"  {'depth':>5} {'k':>6} {'lambda':>8}"
     if n_seeds > 1:
         hdr += f" {'+/-std':>7}"
@@ -125,8 +136,7 @@ def measure_lambda_vs_depth(depths=(1, 2, 3, 4, 5), H=16, steps=1500, seed=0, n_
         line = f"  {r['depth']:>5} {r['k']:>6} {r['lambda']:>8.3f}"
         if n_seeds > 1:
             line += f" {r['lambda_std']:>7.3f}"
-        line += (f" {r['omega_func']:>11.2f} {r['d_omega_func']:>13.2f} "
-                 f"{r['k'] / 2:>7.1f} {r['loss']:>10.2e}")
+        line += f" {r['omega_func']:>11.2f} {r['d_omega_func']:>13.2f} {r['k'] / 2:>7.1f} {r['loss']:>10.2e}"
         print(line)
     return rows
 
@@ -140,16 +150,24 @@ def select_depth_functional(curve: DepthCurve, mu: float, d_omega_by_mid):
     d_omega_by_mid: dict midpoint -> Delta(omega_func) for that layer transition (>= 0; a tiny floor is
     used so a zero functional cost does not make every layer free)."""
     floor = 1e-3
-    for (mid, m, _me) in curve.marginals:
+    for mid, m, _me in curve.marginals:
         price = mu * max(d_omega_by_mid.get(mid, 1.0), floor)
         if m < price:
             return int(np.floor(mid))
     return curve.depths[-1]
 
 
-def compare_depth_selection(name="ESOL", task="regression", width=32,
-                            depths=(1, 2, 3, 4, 5), seeds=(0, 1, 2), H=16,
-                            fit_epochs=60, lam_steps=1500, lam_seeds=3):
+def compare_depth_selection(
+    name="ESOL",
+    task="regression",
+    width=32,
+    depths=(1, 2, 3, 4, 5),
+    seeds=(0, 1, 2),
+    H=16,
+    fit_epochs=60,
+    lam_steps=1500,
+    lam_seeds=3,
+):
     """Measure a real loss curve S(L), and select depth under UNIT vs FUNCTIONAL cost as mu sweeps.
     Fits both L*(mu) on log-log axes and reports the apparent exponents side by side.
 
@@ -169,6 +187,7 @@ def compare_depth_selection(name="ESOL", task="regression", width=32,
         tr = te = None
 
     if tr is not None:
+
         def train_eval(L, sd):
             np.random.seed(sd)
             torch.manual_seed(sd)
@@ -177,19 +196,21 @@ def compare_depth_selection(name="ESOL", task="regression", width=32,
             y = np.asarray(te.y)
             with torch.no_grad():
                 ids = np.arange(len(te.node_feats))
-                wp = (mg.contract == "equivariant")
+                wp = mg.contract == "equivariant"
                 ue = mg.contract in ("graph", "equivariant")
                 out = mg._forward_contract(mg.net, te, ids, mg.contract, wp, ue, 3.0).cpu().numpy()
             p = out.squeeze(-1) if out.ndim > 1 else out
-            mse = float(((p - y[:len(p)]) ** 2).mean())
+            mse = float(((p - y[: len(p)]) ** 2).mean())
             return mse, -mse  # (val_loss, val_acc-proxy)
 
         curve = measure_depth_curve(train_eval, list(depths), list(seeds))
     else:
         # synthetic saturating curve (loss improves then plateaus)
-        S = np.array([0.5, 0.34, 0.30, 0.29, 0.288])[:len(depths)]
-        marg = [((depths[i - 1] + depths[i]) / 2, (S[i - 1] - S[i]) / (depths[i] - depths[i - 1]), 0.0)
-                for i in range(1, len(depths))]
+        S = np.array([0.5, 0.34, 0.30, 0.29, 0.288])[: len(depths)]
+        marg = [
+            ((depths[i - 1] + depths[i]) / 2, (S[i - 1] - S[i]) / (depths[i] - depths[i - 1]), 0.0)
+            for i in range(1, len(depths))
+        ]
         curve = DepthCurve(list(depths), S, np.zeros(len(depths)), np.zeros(len(depths)), marg)
 
     # (b) functional per-layer costs from the lambda-vs-depth measurement
@@ -219,11 +240,13 @@ def compare_depth_selection(name="ESOL", task="regression", width=32,
     print(f"  UNIT cost (B6):        slope = {s_unit:.3f}  (over {n_unit} points where L*>1)")
     print(f"  FUNCTIONAL cost (D6):  slope = {s_func:.3f}  (over {n_func} points where L*>1)")
     print(f"  L* range: unit {L_unit.min()}-{L_unit.max()}, functional {L_func.min()}-{L_func.max()}")
-    print("\nReading: if the functional-cost exponent differs from the unit-cost one, pricing depth by "
-          "the singular complexity materially changes depth selection. If the functional per-layer cost "
-          "saturates (Delta(omega_func) -> 0 after the first layer), functional pricing tends to select "
-          "SHALLOWER nets at fixed mu -- deeper layers are 'free' in loss but add no functional dimension, "
-          "so they are not worth even a tiny price.")
+    print(
+        "\nReading: if the functional-cost exponent differs from the unit-cost one, pricing depth by "
+        "the singular complexity materially changes depth selection. If the functional per-layer cost "
+        "saturates (Delta(omega_func) -> 0 after the first layer), functional pricing tends to select "
+        "SHALLOWER nets at fixed mu -- deeper layers are 'free' in loss but add no functional dimension, "
+        "so they are not worth even a tiny price."
+    )
     return {"mus": mus, "L_unit": L_unit, "L_func": L_func, "slope_unit": s_unit, "slope_func": s_func}
 
 

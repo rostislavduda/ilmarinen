@@ -4,6 +4,7 @@ Extracted from the legacy networks.py (the pre-AllGraph model zoo, now under ilm
 current schemas depend on this small shared util rather than on that legacy module -- keeping AllGraph's
 build path free of legacy imports.
 """
+
 from __future__ import annotations
 
 import numpy as np

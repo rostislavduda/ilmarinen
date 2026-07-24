@@ -4,6 +4,7 @@ Opt-in observables assembled after a fit (LLC / developmental LLC / thermodynami
 spectroscopy / effective-dimension ledger / equivariance-breaking probe). Each reuses already-computed
 quantities and never changes the fit result. Split out of allgraph.py to keep the controller focused;
 AllGraph mixes this in, so every method still resolves against the same instance via `self`."""
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -58,11 +59,15 @@ class _ReportsMixin:
             if probe is not None:
                 result["equivariance_breaking"] = probe
                 if probe.get("symmetry_broken"):
-                    self._log(f"[AllGraph] equivariance-breaking probe: symmetry appears BROKEN "
-                              f"(signal={probe['breaking_signal']}); priced relaxation may help.")
+                    self._log(
+                        f"[AllGraph] equivariance-breaking probe: symmetry appears BROKEN "
+                        f"(signal={probe['breaking_signal']}); priced relaxation may help."
+                    )
                 else:
-                    self._log(f"[AllGraph] equivariance-breaking probe: symmetry appears intact "
-                              f"(signal={probe['breaking_signal']}); strict equivariance is appropriate.")
+                    self._log(
+                        f"[AllGraph] equivariance-breaking probe: symmetry appears intact "
+                        f"(signal={probe['breaking_signal']}); strict equivariance is appropriate."
+                    )
         return result
 
     def _llc_closure(self, net, data, task, batch=128):
@@ -75,10 +80,11 @@ class _ReportsMixin:
         mod = self.contract
         y = np.asarray(data.y)
         lossf = nn.CrossEntropyLoss() if task == "classification" else nn.MSELoss()
-        n_total = (len(data.dense) if mod in ("sequence", "spatial", "volumetric", "4d", "operator")
-                   else len(data.node_feats))
+        n_total = (
+            len(data.dense) if mod in ("sequence", "spatial", "volumetric", "4d", "operator") else len(data.node_feats)
+        )
         rng = np.random.RandomState(self.seed)
-        idx = rng.permutation(n_total)[:min(batch, n_total)]
+        idx = rng.permutation(n_total)[: min(batch, n_total)]
         yt = torch.as_tensor(y)
 
         if mod in ("sequence", "spatial", "volumetric", "4d"):
@@ -86,28 +92,44 @@ class _ReportsMixin:
             if mod == "sequence" and X.dim() == 2:
                 X = X.unsqueeze(-1)
             Xb = X[idx].to(self.device)
-            tb = (yt[idx].long().to(self.device) if task == "classification"
-                  else yt[idx].float().unsqueeze(1).to(self.device))
+            tb = (
+                yt[idx].long().to(self.device)
+                if task == "classification"
+                else yt[idx].float().unsqueeze(1).to(self.device)
+            )
 
             def closure():
-                out = (net.forward_seq_readout(Xb, 1).squeeze(1) if mod == "sequence" else net(Xb))
+                out = net.forward_seq_readout(Xb, 1).squeeze(1) if mod == "sequence" else net(Xb)
                 return lossf(out, tb)
         elif mod == "operator":
             # operator forward is net(a, coords) -> field; the loss is a per-grid-point field MSE, matching
             # _fit_operator. LLC on the operator net makes the mode-budget/width complexity singularity-aware
             # like the other contracts.
-            a = data.dense if isinstance(data.dense, torch.Tensor) else torch.as_tensor(np.asarray(data.dense), dtype=torch.float32)
-            gx = data.grid if isinstance(data.grid, torch.Tensor) else torch.as_tensor(np.asarray(data.grid), dtype=torch.float32)
-            ab = a[idx].to(self.device); gb = gx[idx].to(self.device)
+            a = (
+                data.dense
+                if isinstance(data.dense, torch.Tensor)
+                else torch.as_tensor(np.asarray(data.dense), dtype=torch.float32)
+            )
+            gx = (
+                data.grid
+                if isinstance(data.grid, torch.Tensor)
+                else torch.as_tensor(np.asarray(data.grid), dtype=torch.float32)
+            )
+            ab = a[idx].to(self.device)
+            gb = gx[idx].to(self.device)
             tb = yt[idx].float().to(self.device)
 
             def closure():
                 return lossf(net(ab, gb), tb)
         else:
-            with_pos = (mod == "equivariant"); use_edges = mod in ("graph", "equivariant")
+            with_pos = mod == "equivariant"
+            use_edges = mod in ("graph", "equivariant")
             ids = np.asarray(idx)
-            tb = (yt[ids].long().to(self.device) if task == "classification"
-                  else yt[ids].float().unsqueeze(1).to(self.device))
+            tb = (
+                yt[ids].long().to(self.device)
+                if task == "classification"
+                else yt[ids].float().unsqueeze(1).to(self.device)
+            )
 
             def closure():
                 out = self._forward_contract(net, data, ids, mod, with_pos, use_edges, 3.0)
@@ -122,9 +144,13 @@ class _ReportsMixin:
         failure (best-effort). Does not change selection."""
         try:
             from ..machinery.thermodynamic_potential import POTENTIAL_LEVELS, assert_temperature_consistency, wbic_beta
+
             # n = training-set size (fixes beta_W); resolve the actual Level-A temperature in use.
-            n_total = (len(data.dense) if self.contract in ("sequence", "spatial", "volumetric", "4d", "operator")
-                       else (len(data.node_feats) if data.node_feats is not None else len(data.y)))
+            n_total = (
+                len(data.dense)
+                if self.contract in ("sequence", "spatial", "volumetric", "4d", "operator")
+                else (len(data.node_feats) if data.node_feats is not None else len(data.y))
+            )
             # gibbs_beta may be 'auto' (resolved per-fit); if the gibbs path ran it is echoed in the result,
             # else fall back to the configured value (numeric default 8.0). 'auto' with no gibbs run -> use 8.0.
             gb = self.gibbs_beta
@@ -134,11 +160,19 @@ class _ReportsMixin:
             if not check["ok"]:
                 self._log(f"[AllGraph] thermodynamic consistency WARNING: {' | '.join(check['issues'])}")
             else:
-                self._log(f"[AllGraph] thermodynamic potential: beta_W=1/log n={check['beta_W']:.4f} (weights), "
-                          f"beta_A=gibbs_beta={check['beta_A']:.2f} (primitives), beta_C=1 (contracts) -- one "
-                          f"free-energy form, three decoupled temperatures.")
-            return {"levels": list(POTENTIAL_LEVELS), "consistency": check, "n": int(n_total),
-                    "beta_W": wbic_beta(n_total), "beta_A": float(gb), "beta_C": 1.0}
+                self._log(
+                    f"[AllGraph] thermodynamic potential: beta_W=1/log n={check['beta_W']:.4f} (weights), "
+                    f"beta_A=gibbs_beta={check['beta_A']:.2f} (primitives), beta_C=1 (contracts) -- one "
+                    f"free-energy form, three decoupled temperatures."
+                )
+            return {
+                "levels": list(POTENTIAL_LEVELS),
+                "consistency": check,
+                "n": int(n_total),
+                "beta_W": wbic_beta(n_total),
+                "beta_A": float(gb),
+                "beta_C": 1.0,
+            }
         except Exception as e:
             self._log(f"[AllGraph] thermodynamic report skipped ({str(e)[:70]})")
             return None
@@ -158,6 +192,7 @@ class _ReportsMixin:
         nothing perturbable). Diagnostic; returns the spectrum dict, or None on failure/empty."""
         try:
             from ..machinery.response_spectroscopy import response_spectrum
+
             # --- readout channel: solo energies + the beta actually used ---
             energies = result.get("gibbs_energies")
             beta = None
@@ -184,13 +219,16 @@ class _ReportsMixin:
                     # the priced objective lives in tb["mdl"] (the select_contract_mdl return): it carries
                     # risk, omega_struct, mu_c directly. Fall back to top-level keys if ever present.
                     src = tb.get("mdl") if isinstance(tb.get("mdl"), dict) else tb
-                    if isinstance(src, dict) and "omega_struct" in src and "risk" in src \
-                            and len(src["omega_struct"]) >= 2:
+                    if (
+                        isinstance(src, dict)
+                        and "omega_struct" in src
+                        and "risk" in src
+                        and len(src["omega_struct"]) >= 2
+                    ):
                         scores = {c: 1.0 - float(r) for c, r in src["risk"].items()}
                         omegas = {c: float(o) for c, o in src["omega_struct"].items()}
                         mu_c = float(src.get("mu_c", self.sparsity_mu or 0.05))
-            spec = response_spectrum(energies=energies, beta=beta,
-                                     scores=scores, omegas=omegas, mu_c=mu_c)
+            spec = response_spectrum(energies=energies, beta=beta, scores=scores, omegas=omegas, mu_c=mu_c)
             if spec.get("readout") is None and spec.get("contract") is None:
                 return None  # nothing perturbable to report
             self._log(f"[AllGraph] response spectroscopy: {spec['summary']}")
@@ -209,6 +247,7 @@ class _ReportsMixin:
             import numpy as _np
 
             from ..machinery.effective_dimension_ledger import effective_dimension_ledger
+
             # --- data-modes level: covariance spectrum of the input features (cheap) ---
             cov_spectrum = None
             X = None
@@ -225,7 +264,7 @@ class _ReportsMixin:
                 Xc = X - X.mean(axis=0, keepdims=True)
                 # covariance eigenvalues via SVD (numerically stable), same convention as effective_dimension
                 s = _np.linalg.svd(Xc, compute_uv=False)
-                cov_spectrum = (s ** 2) / max(len(X) - 1, 1)
+                cov_spectrum = (s**2) / max(len(X) - 1, 1)
             # --- primitive-mixture level: the deployed mixture weights w = softmax(alpha) ---
             weights = result.get("gibbs_weights")
             alpha_vec = None
@@ -236,8 +275,11 @@ class _ReportsMixin:
             ledger = effective_dimension_ledger(cov_spectrum=cov_spectrum, alpha=alpha_vec, llc=llc)
             if not ledger["levels"]:
                 return None
-            summary = "; ".join(f"{lv['level']}={lv['value']:.2f} {lv['unit']}"
-                                for lv in ledger["levels"] if lv.get("value") is not None)
+            summary = "; ".join(
+                f"{lv['level']}={lv['value']:.2f} {lv['unit']}"
+                for lv in ledger["levels"]
+                if lv.get("value") is not None
+            )
             self._log(f"[AllGraph] effective-dimension ledger: {summary}")
             return ledger
         except Exception as e:
@@ -257,6 +299,7 @@ class _ReportsMixin:
         of the deployed weights -- this is a read-out of the SELECTED architecture's learning dynamics."""
         try:
             from ..machinery.developmental_llc import developmental_llc as _dev_llc
+
             mod = self.contract
             builder = self._selected_net_builder(data, task)
             if builder is None:
@@ -283,21 +326,36 @@ class _ReportsMixin:
             # to a healthy multiple of the fit budget so the onset is actually reached within the trajectory.
             te = self.developmental_llc_epochs or max(self.epochs * 4, 120)
 
-            out = _dev_llc(builder, make_closure, train_step, n_total,
-                           total_epochs=te, checkpoints=self.developmental_llc_checkpoints,
-                           chains=chains, steps=steps, burn=burn, eps=2e-5, gamma=100.0, seed=self.seed)
+            out = _dev_llc(
+                builder,
+                make_closure,
+                train_step,
+                n_total,
+                total_epochs=te,
+                checkpoints=self.developmental_llc_checkpoints,
+                chains=chains,
+                steps=steps,
+                burn=burn,
+                eps=2e-5,
+                gamma=100.0,
+                seed=self.seed,
+            )
             tr = out.get("transitions", {})
             onset = tr.get("convergence_onset_epoch")
             njumps = len(tr.get("candidate_staged_jumps", []))
             if onset is not None:
-                self._log(f"[AllGraph] developmental LLC: convergence onset at epoch {onset} "
-                          f"(lambda flips negative->positive; usable capacity turns on); "
-                          f"{njumps} candidate staged jump(s); final lambda={out['final']['lambda']:.2f} "
-                          f"(k/2={out['half_params']:.0f}).")
+                self._log(
+                    f"[AllGraph] developmental LLC: convergence onset at epoch {onset} "
+                    f"(lambda flips negative->positive; usable capacity turns on); "
+                    f"{njumps} candidate staged jump(s); final lambda={out['final']['lambda']:.2f} "
+                    f"(k/2={out['half_params']:.0f})."
+                )
             else:
-                self._log(f"[AllGraph] developmental LLC: no stable convergence onset within "
-                          f"{out['checkpoints'][-1]} epochs (net may need a longer trajectory to converge); "
-                          f"curve reported for inspection.")
+                self._log(
+                    f"[AllGraph] developmental LLC: no stable convergence onset within "
+                    f"{out['checkpoints'][-1]} epochs (net may need a longer trajectory to converge); "
+                    f"curve reported for inspection."
+                )
             return out
         except Exception as e:
             self._log(f"[AllGraph] developmental LLC skipped ({str(e)[:70]})")
@@ -312,18 +370,24 @@ class _ReportsMixin:
         modest by default since relational forwards are expensive; raise it for a lower-variance estimate."""
         try:
             from ..machinery.singular_complexity import estimate_llc, free_energy
+
             closure, n_total = self._llc_closure(net, data, task, batch)
-            r = estimate_llc(net, closure, n_total, chains=chains, steps=steps, burn=burn, eps=2e-5,
-                             gamma=100.0, seed=self.seed)
+            r = estimate_llc(
+                net, closure, n_total, chains=chains, steps=steps, burn=burn, eps=2e-5, gamma=100.0, seed=self.seed
+            )
             r["free_energy_singular"] = free_energy(r["L_star"], r["lambda"], n_total)
             r["free_energy_bic"] = free_energy(r["L_star"], r["half_params"], n_total)
             if r.get("valid", True):
-                self._log(f"[AllGraph] LLC lambda={r['lambda']:.2f}+/-{r['lambda_std']:.2f} "
-                          f"(k/2={r['half_params']:.0f}, ratio={r['ratio']:.4f}) -> singular complexity << param count")
+                self._log(
+                    f"[AllGraph] LLC lambda={r['lambda']:.2f}+/-{r['lambda_std']:.2f} "
+                    f"(k/2={r['half_params']:.0f}, ratio={r['ratio']:.4f}) -> singular complexity << param count"
+                )
             else:
-                self._log(f"[AllGraph] LLC lambda={r['lambda']:.2f} is negative -> deployed net not at a "
-                          f"converged minimum at this epoch budget; LLC needs a converged w* (train longer). "
-                          f"Reported as invalid.")
+                self._log(
+                    f"[AllGraph] LLC lambda={r['lambda']:.2f} is negative -> deployed net not at a "
+                    f"converged minimum at this epoch budget; LLC needs a converged w* (train longer). "
+                    f"Reported as invalid."
+                )
             return r
         except Exception as e:
             self._log(f"[AllGraph] LLC report skipped ({str(e)[:70]})")
@@ -342,30 +406,40 @@ class _ReportsMixin:
             y = np.asarray(data.y, dtype=np.float32)
             ids = np.arange(len(data.node_feats))
             with torch.no_grad():
-                pred = self._forward_contract(self.net, data, ids, self.contract, True, True, 3.0).squeeze(-1).cpu().numpy()
+                pred = (
+                    self._forward_contract(self.net, data, ids, self.contract, True, True, 3.0)
+                    .squeeze(-1)
+                    .cpu()
+                    .numpy()
+                )
             if task == "classification":
-                return None                       # probe is defined for regression residuals
-            resid = y[:len(pred)] - pred
+                return None  # probe is defined for regression residuals
+            resid = y[: len(pred)] - pred
             resid = (resid - resid.mean()) / (resid.std() + 1e-9)
-            positions = [np.asarray(p, dtype=np.float32) for p in data.positions][:len(pred)]
-            dip = np.stack([p.sum(0) for p in positions])                      # non-invariant vector
-            inv = np.stack([np.sqrt((p ** 2).sum()) for p in positions]).reshape(-1, 1)  # invariant control
+            positions = [np.asarray(p, dtype=np.float32) for p in data.positions][: len(pred)]
+            dip = np.stack([p.sum(0) for p in positions])  # non-invariant vector
+            inv = np.stack([np.sqrt((p**2).sum()) for p in positions]).reshape(-1, 1)  # invariant control
 
             def explained_var(X):
                 X = (X - X.mean(0)) / (X.std(0) + 1e-9)
                 Xb = np.concatenate([X, np.ones((len(X), 1))], 1)
                 beta, _, _, _ = np.linalg.lstsq(Xb, resid, rcond=None)
                 pr = Xb @ beta
-                return float(1 - ((resid - pr) ** 2).sum() / ((resid ** 2).sum() + 1e-9))
+                return float(1 - ((resid - pr) ** 2).sum() / ((resid**2).sum() + 1e-9))
 
-            ev_ni = explained_var(dip); ev_i = explained_var(inv)
+            ev_ni = explained_var(dip)
+            ev_i = explained_var(inv)
             signal = ev_ni - ev_i
-            broken = signal > 0.1                  # non-invariant explains residual appreciably beyond invariant
-            return {"breaking_signal": round(signal, 3), "resid_explained_noninvariant": round(ev_ni, 3),
-                    "resid_explained_invariant": round(ev_i, 3), "symmetry_broken": bool(broken),
-                    "note": "residual of the strict-equivariant fit probed by a non-invariant vs invariant "
-                            "feature; positive breaking_signal => symmetry appears broken (consider "
-                            "price_equivariance). Cheap: one linear probe on the trained net."}
+            broken = signal > 0.1  # non-invariant explains residual appreciably beyond invariant
+            return {
+                "breaking_signal": round(signal, 3),
+                "resid_explained_noninvariant": round(ev_ni, 3),
+                "resid_explained_invariant": round(ev_i, 3),
+                "symmetry_broken": bool(broken),
+                "note": "residual of the strict-equivariant fit probed by a non-invariant vs invariant "
+                "feature; positive breaking_signal => symmetry appears broken (consider "
+                "price_equivariance). Cheap: one linear probe on the trained net.",
+            }
         except Exception as e:
             self._log(f"[AllGraph] equivariance-breaking probe skipped ({str(e)[:60]})")
             return None

@@ -15,6 +15,7 @@ Run from the repository root:
 
     python -m examples.streaming_graphs
 """
+
 from __future__ import annotations
 
 import tempfile
@@ -26,7 +27,7 @@ import torch
 
 from ilmarinen import AllData, AllGraph, LazyGraphSource
 
-warnings.filterwarnings("ignore")                        # silence torch index_reduce beta warning in the demo
+warnings.filterwarnings("ignore")  # silence torch index_reduce beta warning in the demo
 
 
 def make_graphs(n=240, n_nodes=8, n_feat=4, seed=0):
@@ -37,7 +38,7 @@ def make_graphs(n=240, n_nodes=8, n_feat=4, seed=0):
         f = rng.randn(n_nodes, n_feat).astype(np.float32)
         e = [(i, (i + 1) % n_nodes) for i in range(n_nodes)] + [(0, n_nodes // 2)]
         node_feats.append(f)
-        edges.append(np.array(e, dtype=np.int64).T)      # (2, E)
+        edges.append(np.array(e, dtype=np.int64).T)  # (2, E)
         ys.append(int(f[:, 0].sum() > 0))
     return node_feats, edges, np.array(ys, dtype=np.int64)
 
@@ -53,7 +54,7 @@ def main():
 
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)
-        for i, (f, e) in enumerate(zip(node_feats, edges)):   # one file pair per graph, on disk
+        for i, (f, e) in enumerate(zip(node_feats, edges)):  # one file pair per graph, on disk
             np.save(root / f"node_{i}.npy", f)
             np.save(root / f"edge_{i}.npy", e)
         print(f"wrote {len(node_feats)} graphs to {root.name}/ as per-graph .npy files")
@@ -66,19 +67,22 @@ def main():
         # The loader returns {'node': ..., 'edge': ...} for graph i; only the minibatch in flight is resident.
         # Declare n / n_in / has_edges up front so the builder reads shapes as metadata (never a fetch).
         def load_graph(i):
-            return {"node": np.load(root / f"node_{i}.npy"),
-                    "edge": np.load(root / f"edge_{i}.npy")}
+            return {"node": np.load(root / f"node_{i}.npy"), "edge": np.load(root / f"edge_{i}.npy")}
 
         source = LazyGraphSource(load_graph, n=len(node_feats), n_in=node_feats[0].shape[1], has_edges=True)
         mg_stream = AllGraph(**cfg)
         r_stream = mg_stream.fit(
             AllData.graph_stream(source, y=y, kind_hint="graph"),
-            task="classification", n_out=2, stream=True,
+            task="classification",
+            n_out=2,
+            stream=True,
         )
 
     print()
     print(f"resident : contract={r_res['contract']:6s} value={r_res['value']:.4f}  n_params={r_res['n_params']}")
-    print(f"streaming: contract={r_stream['contract']:6s} value={r_stream['value']:.4f}  n_params={r_stream['n_params']}")
+    print(
+        f"streaming: contract={r_stream['contract']:6s} value={r_stream['value']:.4f}  n_params={r_stream['n_params']}"
+    )
     print()
     identical = weights_identical(mg_resident.net, mg_stream.net)
     print(f"trained weights bit-identical (streaming == resident): {identical}")

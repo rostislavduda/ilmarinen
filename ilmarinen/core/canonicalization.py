@@ -23,6 +23,7 @@ VALIDATED (tests/canonicalization.md):
   * a degeneracy guard flags clouds with a near-degenerate inertia spectrum (spheres, symmetric tops,
     tetrahedra/cubes), where the frame is ambiguous, so the caller can fall back (skip canonicalization).
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -39,8 +40,8 @@ def canonicalize_cloud(P, degen_tol=0.12):
     if len(P) < 2:
         return P, True
     cov = P.T @ P / len(P)
-    w, V = np.linalg.eigh(cov)                 # ascending
-    order = np.argsort(w)[::-1]                 # largest inertia eigenvalue first
+    w, V = np.linalg.eigh(cov)  # ascending
+    order = np.argsort(w)[::-1]  # largest inertia eigenvalue first
     w = w[order]
     V = V[:, order]
     # degeneracy guard: any adjacent pair of eigenvalues within degen_tol (relative) -> ambiguous frame
@@ -50,7 +51,7 @@ def canonicalize_cloud(P, degen_tol=0.12):
         if (w[i] - w[i + 1]) / denom < degen_tol:
             degenerate = True
             break
-    Pc = P @ V                                  # rotate into the principal frame
+    Pc = P @ V  # rotate into the principal frame
     # deterministic sign convention: along each axis, make the largest-magnitude coordinate positive.
     for k in range(Pc.shape[1]):
         j = int(np.argmax(np.abs(Pc[:, k])))
@@ -70,7 +71,7 @@ def canonicalize_positions(positions, degen_tol=0.12):
         if deg:
             ndeg += 1
             P0 = np.asarray(P, float)
-            out.append(P0 - P0.mean(0))         # centered but not rotated (frame ambiguous)
+            out.append(P0 - P0.mean(0))  # centered but not rotated (frame ambiguous)
         else:
             out.append(Pc)
     frac = ndeg / max(len(positions), 1)
@@ -88,13 +89,16 @@ def canonicalize_data(data, max_degenerate_frac=0.5, degen_tol=0.12):
     to an orientation-dependent target would (correctly) destroy signal, so the caller gates on that.
     """
     import copy
+
     if getattr(data, "positions", None) is None:
         return data, {"applied": False, "reason": "no positions"}
     canon, frac = canonicalize_positions(data.positions, degen_tol=degen_tol)
     if frac > max_degenerate_frac:
-        return data, {"applied": False, "reason": f"too many degenerate frames ({frac:.0%})",
-                      "degenerate_frac": frac}
+        return data, {"applied": False, "reason": f"too many degenerate frames ({frac:.0%})", "degenerate_frac": frac}
     new = copy.copy(data)
     new.positions = canon
-    return new, {"applied": True, "degenerate_frac": frac,
-                 "note": "positions canonicalized to principal-axis frame (SO(3) symmetry used up)"}
+    return new, {
+        "applied": True,
+        "degenerate_frac": frac,
+        "note": "positions canonicalized to principal-axis frame (SO(3) symmetry used up)",
+    }

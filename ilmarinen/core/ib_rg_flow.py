@@ -115,18 +115,25 @@ def layer_rg_flow(layer_activations, Y, betas=None, ridge=1e-6):
     for li, H in enumerate(layer_activations):
         H = np.asarray(H, dtype=np.float64)
         lam, rho2 = gib_spectrum(H, Y, ridge=ridge)
-        row = {"layer": li, "top_canonical_corr": float(np.sqrt(np.clip(1.0 - lam.min(), 0.0, 1.0))),
-               "relevant_information": float(-0.5 * np.sum(np.log(np.clip(lam, 1e-6, 1.0)))),
-               "n_informative": int((lam < 0.9).sum()), "min_lambda": float(lam.min())}
+        row = {
+            "layer": li,
+            "top_canonical_corr": float(np.sqrt(np.clip(1.0 - lam.min(), 0.0, 1.0))),
+            "relevant_information": float(-0.5 * np.sum(np.log(np.clip(lam, 1e-6, 1.0)))),
+            "n_informative": int((lam < 0.9).sum()),
+            "min_lambda": float(lam.min()),
+        }
         if beta_ref is not None:
             row["d_IB_at_beta"] = int(ib_effective_dimension(lam, beta_ref))
         rows.append(row)
     ccs = [r["top_canonical_corr"] for r in rows]
     monotone = all(ccs[i] <= ccs[i + 1] + 1e-6 for i in range(len(ccs) - 1))
-    return {"layers": rows, "top_canonical_corr_monotone": bool(monotone),
-            "note": "GIB flow across layers: a monotone rise in top_canonical_corr/relevant_information is the "
-                    "measurable RG coarse-graining of depth toward the target, quantified by the same Gaussian "
-                    "IB spectrum used for the beta-scale flow."}
+    return {
+        "layers": rows,
+        "top_canonical_corr_monotone": bool(monotone),
+        "note": "GIB flow across layers: a monotone rise in top_canonical_corr/relevant_information is the "
+        "measurable RG coarse-graining of depth toward the target, quantified by the same Gaussian "
+        "IB spectrum used for the beta-scale flow.",
+    }
 
 
 def ib_rg_flow(X, Y, betas=None, ridge=1e-6):
@@ -160,16 +167,25 @@ def ib_rg_flow(X, Y, betas=None, ridge=1e-6):
     n = len(np.asarray(X))
     dy = 1 if np.asarray(Y).ndim == 1 else np.asarray(Y).shape[1]
     corr_floor = max(0.1, np.sqrt(dy / max(n, 1)) * 1.5)
-    informative = rho2 > corr_floor ** 2                    # modes with real canonical correlation to Y
+    informative = rho2 > corr_floor**2  # modes with real canonical correlation to Y
     n_informative = int(informative.sum())
     bc_informative = np.sort(bc[informative]) if n_informative else np.array([])
     # static unsupervised participation ratio of Cov(X) (the metaphor)
-    Xc = np.asarray(X, dtype=np.float64); Xc = Xc - Xc.mean(0, keepdims=True)
+    Xc = np.asarray(X, dtype=np.float64)
+    Xc = Xc - Xc.mean(0, keepdims=True)
     s = np.linalg.svd(Xc, full_matrices=False, compute_uv=False)
-    ev = s ** 2
+    ev = s**2
     p = ev / ev.sum() if ev.sum() > 0 else np.ones_like(ev) / len(ev)
-    d_eff_static = float(1.0 / np.sum(p ** 2))
-    return {"lam": lam, "canonical_corr": np.sort(np.sqrt(rho2))[::-1], "critical_betas": np.sort(bc),
-            "betas": betas, "d_IB": d, "transitions": transitions, "d_eff_static": d_eff_static,
-            "n_informative": n_informative, "critical_betas_informative": bc_informative,
-            "corr_floor": float(corr_floor)}
+    d_eff_static = float(1.0 / np.sum(p**2))
+    return {
+        "lam": lam,
+        "canonical_corr": np.sort(np.sqrt(rho2))[::-1],
+        "critical_betas": np.sort(bc),
+        "betas": betas,
+        "d_IB": d,
+        "transitions": transitions,
+        "d_eff_static": d_eff_static,
+        "n_informative": n_informative,
+        "critical_betas_informative": bc_informative,
+        "corr_floor": float(corr_floor),
+    }

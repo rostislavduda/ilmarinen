@@ -32,6 +32,7 @@ So this module is a validated continuous-depth MODEL + a validated criticality c
 NOT a validated instance of the depth-freedom scaling law. `arc_length` and
 `leading_jacobian_re` are retained as measurement tools (they produced the refutation).
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -40,6 +41,7 @@ import torch.nn as nn
 
 try:
     from torchdiffeq import odeint_adjoint as _odeint
+
     _HAVE_TORCHDIFFEQ = True
 except Exception:  # pragma: no cover
     _HAVE_TORCHDIFFEQ = False
@@ -52,9 +54,7 @@ class ODEFunc(nn.Module):
         super().__init__()
         torch.manual_seed(seed)
         A = nn.Tanh if act == "tanh" else nn.ReLU
-        self.net = nn.Sequential(
-            nn.Linear(dim, hidden), A(), nn.Linear(hidden, dim)
-        )
+        self.net = nn.Sequential(nn.Linear(dim, hidden), A(), nn.Linear(hidden, dim))
         for m in self.net:
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight, gain=0.7)
@@ -80,8 +80,7 @@ def criticality_penalty(func, z, iters=4):
     v = v / (v.norm(dim=1, keepdim=True) + 1e-9)
     lam = None
     for _ in range(iters):
-        Jv = torch.autograd.grad(f, zc, grad_outputs=v, create_graph=True,
-                                 retain_graph=True)[0]
+        Jv = torch.autograd.grad(f, zc, grad_outputs=v, create_graph=True, retain_graph=True)[0]
         lam = (v * Jv).sum(1)
         v = (Jv / (Jv.norm(dim=1, keepdim=True) + 1e-9)).detach()
     return lam
@@ -94,8 +93,7 @@ class NeuralODE(nn.Module):
     the planar flow room to untangle non-separable classes.
     """
 
-    def __init__(self, n_in=2, n_out=2, act="tanh", aug=4, T=1.0, steps=30,
-                 hidden=48, seed=0):
+    def __init__(self, n_in=2, n_out=2, act="tanh", aug=4, T=1.0, steps=30, hidden=48, seed=0):
         super().__init__()
         if not _HAVE_TORCHDIFFEQ:
             raise ImportError("NeuralODE requires torchdiffeq (pip install torchdiffeq)")
@@ -126,8 +124,7 @@ class NeuralODE(nn.Module):
         with torch.no_grad():
             tt = torch.linspace(0, T_eval, steps)
             traj = _odeint(self.func, self.embed(x), tt, method="rk4")
-            sp = [self.func(tt[k], traj[k]).norm(dim=1).mean().item()
-                  for k in range(steps)]
+            sp = [self.func(tt[k], traj[k]).norm(dim=1).mean().item() for k in range(steps)]
             return float(np.trapz(np.array(sp), dx=T_eval / (steps - 1)))
 
     def leading_jacobian_re(self, x, n_pts=6):
@@ -137,6 +134,7 @@ class NeuralODE(nn.Module):
         (contracting), ~0 critical (marginal). Uses functional jacobian.
         """
         from torch.func import jacrev
+
         with torch.no_grad():
             tt = torch.linspace(0, self.T, 4)
             traj = _odeint(self.func, self.embed(x), tt, method="rk4")
