@@ -10,9 +10,9 @@ charge `Omega` a **derived** code length rather than a hand-set constant. The or
 physicist's ordering: fix the kinematics (symmetry, effective dimension) first, then let the dynamics
 (training) select the remaining degrees of freedom under one Occam objective.
 
-This is a research package. Findings — including first-class negatives — are recorded in
-`STUDY_LOG.md` (generated from the write-ups in `tests/*.md`) and written up in three PDF reports
-(see **Reports** below).
+This is a research package. Findings — including first-class negatives — are written up in three PDF
+reports (see **Reports** below). Detailed per-study write-ups are kept in the author's working tree
+and are not part of this distribution.
 
 ## Install / instantiate a container
 
@@ -112,7 +112,7 @@ python -m validation_runners.run_quick_validation --report_llc --report_ledger -
 ```
 
 Both runners expose every opt-in flag (`--help` lists them). `studies/` holds the standalone study
-reproducers referenced by `STUDY_LOG.md`.
+reproducers.
 
 ## Tests
 
@@ -150,9 +150,8 @@ ilmarinen/
 └── _selfcheck.py  integrity check over all modules and primitives
 
 validation_runners/   the quick + standard validation CLIs (every flag exposed)
-studies/              standalone study reproducers (source for STUDY_LOG.md)
+studies/              standalone study reproducers
 tests_unit/           the unit suite
-tests/                per-study write-ups (compiled into STUDY_LOG.md)
 ```
 
 ## Data locations (portable)
