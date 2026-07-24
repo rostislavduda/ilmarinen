@@ -22,15 +22,16 @@ Usage:
 import argparse
 import os
 import sys
+
 import numpy as np
 import torch
 import torch.nn as nn
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from ilmarinen.models import build_spatial_schema
-from ilmarinen.machinery.priced_structural import kernel_costs, priced_objective, select_by_priced_rule
 from ilmarinen.core.correlation_length import recommend_conv_primitive
+from ilmarinen.machinery.priced_structural import kernel_costs, priced_objective, select_by_priced_rule
+from ilmarinen.models import build_spatial_schema
 
 # candidate set: conv at three receptive fields + the non-conv spatial primitives
 

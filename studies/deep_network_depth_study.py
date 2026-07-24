@@ -30,6 +30,7 @@ Run: python studies/deep_network_depth_study.py
 """
 import warnings; warnings.filterwarnings("ignore")
 import sys
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -101,8 +102,8 @@ def esol_production_depth(max_depth_cap=8):
     print("PART 2 -- ESOL via the REAL production path (select_architecture_by_area)")
     print("=" * 74)
     try:
-        from ilmarinen.core.moleculenet import load_esol
         from ilmarinen.core.allgraph import AllData, AllGraph
+        from ilmarinen.core.moleculenet import load_esol
     except Exception as e:
         print(f"  SKIP (import failed: {str(e)[:60]})\n")
         return

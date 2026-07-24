@@ -33,7 +33,9 @@ Both branches are strictly monotone up their lattice, so a richer contract must 
 by a risk reduction exceeding mu_c times the added code length -- the marginal-value rule, one rung up.
 """
 from __future__ import annotations
+
 import math
+
 import numpy as np
 
 
@@ -173,6 +175,7 @@ def price_tensorization(X, mu=0.05, method="gaussian", axis_bits=None, max_rank=
     degeneracy of the flat-distance profile and may be mis-ranked; refused rather than guessed.
     """
     import numpy as _np
+
     from ..core.mode_structure import mutual_information_matrix, parse_grid_shape, parse_grid_shape_scalable
     X = _np.asarray(X, float)
     D = X.shape[1]

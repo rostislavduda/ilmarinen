@@ -60,7 +60,9 @@ resources it actually possesses. This module implements the loop generically ove
 exposes per-cell primitive alphas, plus optional width/depth/max-l gates supplied by a thin adapter.
 """
 from __future__ import annotations
+
 import math
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -141,7 +143,7 @@ class DifferentiableReadout(nn.Module):
         return h.amax(dim=1)                                      # amax, not max().values: MPS-safe over NaN
 
     def _pool_graph(self, h, batch, n_graphs, op):              # h: (N,w)
-        from ilmarinen.models.graph_schema import _scatter_sum, _scatter_mean, _scatter_max
+        from ilmarinen.models.graph_schema import _scatter_max, _scatter_mean, _scatter_sum
         if op == "sum": return _scatter_sum(h, batch, n_graphs)
         if op == "mean": return _scatter_mean(h, batch, n_graphs)
         return _scatter_max(h, batch, n_graphs)

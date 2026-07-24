@@ -121,8 +121,7 @@ class _ReportsMixin:
         without being coupled. Diagnostic; returns the hierarchy dict + the consistency result, or None on
         failure (best-effort). Does not change selection."""
         try:
-            from ..machinery.thermodynamic_potential import (assert_temperature_consistency, wbic_beta,
-                                                             POTENTIAL_LEVELS)
+            from ..machinery.thermodynamic_potential import POTENTIAL_LEVELS, assert_temperature_consistency, wbic_beta
             # n = training-set size (fixes beta_W); resolve the actual Level-A temperature in use.
             n_total = (len(data.dense) if self.contract in ("sequence", "spatial", "volumetric", "4d", "operator")
                        else (len(data.node_feats) if data.node_feats is not None else len(data.y)))
@@ -207,8 +206,9 @@ class _ReportsMixin:
         level). No selection is changed; a level is omitted when its input is unavailable. Best-effort;
         returns the ledger dict or None."""
         try:
-            from ..machinery.effective_dimension_ledger import effective_dimension_ledger
             import numpy as _np
+
+            from ..machinery.effective_dimension_ledger import effective_dimension_ledger
             # --- data-modes level: covariance spectrum of the input features (cheap) ---
             cov_spectrum = None
             X = None

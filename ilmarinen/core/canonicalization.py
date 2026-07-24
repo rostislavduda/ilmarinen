@@ -24,6 +24,7 @@ VALIDATED (tests/canonicalization.md):
     tetrahedra/cubes), where the frame is ambiguous, so the caller can fall back (skip canonicalization).
 """
 from __future__ import annotations
+
 import numpy as np
 
 

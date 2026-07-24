@@ -37,6 +37,7 @@ This module leaves DARTS and every validated schema UNTOUCHED; it is a separate,
 selector that reads clean-solo energies and returns the derived Gibbs-alpha.
 """
 from __future__ import annotations
+
 import numpy as np
 
 

@@ -27,7 +27,15 @@ USAGE:
     python run_standard_validation.py --contracts graph,equivariant
     python run_standard_validation.py --epochs_scale 2.0   # longer training
 """
-import argparse, gc, os, sys, time, numpy as np, torch
+import argparse
+import gc
+import os
+import sys
+import time
+
+import numpy as np
+import torch
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")   # let unsupported MPS ops fall back to CPU
 from ilmarinen.core.allgraph import AllGraph
@@ -479,7 +487,8 @@ def apply_opt_preset(args, expected_mod):
     overrides = _OPT_FLAGS.get(expected_mod)
     if not overrides:
         return args
-    import copy, sys
+    import copy
+    import sys
     given = {tok[2:].split("=")[0] for tok in sys.argv[1:] if tok.startswith("--")}
     run = copy.copy(args)
     for k, v in overrides.items():

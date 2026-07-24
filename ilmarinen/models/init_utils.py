@@ -5,6 +5,7 @@ current schemas depend on this small shared util rather than on that legacy modu
 build path free of legacy imports.
 """
 from __future__ import annotations
+
 import numpy as np
 import torch
 import torch.nn as nn

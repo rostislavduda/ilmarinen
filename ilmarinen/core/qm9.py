@@ -9,7 +9,9 @@ Kaggle) may be network-restricted; obtain the dsgdb9nsd.xyz.tar.bz2 and extract 
 point load_qm9_dir at it.
 """
 from __future__ import annotations
+
 import os
+
 import numpy as np
 
 QM9_ELEMENTS = ['H', 'C', 'N', 'O', 'F']

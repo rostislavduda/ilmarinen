@@ -17,11 +17,18 @@ selected network structure is visible.
 Datasets: image datasets (CIFAR-10, Fashion-MNIST) where routing should send data to conv2d, and
 UCR time series where routing should keep them as sequences (control that routing does no harm).
 """
-import argparse, os, sys, numpy as np, torch, torch.nn as nn
+import argparse
+import os
+import sys
+
+import numpy as np
+import torch
+import torch.nn as nn
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from ilmarinen.core.route import route_by_structure
 from ilmarinen.models.schema import build_schema
 from ilmarinen.models.spatial_schema import build_spatial_schema
-from ilmarinen.core.route import route_by_structure
 
 SEQ_PRIMS = ("plain", "gated", "lstm", "conv", "spectral", "attention", "dense", "linssm", "norm")
 
@@ -130,7 +137,7 @@ def metaoptimize(build_for, Xw, yw, Xv, yv, Xte, yte, widths, depths, seed, epoc
                          the next layer/neuron block is not worth its price. This is the Route-2
                          grand-canonical depth condition -dS*/dL = mu from the analytical report.
     """
-    from ilmarinen.machinery.priced_depth import measure_depth_curve, select_depth, significant_elbow
+    from ilmarinen.machinery.priced_depth import measure_depth_curve, select_depth
 
     def fit(w, d):
         va, vl, net = fit_once(lambda s: build_for(w, d, s), Xw, yw, Xv, yv, seed, epochs, mu, gamma)

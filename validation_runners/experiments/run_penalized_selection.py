@@ -27,9 +27,17 @@ Usage:
   python run_penalized_selection.py --dataset GunPoint --mu 0.3
   python run_penalized_selection.py --dataset ItalyPowerDemand --mu 0.5 --widths 8,16,32,64 --acc_tol 0.02
 """
-import argparse, os, sys, numpy as np, torch, torch.nn as nn
+import argparse
+import os
+import sys
+
+import numpy as np
+import torch
+import torch.nn as nn
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from aeon.datasets import load_classification
+
 from ilmarinen.models.schema import build_schema
 
 DEFAULT_PRIMS = ("plain", "gated", "lstm", "conv", "attention", "dense", "norm", "spectral")
@@ -132,7 +140,7 @@ def run(args):
     print("  width sweep (val acc): " + ", ".join(f"{w}:{va:.3f}" for w, va, _ in rows))
     print(f"  -> WIDTH K* = {Kstar} (smallest within {args.acc_tol} of best val acc {best_va:.3f})")
     print(f"  -> architecture: {arch}   ({params} schema params)")
-    print(f"  peak-alpha: " + ", ".join(f"{p}={v:.2f}" for p, v in zip(prims, peak)))
+    print("  peak-alpha: " + ", ".join(f"{p}={v:.2f}" for p, v in zip(prims, peak)))
     print(f"  TEST accuracy: {test_acc:.3f}   (majority baseline {maj:.3f})")
 
 

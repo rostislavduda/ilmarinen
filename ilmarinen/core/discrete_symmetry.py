@@ -20,7 +20,9 @@ second-most-common discrete symmetry after permutation. S_n (permutation) is a s
 search built on the same equivariance-testing primitive.
 """
 from __future__ import annotations
+
 import itertools
+
 import numpy as np
 import torch
 

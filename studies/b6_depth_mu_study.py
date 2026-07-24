@@ -16,10 +16,11 @@ Run: python studies/b6_depth_mu_study.py [dataset_name]
 """
 import warnings; warnings.filterwarnings("ignore")
 import sys
+
 import numpy as np
 
 sys.path.insert(0, ".")
-from ilmarinen.machinery.priced_depth import DepthCurve, select_depth, measure_depth_curve  # noqa: E402
+from ilmarinen.machinery.priced_depth import DepthCurve, measure_depth_curve, select_depth  # noqa: E402
 
 
 def synthetic_recovery(alphas=(1.0, 2.0, 3.0), Lmax=60):
@@ -42,9 +43,10 @@ def synthetic_recovery(alphas=(1.0, 2.0, 3.0), Lmax=60):
 
 def measure_real_curve(name="ESOL", task="regression", width=48, depths=(1, 2, 3, 4, 5), seeds=(0, 1, 2)):
     """Measure a real depth curve vian AllGraph and fit the marginal-value power law."""
+    import torch
+
     from ilmarinen.core.allgraph import AllGraph
     from ilmarinen.core.dataset_registry import quick_suite
-    import torch
     d = quick_suite()[name][0](reduced=True, device="cpu"); tr, te = d["train"], d["test"]
 
     def train_eval(depth, seed):

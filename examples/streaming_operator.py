@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ilmarinen import AllGraph, AllData, MemmapOperatorSource
+from ilmarinen import AllData, AllGraph, MemmapOperatorSource
 
 
 def make_operator_data(n=400, grid=32, seed=0):

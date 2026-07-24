@@ -22,6 +22,7 @@ Applies to any model exposing a `.block.alpha` (spatial) or per-cell `.alpha`
 (recurrent) parameter; the alpha params are detected by name.
 """
 from __future__ import annotations
+
 import numpy as np
 import torch
 import torch.nn as nn

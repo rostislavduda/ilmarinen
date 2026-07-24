@@ -58,11 +58,9 @@ Tier-3 additions (close the last task x contract regression holes; light/real im
 
 from __future__ import annotations
 
-import json
-import urllib.request
-
 import numpy as np
-from .dataset_registry import qscale         # --data_scale multiplier applied to reduced (quick) subset sizes
+
+from .dataset_registry import qscale  # --data_scale multiplier applied to reduced (quick) subset sizes
 
 
 # --------------------------------------------------------------------------- 4D: 3D heat diffusion over time
@@ -172,9 +170,10 @@ def load_chickenpox(reduced, device):
     (county, time-window) is one sequence sample, so the 20 counties x many weeks give a real dataset.
 
     If the download fails (offline), raises RuntimeError with the URL so the caller can fetch it manually."""
+    import torch
+
     from .allgraph import AllData
     from .data_sources import pyg_temporal_json
-    import torch
     j = pyg_temporal_json("chickenpox")
     FX = np.asarray(j["FX"], dtype=np.float32)                # (weeks, counties) = (521, 20)
     weeks, counties = FX.shape
@@ -210,9 +209,10 @@ def load_superconductivity(reduced, device):
     material -> its critical temperature Tc (K), a regression. Tabular, so it routes to the dense/sequence
     contract as a flat feature vector; exercises the size selector and LLC on a real physics regression. Fetched
     via the ucimlrepo package / UCI URL, falling back to the uploaded superconductivty_data.zip. ~21k rows."""
+    import torch
+
     from .allgraph import AllData
     from .data_sources import superconductivity_arrays
-    import torch
     X, y = superconductivity_arrays()
     # standardize features and target
     X = (X - X.mean(0, keepdims=True)) / (X.std(0, keepdims=True) + 1e-6)
@@ -235,10 +235,11 @@ def load_rmd17_aspirin(reduced, device):
     """rMD17 aspirin (molecular dynamics): a 21-atom molecule (vs ethanol's 9), with multiple rotatable bonds
     -- a genuinely larger, more flexible geometry than ethanol or QM7. Energy is SO(3)-invariant, so it routes
     to the equivariant contract and exercises B4/B5. Reads the uploaded rmd17_aspirin.npz."""
-    from .rmd17 import load_rmd17 as _l
-    from .data_sources import rmd17_npz
-    from .allgraph import AllData
     import tempfile
+
+    from .allgraph import AllData
+    from .data_sources import rmd17_npz
+    from .rmd17 import load_rmd17 as _l
     npz = rmd17_npz("aspirin")
     tmp = tempfile.NamedTemporaryFile(suffix=".npz", delete=False)
     np.savez(tmp.name, **{k: npz[k] for k in npz.files}); tmp.close()
@@ -267,9 +268,10 @@ def load_rmd17_aspirin(reduced, device):
 
 # --------------------------------------------------------------------------- VOLUMETRIC: MedMNIST 3D (medicine)
 def _load_medmnist3d(flag, field, sota, chance, reduced):
+    import torch
+
     from .allgraph import AllData
     from .data_sources import medmnist_arrays
-    import torch
     d = medmnist_arrays(flag)
     Xtr = np.asarray(d["train_images"], dtype=np.float32); ytr = np.asarray(d["train_labels"]).astype(np.int64).ravel()
     Xte = np.asarray(d["test_images"], dtype=np.float32); yte = np.asarray(d["test_labels"]).astype(np.int64).ravel()
@@ -308,9 +310,10 @@ def load_englandcovid(reduced, device):
     windowed per-region forecasting (past W days -> next day), matching the lagged-feature setup of the
     original benchmark. New medical-domain sequence signal. Fetched from the PyG-Temporal GitHub mirror
     (~1.4 MB). Raises RuntimeError with the URL if offline."""
+    import torch
+
     from .allgraph import AllData
     from .data_sources import pyg_temporal_json
-    import torch
     j = pyg_temporal_json("england_covid")
     Y = np.asarray(j["y"], dtype=np.float32)                  # (time_periods, nodes) = (61, 129)
     periods, nodes = Y.shape
@@ -350,8 +353,8 @@ def load_jetmass(reduced, device):
     target is each jet's RELATIVE MASS -- a permutation-invariant function of the constituent set -- so it
     exercises the set contract on a REGRESSION target (the only set task the suite otherwise lacks). Reuses the
     JetNet loader, so it raises (and the runner skips) exactly when JetNet's data is absent."""
-    from .jetnet import load_jetnet as _l
     from .allgraph import AllData
+    from .jetnet import load_jetnet as _l
     particles, mask, labels, names = _l(n_per_class=qscale(700, lo=40) if reduced else None)
     nf = [particles[i][mask[i]] for i in range(len(labels))]
     y = np.array([_relative_jet_mass(p) for p in nf], dtype=np.float32)
@@ -389,8 +392,9 @@ def load_advectiondiffusion4d(reduced, device):
     is uninformative -- the initial field is random), so it genuinely exercises the spatiotemporal
     (b,C,T,D,H,W) conv4d path. Fills the 4d classification hole and adds a second, physically distinct 4d
     dataset beyond pure diffusion. Solver-generated locally, no download."""
-    from .allgraph import AllData
     import torch
+
+    from .allgraph import AllData
     S, T = (6, 5) if reduced else (8, 5)                      # smaller grid in reduced mode (4d conv ~ S^3*T; big GPU win)
     n = qscale(180) if reduced else 600
     rng = np.random.RandomState(0)
@@ -426,6 +430,7 @@ def _tu_graphs(name):
     """Parse a TU Dortmund graph-kernel dataset into per-graph (node_feats, edges, label). Featureless graphs
     (like IMDB-BINARY) get a one-hot node-DEGREE feature (capped at _TU_DEG_CAP), the standard substitute."""
     import os
+
     from .data_sources import tudataset_dir
     d = tudataset_dir(name)
     A = np.atleast_2d(np.loadtxt(os.path.join(d, f"{name}_A.txt"), delimiter=",", dtype=np.int64))   # (E,2) 1-idx
@@ -533,8 +538,9 @@ def load_modelnet10(reduced, device):
     fallback; skips (FileNotFoundError) if neither is present."""
     import glob
     import os
-    from .data_sources import modelnet10_dir
+
     from .allgraph import AllData
+    from .data_sources import modelnet10_dir
     root = modelnet10_dir()
     npts = 160 if reduced else 512
     rng = np.random.RandomState(0)
@@ -576,8 +582,8 @@ def load_toptagging(reduced, device):
     extended O(1,3) discovery machinery needs. (The built-in equivariant schema is 3D-only, so this routes
     to the set contract by default; the 4-momenta feed the opt-in `--discover extended` Lorentz path.) Needs
     pandas + PyTables to read the HDF5, plus a heavy first-time download or an uploaded file; skips otherwise."""
-    from .data_sources import top_tagging_h5
     from .allgraph import AllData
+    from .data_sources import top_tagging_h5
     try:
         import pandas as pd
     except ImportError:
@@ -617,8 +623,8 @@ def load_jetmasslorentz(reduced, device):
     recovered from the 4-momenta (carried as positions) and an EMLP for the discovered Lorentz group is
     deployed -- verified end to end: metric R^2=1.0, group O(1,3), 6 generators (so(1,3): 3 rotations + 3
     boosts). Reuses the JetNet loader, so no new download (skips exactly when JetNet's data is absent)."""
-    from .jetnet import load_jetnet as _l
     from .allgraph import AllData
+    from .jetnet import load_jetnet as _l
     particles, mask, labels, names = _l(n_per_class=qscale(700, lo=40) if reduced else None)
     jets, m2 = [], []
     for i in range(len(labels)):
@@ -648,11 +654,12 @@ def load_mnistangle(reduced, device):
     random angle in [-45,45] degrees; the target is that angle (standardized). REAL images with a genuinely
     continuous target -> exercises the spatial conv contract's REGRESSION head (the suite's only otherwise-
     uncovered spatial task). Semi-synthetic (real images, known target); MNIST is fetched via torchvision."""
-    from .allgraph import AllData
-    from .paths import data_dir
-    from scipy.ndimage import rotate as _rotate
     import torch
     import torchvision
+    from scipy.ndimage import rotate as _rotate
+
+    from .allgraph import AllData
+    from .paths import data_dir
     root = data_dir()
     tr = torchvision.datasets.MNIST(root=root, train=True, download=True)
     te = torchvision.datasets.MNIST(root=root, train=False, download=True)
@@ -684,8 +691,9 @@ def load_diffusionblob3d(reduced, device):
     into an anisotropic Gaussian blob at a random location; the target is the blob's EFFECTIVE WIDTH (geometric
     mean of the per-axis sigmas), which requires reading the blob's 3D spatial extent (not a mean/sum). Fills
     the volumetric-REGRESSION hole. Solver/synthetic, no download."""
-    from .allgraph import AllData
     import torch
+
+    from .allgraph import AllData
     S = 16
     n = qscale(400) if reduced else 800
     rng = np.random.RandomState(0)

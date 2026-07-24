@@ -21,6 +21,7 @@ frequency per bin on tasks with a KNOWN correct primitive; a calibrated method h
 (reliability diagonal). Returns the per-bin (confidence, accuracy) and the expected calibration error.
 """
 from __future__ import annotations
+
 import numpy as np
 
 

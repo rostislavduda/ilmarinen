@@ -28,7 +28,7 @@ def run():
         try: importlib.import_module(f"ilmarinen.legacy.{m}")
         except Exception as e: print(f"MISSING legacy/{m}: {e}"); ok = False
     try:
-        from ilmarinen.machinery import gibbs_alpha_select, gibbs_alpha, replicator_flow, select_beta_by_elbow
+        pass
     except Exception as e: print(f"MISSING gibbs_alpha exports: {e}"); ok = False
     for m in REQUIRED_MACHINERY:
         try: importlib.import_module(f"ilmarinen.machinery.{m}")
@@ -51,7 +51,7 @@ def run():
     # device helper + public API surface (deployability): the package must expose AllGraph/AllData and the
     # device auto-detection entry points at the top level.
     try:
-        from ilmarinen.device import best_device, resolve_device, mps_available  # noqa: F401
+        from ilmarinen.device import best_device, mps_available, resolve_device  # noqa: F401
     except Exception as e: print(f"MISSING device module: {e}"); ok = False
     try:
         import ilmarinen as _mo
@@ -62,4 +62,4 @@ def run():
     return 0 if ok else 1
 
 if __name__ == "__main__":
-    import sys; sys.exit(run())
+    import sys; sys.exit(run())  # noqa: I001

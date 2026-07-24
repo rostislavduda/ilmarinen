@@ -21,8 +21,10 @@ Validated in tests/extended_groups.md: exact recovery on constructed examples fo
 abstention on non-examples.
 """
 from __future__ import annotations
-import numpy as np
+
 from itertools import permutations
+
+import numpy as np
 
 from .metric_discovery import fit_metric_regression, metric_signature
 

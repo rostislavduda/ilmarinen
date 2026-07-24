@@ -11,6 +11,7 @@ Files: g.hdf5, q.hdf5, t.hdf5, w.hdf5, z.hdf5, each with:
   jet_features      (N, 4)      -- [pt, eta, mass, n_particles]  (not used for the set task)
 """
 from __future__ import annotations
+
 import numpy as np
 
 JET_CLASSES = ("g", "q", "t", "w", "z")

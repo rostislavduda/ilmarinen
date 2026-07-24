@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ilmarinen import AllGraph, AllData, MemmapDenseSource
+from ilmarinen import AllData, AllGraph, MemmapDenseSource
 
 
 def make_dataset(n=600, hw=10, seed=0):

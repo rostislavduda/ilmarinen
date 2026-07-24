@@ -14,8 +14,10 @@ avoid field-of-view leakage.
 Requires `jump-portrait` (pip install jump-portrait) and network access to the gallery S3 at first build.
 """
 from __future__ import annotations
+
 import contextlib
 import os
+
 import numpy as np
 
 # 6 CRISPR genes with distinct, well-studied morphological signatures, all present on source_13 with >=10
@@ -148,9 +150,9 @@ def _plan_class(gene, source, per_class, sites_per_well, have):
     rank_map). rank_map maps (plate, well, str(site)) -> (well_rank, site_rank) for EVERY selected field;
     to_fetch_table is the pyarrow sub-table of only the fields NOT already in `have` (a set of identities
     (f"{plate}/{well}", str(site))), or None when the class needs no new download."""
-    from jump_portrait.fetch import get_item_location_metadata
     import pyarrow as pa
     import pyarrow.compute as pc
+    from jump_portrait.fetch import get_item_location_metadata
     meta = get_item_location_metadata(gene)                        # pyarrow Table of (source,plate,well,site,urls)
     meta = meta.filter(pc.equal(meta.column("Metadata_Source"), source))
     rmap, to_fetch = {}, []
@@ -303,8 +305,9 @@ def split_by_well(X, y, wells, classes, split_seed=0):
     dict. Split out of load_cellpainting so a resolution/robustness study can re-split the SAME arrays
     under different seeds -- the effective sample size here is WELLS, not fields (a well's sites are near
     replicates), so honest error bars come from resampling this split, not from resampling fields."""
-    from .allgraph import AllData
     import torch
+
+    from .allgraph import AllData
     # per-channel z-score (channels are distinct stains with different dynamic ranges)
     mu = X.mean((0, 2, 3), keepdims=True); sd = X.std((0, 2, 3), keepdims=True) + 1e-6
     X = (X - mu) / sd

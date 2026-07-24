@@ -44,20 +44,25 @@ FALSE-POSITIVE GUARDS (numerical robustness -- the practical crux):
         a false one flips. Exposed via `noise_sweep=True`.
 """
 from __future__ import annotations
+
+from collections import Counter
+
 import numpy as np
 import torch
 import torch.nn as nn
 
-from .symmetry_discovery import discover_affine_symmetries, discover_symmetries, identify_generator
-from collections import Counter
+from .symmetry_discovery import discover_affine_symmetries
 
 # --- named thresholds for the symmetry-discovery cascade (see discover_and_reduce docstring) ---
 _ANTISYM_THRESHOLD = 0.3   # magnitude above which an antisymmetric (rotation-like) signal is real
 _SCALE_AWARE_TOL = 0.08    # scale-aware ratio separating genuine symmetry (~0.01) from flatness (~0.2)
 _NULL_EXCESS_FACTOR = 3    # discovered permutation count must exceed this multiple of the shuffled null
-from .discrete_symmetry import (discover_z2, discover_permutation_subgroup,
-                                 discover_cyclic_dihedral, equivariance_error,
-                                 build_z2_invariant_features, build_permutation_invariant_features)
+from .discrete_symmetry import (
+    build_permutation_invariant_features,
+    discover_cyclic_dihedral,
+    discover_permutation_subgroup,
+    discover_z2,
+)
 
 
 def continuous_invariant_features(X, generators):

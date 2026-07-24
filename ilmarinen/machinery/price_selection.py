@@ -32,6 +32,7 @@ which is genuinely a preference, not derivable from data. So mu is not a fundame
 preference that standard 1-D determinations resolve once made concrete.
 """
 from __future__ import annotations
+
 import numpy as np
 
 

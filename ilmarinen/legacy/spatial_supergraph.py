@@ -24,6 +24,7 @@ that both primitives sit on top of), keeping the dense primitive tractable while
 preserving the conv-vs-dense contrast at the mixing layer.
 """
 from __future__ import annotations
+
 import numpy as np
 import torch
 import torch.nn as nn

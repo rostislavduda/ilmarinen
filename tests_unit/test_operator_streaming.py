@@ -11,9 +11,8 @@ import numpy as np
 import pytest
 import torch
 
-from ilmarinen import (AllGraph, AllData, OperatorSource,
-                       InMemoryOperatorSource, MemmapOperatorSource)
-from ilmarinen.core.allgraph_streaming import _infer_operator_sdims, _default_operator_grid
+from ilmarinen import AllData, AllGraph, InMemoryOperatorSource, MemmapOperatorSource, OperatorSource
+from ilmarinen.core.allgraph_streaming import _default_operator_grid, _infer_operator_sdims
 
 _SMOOTH = np.array([0.25, 0.5, 0.25], np.float32)
 

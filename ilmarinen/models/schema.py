@@ -30,12 +30,12 @@ sequential and nonlinear (not an associative scan), so it stays a loop; the non-
 cores (conv/attention/dense/norm/spectral) are already fully vectorized over time.
 """
 from __future__ import annotations
+
 import numpy as np
 import torch
 import torch.nn as nn
 
 from .init_utils import _init_linear
-
 
 # ---------------------------------------------------------------------------
 # Sequence-to-sequence primitive cores (common contract: forward_seq -> (b,T,width))

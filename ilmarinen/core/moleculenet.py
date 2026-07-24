@@ -10,8 +10,10 @@ dict(x (n_atoms, F), edge_index (2,|E|)). Atom features are a small, standard se
 a common element set + degree + aromaticity), bonds give undirected edges (both directions).
 """
 from __future__ import annotations
+
 import csv
 import gzip
+
 import numpy as np
 
 # a compact common-organic element vocabulary; anything else -> "other"
@@ -32,8 +34,8 @@ def _atom_features(atom):
 
 def _smiles_to_graph(smiles):
     """SMILES -> (x (n,F) float32, edge_index (2,|E|) int64) or None if unparseable / <2 atoms."""
-    from rdkit import Chem
     import torch
+    from rdkit import Chem
     mol = Chem.MolFromSmiles(smiles)
     if mol is None or mol.GetNumAtoms() < 2:
         return None
@@ -52,7 +54,7 @@ def load_esol(path=None, n_max=None):
     """ESOL water-solubility regression. Returns (graphs, y) with y = measured log solubility (float32).
     graphs: list of dict(x, edge_index) matching the graph-schema contract."""
     if path is None:
-        from .data_sources import moleculenet_csv; path = moleculenet_csv("delaney-processed.csv")
+        from .data_sources import moleculenet_csv; path = moleculenet_csv("delaney-processed.csv")  # noqa: I001
     graphs, ys = [], []
     with open(path) as f:
         reader = csv.DictReader(f)
@@ -72,7 +74,7 @@ def load_tox21(path=None, task="NR-AR", n_max=None):
     Molecules with a missing label for the chosen task are skipped (Tox21 is sparsely labelled).
     y is 0/1 float32. graphs match the graph-schema contract."""
     if path is None:
-        from .data_sources import moleculenet_csv; path = moleculenet_csv("tox21.csv.gz")
+        from .data_sources import moleculenet_csv; path = moleculenet_csv("tox21.csv.gz")  # noqa: I001
     graphs, ys = [], []
     op = gzip.open if path.endswith(".gz") else open
     with op(path, "rt") as f:

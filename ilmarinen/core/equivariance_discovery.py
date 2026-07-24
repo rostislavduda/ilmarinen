@@ -32,6 +32,7 @@ have no generator and are out of scope for the Lie-derivative detector (they nee
 test).
 """
 from __future__ import annotations
+
 import numpy as np
 
 
@@ -246,8 +247,8 @@ def discover_and_route_full(net, X, output_index=None, tol_ratio=1.8, tol_class=
     residual pi_0(G) is reported (not shadows of the continuous group)."""
     import numpy as np
     import torch
-    from ilmarinen.core.discrete_symmetry import (discover_z2, discover_permutation_subgroup,
-                                                discover_cyclic_dihedral)
+
+    from ilmarinen.core.discrete_symmetry import discover_cyclic_dihedral, discover_permutation_subgroup, discover_z2
 
     # --- continuous ---
     cont = discover_and_route(net, X, output_index=output_index, tol_ratio=tol_ratio,

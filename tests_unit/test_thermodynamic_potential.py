@@ -9,8 +9,12 @@ import math
 
 import pytest
 
-from ilmarinen.machinery.thermodynamic_potential import (POTENTIAL_LEVELS, wbic_beta, free_energy_form,
-                                                       assert_temperature_consistency)
+from ilmarinen.machinery.thermodynamic_potential import (
+    POTENTIAL_LEVELS,
+    assert_temperature_consistency,
+    free_energy_form,
+    wbic_beta,
+)
 
 
 # --------------------------------------------------------------------------- the one form (exact)

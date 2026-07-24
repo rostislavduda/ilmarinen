@@ -60,13 +60,13 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-from ilmarinen.core.cellpainting import (CLASSES, CHANNELS, NATIVE_SHAPE, _cached_arrays,
-                                         resample_stack, split_by_well)
-from ilmarinen.core.paths import data_dir
 # reuse the maintained runner's embedding hook + retrieval metric, so the numbers here are the SAME
 # quantity the Cell Painting suite reports (no reimplementation drift).
 from run_cellpainting_validation import _embeddings, retrieval_map
-from run_standard_validation import add_pipeline_args, resolve_pipeline, make_allgraph, BUDGET
+from run_standard_validation import BUDGET, add_pipeline_args, make_allgraph, resolve_pipeline
+
+from ilmarinen.core.cellpainting import CHANNELS, CLASSES, NATIVE_SHAPE, _cached_arrays, resample_stack, split_by_well
+from ilmarinen.core.paths import data_dir
 
 
 def _fmt(v, nd=4):
@@ -295,7 +295,7 @@ def main():
     if chosen != best_hw and best["sec"] > 0:
         print(f"                   {best['sec']/max(pick['sec'],1e-9):.1f}x cheaper than the best cell for "
               f"a difference inside the noise")
-    print(f"current default  : hw=48 in run_cellpainting_validation.py")
+    print("current default  : hw=48 in run_cellpainting_validation.py")
     if args.splits < 3:
         print("CAUTION: --splits < 3, so the SE is not meaningful; the knee is not trustworthy here.")
     print("Before changing the default, confirm on a DIFFERENT --classes set and --per_class "

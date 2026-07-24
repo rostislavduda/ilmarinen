@@ -84,10 +84,26 @@ line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
-# Conservative, high-signal starter set. Report-only in CI for now (see ci.yml);
-# to be enforced once the existing tree is clean.
 #   E/W  pycodestyle   F  pyflakes   I  isort   B  flake8-bugbear   UP  pyupgrade
 select = ["E", "W", "F", "I", "B", "UP"]
+ignore = [
+    # --- deliberate house style (kept permanently) ---
+    "E501",           # line length — leave to a formatter if one is ever adopted
+    "E701", "E702",   # compact one-line / semicolon-separated statements
+    "E741",           # ambiguous identifiers l/I/O — standard in math/physics code
+    "E731",           # assigning a lambda to a variable
+    "E402",           # module import not at top — intentional lazy/optional imports
+    # --- deferred to a follow-up manual pass (not safely auto-fixable) ---
+    "B905",           # zip() without an explicit strict=
+    "B007",           # loop control variable not used in the body
+    "B023",           # function definition captures a loop variable (review for closures)
+    "B904",           # raise ... from within an except handler
+    "UP031",          # printf-style % formatting -> str.format / f-string
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]   # unused imports in package __init__ are re-exports
+"studies/*.py" = ["I001"]  # standalone scripts: intentional early `warnings.filterwarnings` import order
 
 [tool.ruff.lint.isort]
 known-first-party = ["ilmarinen"]

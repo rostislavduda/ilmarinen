@@ -16,7 +16,7 @@ def __getattr__(name):          # PEP 562: defer the heavy pipeline import until
     if name in _LAZY:
         from .._deprecation import warn_legacy
         warn_legacy(name, "ilmarinen.legacy.pipelines")
-        from ..legacy import pipelines    # pipelines moved to the quarantined legacy island
+        from ..legacy import pipelines  # pipelines moved to the quarantined legacy island
         return getattr(pipelines, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

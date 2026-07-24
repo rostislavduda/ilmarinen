@@ -10,7 +10,9 @@ S*(L) as a multi-seed mean with standard error, and the stopping rule reads the
 2 standard errors (genuine signal vs. noise).
 """
 from __future__ import annotations
+
 from dataclasses import dataclass, field
+
 import numpy as np
 
 

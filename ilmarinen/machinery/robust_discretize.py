@@ -18,6 +18,7 @@ CASE 2 -- IDENTICAL selection ACROSS adjacent layers. Valid (two conv layers is 
   have caught.
 """
 from __future__ import annotations
+
 import numpy as np
 import torch
 

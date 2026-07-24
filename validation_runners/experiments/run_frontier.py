@@ -18,9 +18,17 @@ Usage:
   python run_frontier.py --dataset GunPoint
   python run_frontier.py --dataset ItalyPowerDemand --widths 8,16,32,64,128 --mus 0.0005,0.001,0.002,0.005,0.01
 """
-import argparse, os, sys, numpy as np, torch, torch.nn as nn
+import argparse
+import os
+import sys
+
+import numpy as np
+import torch
+import torch.nn as nn
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from aeon.datasets import load_classification
+
 from ilmarinen.models.schema import build_schema
 
 DEFAULT_PRIMS = ("plain", "gated", "lstm", "conv", "attention", "dense", "norm", "spectral")
@@ -101,7 +109,7 @@ def run(args):
         d2loss[w] = vl
 
     print(f"=== {args.dataset}: fit-vs-complexity frontier (majority {maj:.3f}) ===")
-    print(f"  width val-loss @depth1: " + ", ".join(f"{w}:{wloss[w]:.3f}" for w in widths))
+    print("  width val-loss @depth1: " + ", ".join(f"{w}:{wloss[w]:.3f}" for w in widths))
     print(f"  {'price mu':>10} | {'K*':>4} | {'L*':>3} | {'primitive(s)':>18} | {'params':>7} | test acc")
     print("  " + "-" * 68)
     for mu in mus:

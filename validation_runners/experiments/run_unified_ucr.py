@@ -23,9 +23,17 @@ Notes:
   (the pure-Python per-timestep recurrent scan is the bottleneck at large T).
 - Reports TEST accuracy (official split), never train accuracy.
 """
-import argparse, os, sys, numpy as np, torch, torch.nn as nn
+import argparse
+import os
+import sys
+
+import numpy as np
+import torch
+import torch.nn as nn
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from aeon.datasets import load_classification
+
 from ilmarinen.models.schema import build_schema
 
 DEFAULT_PRIMS = ("plain", "gated", "lstm", "conv", "attention", "dense", "norm", "spectral")

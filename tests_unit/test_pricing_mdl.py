@@ -9,8 +9,7 @@ import math
 import numpy as np
 import pytest
 
-from ilmarinen import (certificate_lambda_scale, free_energy, score_to_nll,
-                     spectral_code_length)
+from ilmarinen import certificate_lambda_scale, free_energy, score_to_nll, spectral_code_length
 from ilmarinen.machinery.contract_mdl import omega_struct
 
 

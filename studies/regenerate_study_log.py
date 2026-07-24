@@ -10,10 +10,10 @@ at the top. Run this whenever new .md write-ups are added so the log stays curre
 The script is deterministic and idempotent: running it again with no new files reproduces the same
 STUDY_LOG.md. It reads tests/*.md and writes STUDY_LOG.md at the package root.
 """
-import os
-import glob
-import re
 import datetime
+import glob
+import os
+import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)

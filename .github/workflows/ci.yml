@@ -60,7 +60,7 @@ jobs:
         run: python -m pytest tests_unit/ -v
 
   lint:
-    name: lint (ruff, report-only)
+    name: lint (ruff)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -74,11 +74,7 @@ jobs:
       - name: Install ruff
         run: pip install ruff==0.16.0
 
-      # REPORT-ONLY: `--exit-zero` surfaces findings as annotations without
-      # failing the build, so the existing tree can be cleaned up incrementally.
-      # Remove `--exit-zero` (and drop `|| true` below) to make lint blocking.
+      # Enforced: the tree is clean under the rule set configured in pyproject.toml.
+      # `ruff format` is intentionally NOT enforced (whole-repo reformat deferred).
       - name: Ruff lint
-        run: ruff check --output-format=github --exit-zero .
-
-      - name: Ruff format (check only)
-        run: ruff format --check . || true
+        run: ruff check --output-format=github .

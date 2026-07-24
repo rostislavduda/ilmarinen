@@ -25,6 +25,7 @@ a discovered symmetry L on a layer W means constraining W to the COMMUTANT [W, L
 quantum-mechanical statement that W is conserved under the symmetry.
 """
 from __future__ import annotations
+
 import numpy as np
 import torch
 

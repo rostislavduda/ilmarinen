@@ -41,6 +41,7 @@ All prior modules are left UNTOUCHED; this is a new capability in a new module, 
 spatial_schema.py one tensor rank higher.
 """
 from __future__ import annotations
+
 import numpy as np
 import torch
 import torch.nn as nn

@@ -11,7 +11,9 @@ scalar problem, single-run, monotone. Returns the integer neuron count K and
 the full certificate trajectory.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass, field
+
 import numpy as np
 
 

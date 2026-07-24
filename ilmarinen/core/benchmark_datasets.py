@@ -6,6 +6,7 @@
                  schema. Standard MedMNIST-3D npz layout.
 """
 from __future__ import annotations
+
 import numpy as np
 
 
@@ -19,7 +20,7 @@ def load_ecg5000(path_dir=None):
         X = arr[:, 1:]
         return X, y
     if path_dir is None:
-        from .data_sources import ecg5000_dir; path_dir = ecg5000_dir()
+        from .data_sources import ecg5000_dir; path_dir = ecg5000_dir()  # noqa: I001
     Xtr, ytr = _read(f"{path_dir}/ECG5000_TRAIN.txt")
     Xte, yte = _read(f"{path_dir}/ECG5000_TEST.txt")
     return Xtr, ytr, Xte, yte

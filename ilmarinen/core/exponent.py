@@ -22,7 +22,9 @@ Cost: a handful of Gauss-Hermite quadrature evaluations of R -- milliseconds,
 no training, no data. alpha is a pure property of the activation + init.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass
+
 import numpy as np
 
 from ..core.meanfield import MeanFieldTheory

@@ -31,13 +31,14 @@ Run: python studies/bilevel_vs_joint_study.py
 """
 import warnings; warnings.filterwarnings("ignore")
 import sys
+
 import numpy as np
 import torch
 import torch.nn as nn
 
 sys.path.insert(0, ".")
-from ilmarinen.models.schema import Schema  # noqa: E402
 from ilmarinen.machinery.bilevel import three_way_split  # noqa: E402
+from ilmarinen.models.schema import Schema  # noqa: E402
 
 PRIMS = ("plain", "conv", "dense", "attention", "lstm")
 

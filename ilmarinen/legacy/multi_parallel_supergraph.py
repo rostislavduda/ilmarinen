@@ -27,6 +27,7 @@ Design invariants (carried from the validated parallel + recurrent supergraphs):
 - Peak-alpha tracking (the honest selection signal on moderate-margin tasks).
 """
 from __future__ import annotations
+
 import numpy as np
 import torch
 import torch.nn as nn

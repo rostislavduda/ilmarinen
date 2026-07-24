@@ -24,7 +24,9 @@ certificate tell us the true support size, and we stop only when the solution
 is genuinely certified rather than merely dictionary-optimal.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass, field
+
 import numpy as np
 
 from .tv_solver import lasso_coordinate_descent

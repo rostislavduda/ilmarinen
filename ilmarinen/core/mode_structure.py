@@ -19,6 +19,7 @@ test with an absence verdict ('unstructured'), held to the same standard as the 
 it must not hallucinate structure that is not there (validated on a shuffled control).
 """
 from __future__ import annotations
+
 import numpy as np
 
 

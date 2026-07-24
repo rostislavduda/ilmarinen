@@ -20,6 +20,7 @@ gating (the plain cell that FAILS the long unroll -- the baseline against which
 gating will later be shown necessary).
 """
 from __future__ import annotations
+
 import torch
 import torch.nn as nn
 

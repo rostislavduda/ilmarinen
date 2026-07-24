@@ -13,7 +13,14 @@ Usage:
     python run_unified_synthetic.py --task adding --T 80 --epochs 15
     python run_unified_synthetic.py --task copy --delay 15
 """
-import argparse, os, sys, numpy as np, torch, torch.nn as nn
+import argparse
+import os
+import sys
+
+import numpy as np
+import torch
+import torch.nn as nn
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from ilmarinen.models.schema import build_schema
 

@@ -617,7 +617,7 @@ class MemmapOperatorSource(OperatorSource):
 # it trains via a SEPARATE regime (a seeded windowed shuffle buffer + a hash-of-id train/val split) whose
 # guarantee is DETERMINISTIC-GIVEN-SEED, explicitly NOT bit-identical to the map-style / resident fit. This is
 # scoped to the dense contract family.
-import hashlib                                            # noqa: E402 (kept next to its only user)
+import hashlib  # noqa: E402 (kept next to its only user)
 
 _ITER_SHUFFLE_SEED = 47                                   # offset for the per-epoch windowed-shuffle RandomState
 _ITER_VAL_PERMILLE = 150                                  # ~15% of ids fall in the val bucket

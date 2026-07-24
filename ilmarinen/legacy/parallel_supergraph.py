@@ -26,6 +26,7 @@ Design invariants (carried over from the validated recurrent supergraph):
   screened by the second -- the coupled-Ising field-screening effect).
 """
 from __future__ import annotations
+
 import torch
 import torch.nn as nn
 

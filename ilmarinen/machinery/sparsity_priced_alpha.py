@@ -25,6 +25,7 @@ select_mu_for_budget) choose mu by the SAME rules as width/depth. Torch-friendly
 returns a differentiable scalar) and numpy-friendly (for the frontier/analysis paths).
 """
 from __future__ import annotations
+
 import numpy as np
 
 

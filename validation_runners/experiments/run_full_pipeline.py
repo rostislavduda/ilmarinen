@@ -20,11 +20,19 @@ CAVEAT recorded in the results: the [RAW] vs [SYM] delta confounds the symmetry 
 representation change (sequence vs flattened length-1). When no symmetry is found (the UCR case),
 the delta is purely the representation artifact, not a symmetry benefit.
 """
-import argparse, os, sys, numpy as np, torch, torch.nn as nn
+import argparse
+import os
+import sys
+
+import numpy as np
+import torch
+import torch.nn as nn
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from aeon.datasets import load_classification
-from ilmarinen.models.schema import build_schema
+
 from ilmarinen.core.symmetry_pipeline import discover_and_reduce
+from ilmarinen.models.schema import build_schema
 
 DEFAULT_PRIMS = ("plain", "gated", "lstm", "conv", "spectral", "attention", "dense", "linssm", "norm")
 

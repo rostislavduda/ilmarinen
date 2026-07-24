@@ -23,6 +23,7 @@ and, wrapped as a network, it exploits the symmetry -- beating a plain MLP on an
 the gain growing as data shrinks (a LOSSLESS inductive bias, unlike Phase-1 canonicalization).
 """
 from __future__ import annotations
+
 import numpy as np
 
 

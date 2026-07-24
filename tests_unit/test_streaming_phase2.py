@@ -7,12 +7,18 @@ import numpy as np
 import pytest
 import torch
 
-from ilmarinen import (AllGraph, AllData,
-                       InMemoryDenseSource, MemmapDenseSource,
-                       InMemoryGraphSource, LazyGraphSource,
-                       InMemoryOperatorSource, MemmapOperatorSource)
-from ilmarinen import IterableDenseSource, InMemoryIterableDenseSource
-from ilmarinen.core.allgraph_streaming import _LRUCache, _IterMetric, _iter_val_key
+from ilmarinen import (
+    AllData,
+    AllGraph,
+    InMemoryDenseSource,
+    InMemoryGraphSource,
+    InMemoryIterableDenseSource,
+    InMemoryOperatorSource,
+    LazyGraphSource,
+    MemmapDenseSource,
+    MemmapOperatorSource,
+)
+from ilmarinen.core.allgraph_streaming import _iter_val_key, _IterMetric, _LRUCache
 
 
 def _wsd(net):
@@ -510,5 +516,5 @@ def test_gibbs_nondefault_train_batch_deterministic():
         r = mg.fit(AllData.graph_stream(InMemoryGraphSource(nf, edges=ed), y=y, kind_hint="graph"),
                    n_out=2, select="gibbs")
         return r["value"], _wsd(mg.net)
-    (v1, w1), (v2, w2) = run(), run()
+    (v1, w1), (_, w2) = run(), run()
     assert np.isfinite(v1) and _ident(w1, w2)
