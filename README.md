@@ -1,5 +1,8 @@
 # Ilmarinen — a physics-principled neural-architecture meta-optimizer
 
+[![CI](https://github.com/rostislavduda/ilmarinen/actions/workflows/ci.yml/badge.svg)](https://github.com/rostislavduda/ilmarinen/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 `ilmarinen` selects a neural architecture — its computational *contract* (arena), its primitive
 operations, and its width and depth — for a dataset, by minimizing a single description-length
 objective. Every choice is priced as *risk + complexity*, `J = R + mu * Omega`, with each complexity
@@ -158,3 +161,8 @@ Nothing is written to hard-coded system paths. Downloads are cached under a sing
 as `$ILMARINEN_DATA_DIR` if set, else `<os-temp>/ilmarinen_data`. For offline use, drop pre-downloaded
 dataset files into `$ILMARINEN_UPLOADS_DIR` (defaults to `<base>/uploads`); loaders fall back to those.
 See `ilmarinen/core/paths.py`; set `ILMARINEN_DATA_VERBOSE=1` to log data provenance.
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE) — permissive use, modification, and
+redistribution with an explicit patent grant. Copyright 2026 Rostislav Duda.
