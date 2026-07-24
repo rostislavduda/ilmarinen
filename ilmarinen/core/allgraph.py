@@ -2453,7 +2453,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         for epoch in self._epoch_iter(show_progress):
             rng = np.random.RandomState(self.seed + _ITER_SHUFFLE_SEED + (epoch if isinstance(epoch, int) else 0))
             buf, pending, state = [], [], {"run": None, "nb": 0}
-            def _emit(sample):
+            def _emit(sample, pending=pending, state=state):  # bind this epoch's buffer/state
                 pending.append(sample)
                 if len(pending) >= bs:
                     _step(pending, state); pending.clear()

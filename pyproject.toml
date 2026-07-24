@@ -96,9 +96,9 @@ ignore = [
     # --- deferred to a follow-up manual pass (not safely auto-fixable) ---
     "B905",           # zip() without an explicit strict=
     "B007",           # loop control variable not used in the body
-    "B023",           # function definition captures a loop variable (review for closures)
     "B904",           # raise ... from within an except handler
     "UP031",          # printf-style % formatting -> str.format / f-string
+    # B023 (loop-variable closures) is enforced: the known-safe sites bind via default args.
 ]
 
 [tool.ruff.lint.per-file-ignores]

@@ -154,7 +154,7 @@ def deep_generation_is_not_deep_requirement(n_seeds=3):
     for D in (4, 6):
         X, y = _make_cumulative(3000, D)
         depths = [1, 2, 3, 4, 5, 6]
-        curve = measure_depth_curve(lambda L, sd: (1 - _fit_mlp(X, y, L, sd), _fit_mlp(X, y, L, sd)),
+        curve = measure_depth_curve(lambda L, sd, X=X, y=y: (1 - _fit_mlp(X, y, L, sd), _fit_mlp(X, y, L, sd)),
                                     depths, list(range(n_seeds)))
         print(f"\n  cumulative label from a depth-{D} composition (plain ReLU MLP, width 16):")
         print("    val acc by depth: " + "  ".join(f"L{d}={curve.acc_mean[i]:.3f}"
