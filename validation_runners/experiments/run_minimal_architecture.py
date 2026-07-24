@@ -26,11 +26,19 @@ Usage:
   python run_minimal_architecture.py --dataset GunPoint
   python run_minimal_architecture.py --dataset ItalyPowerDemand --widths 8,16,32,64,128 --depths 1,2,3
 """
-import argparse, os, sys, numpy as np, torch, torch.nn as nn
+import argparse
+import os
+import sys
+
+import numpy as np
+import torch
+import torch.nn as nn
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from aeon.datasets import load_classification
+
+from ilmarinen.machinery.priced_depth import measure_depth_curve
 from ilmarinen.models.schema import build_schema
-from ilmarinen.machinery.priced_depth import measure_depth_curve, select_depth, significant_elbow
 
 DEFAULT_PRIMS = ("plain", "gated", "lstm", "conv", "attention", "dense", "norm", "spectral")
 
@@ -157,10 +165,10 @@ def run(args):
     n_params = sum(p.numel() for p in net.parameters())
 
     print(f"=== {args.dataset}: metaoptimized architecture ===")
-    print(f"  width sweep (val loss): " +
+    print("  width sweep (val loss): " +
           ", ".join(f"{w}:{l:.3f}" for w, l, a in wcurve))
     print(f"  -> selected WIDTH K* = {Kstar}")
-    print(f"  depth sweep (val loss): " +
+    print("  depth sweep (val loss): " +
           ", ".join(f"L{d}:{s:.3f}" for d, s in zip(curve.depths, curve.S_mean)))
     print(f"  -> selected DEPTH L* = {Lstar}")
     print(f"  -> selected PRIMITIVE(s) per layer: {arch}")

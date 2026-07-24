@@ -9,8 +9,7 @@ import math
 import pytest
 import torch
 
-from ilmarinen.machinery.developmental_llc import (default_checkpoints, developmental_llc,
-                                                 _locate_transitions)
+from ilmarinen.machinery.developmental_llc import _locate_transitions, default_checkpoints, developmental_llc
 
 
 # --------------------------------------------------------------------------- schedule (fast, exact)

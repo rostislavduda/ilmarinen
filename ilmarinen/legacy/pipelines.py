@@ -4,14 +4,15 @@ Each pipeline returns a structured result dict and can print a report. These
 are the consolidated, de-noised versions of the proof-of-concept experiments.
 """
 from __future__ import annotations
+
 import numpy as np
 
 from ..core.data import FashionMNIST
 from ..core.meanfield import MeanFieldTheory
-from .training import gradient_norms_at_init, train_and_eval, to_tensor
-from .networks import build_model
-from ..machinery.width_sparsity import greedy_insertion
 from ..machinery.priced_depth import measure_depth_curve, select_depth, significant_elbow
+from ..machinery.width_sparsity import greedy_insertion
+from .networks import build_model
+from .training import gradient_norms_at_init, to_tensor, train_and_eval
 
 
 # ----------------------------------------------------------------------
@@ -117,10 +118,11 @@ def validate_sequential_baseline(data: FashionMNIST, per_class_tr=300, per_class
     inits: list of (name, sigma_w2); sigma_w2=None means use the critical value.
     """
     import numpy as np
-    from ..core.meanfield import MeanFieldTheory
-    from .training import train_and_eval_rnn
-    from .recurrent import build_rnn
     import torch
+
+    from ..core.meanfield import MeanFieldTheory
+    from .recurrent import build_rnn
+    from .training import train_and_eval_rnn
 
     th = MeanFieldTheory("tanh")
     sw2_crit = th.critical_sigma_w2(0.05)
@@ -166,7 +168,9 @@ def validate_supergraph(data: FashionMNIST, per_class_tr=250, per_class_te=100,
     beating the diluted soft mixture (confirming 'soft search selects,
     discretization delivers').
     """
-    import numpy as np, torch, torch.nn as nn
+    import torch
+    import torch.nn as nn
+
     from ..core.meanfield import MeanFieldTheory
     from .supergraph import build_supergraph, discretize
 
@@ -212,7 +216,8 @@ def validate_supergraph(data: FashionMNIST, per_class_tr=250, per_class_te=100,
 # Pipeline 5: supergraph primitive selection (the architecture-search loop)
 # ----------------------------------------------------------------------
 def _make_copy(n, K=4, delay=30, S=6, seed=0):
-    import numpy as np, torch
+    import numpy as np
+    import torch
     rng = np.random.default_rng(seed)
     L = K + delay + K; V = S + 2
     X = np.zeros((n, L, V), np.float32); Y = np.zeros((n, K), np.int64)
@@ -247,10 +252,13 @@ def validate_supergraph_copy(depth=1, width=96, K=4, delay=30, S=6,
     get selection signal). So depth>1 selection is NOT yet reliable and is
     reported here as a known limitation, not a validated-robust result.
     """
-    import numpy as np, torch, torch.nn as nn
+    import numpy as np
+    import torch
+    import torch.nn as nn
+
     from ..core.meanfield import MeanFieldTheory
-    from .supergraph import build_supergraph, discretize
     from ..machinery import three_way_split
+    from .supergraph import build_supergraph, discretize
 
     sw2 = MeanFieldTheory("tanh").critical_sigma_w2(0.05)
     torch.manual_seed(0); np.random.seed(0)

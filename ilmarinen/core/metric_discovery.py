@@ -25,6 +25,7 @@ split-signature group recovered from data -- a group neither the Euclidean nor L
 reach.
 """
 from __future__ import annotations
+
 import numpy as np
 
 
@@ -220,6 +221,7 @@ def discover_metric_from_data(data, min_samples=200, epochs=300, tol_ratio=1.5, 
     open-ended fallback when the menu-based detector is unsure or when a non-standard signature is present.
     """
     import torch
+
     from .symmetry_discovery import discover_symmetries
     if getattr(data, "positions", None) is None:
         return None, {"reason": "no coordinate vectors"}

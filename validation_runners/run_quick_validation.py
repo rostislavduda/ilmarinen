@@ -24,13 +24,29 @@ Usage:
     python run_quick_validation.py --contracts graph,set
     python run_quick_validation.py --preset med          # preview a preset before the full run
 """
-import argparse, os, sys, time, gc, numpy as np, torch
+import argparse
+import gc
+import os
+import sys
+import time
+
+import torch
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from ilmarinen.core.dataset_registry import full_suite, set_quick_scale
 # The pipeline (flags, device/preset resolution, model construction, eval, grid-flatten) is shared with the
 # standard runner so the two stay in lockstep -- this runner only changes the DATA SCALE.
-from run_standard_validation import (_eval_test, _train_size, _seq_depth_for, add_pipeline_args,
-                                      resolve_pipeline, make_allgraph, maybe_flatten_grids, apply_opt_preset)
+from run_standard_validation import (
+    _eval_test,
+    _seq_depth_for,
+    _train_size,
+    add_pipeline_args,
+    apply_opt_preset,
+    make_allgraph,
+    maybe_flatten_grids,
+    resolve_pipeline,
+)
+
+from ilmarinen.core.dataset_registry import full_suite, set_quick_scale
 
 # Down-scaled per-contract budgets (width, depth, epochs): the standard runner's budgets shrunk so a full
 # quick pass over the subsets finishes in minutes. This is the intended difference from standard.
@@ -158,6 +174,7 @@ def main():
     print("=" * 100)
     print(f"Ran {len(rows)}/{len(names)} datasets. Full-data benchmark: run_standard_validation.py")
     import json
+
     from ilmarinen.core.paths import cache_path
     _out = cache_path("quick_val_rows.json")
     json.dump([{"name": r[0], "contract": r[1], "metric": r[2], "value": r[3], "skill": r[4],

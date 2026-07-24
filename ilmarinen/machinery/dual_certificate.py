@@ -39,7 +39,9 @@ Faithfulness notes / honest gaps:
     empirical sup and its margin, and flag if any candidate violates |eta|<=1.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass
+
 import numpy as np
 
 

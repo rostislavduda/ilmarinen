@@ -41,7 +41,6 @@ Level-A and Level-C free energies that D2 documents).
 from __future__ import annotations
 
 import math
-from typing import Dict, Optional
 
 import numpy as np
 
@@ -55,7 +54,7 @@ __all__ = [
 # --------------------------------------------------------------------------------------------------
 # Level A -- smooth readout susceptibility (specific heat of the primitive Gibbs measure)
 # --------------------------------------------------------------------------------------------------
-def gibbs_susceptibility(energies: Dict[str, float], beta: float) -> dict:
+def gibbs_susceptibility(energies: dict[str, float], beta: float) -> dict:
     """Specific-heat-like susceptibility of the Gibbs-alpha primitive readout.
 
     energies : {primitive: Psi_i}  (the SOLO energies behind gibbs_alpha_select; Psi_i = -score_i,
@@ -126,7 +125,7 @@ def gibbs_susceptibility(energies: Dict[str, float], beta: float) -> dict:
 # --------------------------------------------------------------------------------------------------
 # Level C -- first-order contract transition spectroscopy
 # --------------------------------------------------------------------------------------------------
-def _normalized_omega(omegas: Dict[str, float]) -> Dict[str, float]:
+def _normalized_omega(omegas: dict[str, float]) -> dict[str, float]:
     """Min-max normalize Omega across the admissible set, matching select_contract_mdl exactly."""
     cs = list(omegas)
     om = np.array([omegas[c] for c in cs], float)
@@ -134,7 +133,7 @@ def _normalized_omega(omegas: Dict[str, float]) -> Dict[str, float]:
     return {c: float(v) for c, v in zip(cs, omn)}
 
 
-def contract_transition(scores: Dict[str, float], omegas: Dict[str, float],
+def contract_transition(scores: dict[str, float], omegas: dict[str, float],
                         mu_c: float) -> dict:
     """First-order transition spectroscopy of the priced contract selection.
 
@@ -169,7 +168,7 @@ def contract_transition(scores: Dict[str, float], omegas: Dict[str, float],
     R = {c: 1.0 - float(scores[c]) for c in cs}
     omn = _normalized_omega(omegas)
 
-    def J_at(mu: float) -> Dict[str, float]:
+    def J_at(mu: float) -> dict[str, float]:
         return {c: R[c] + mu * omn[c] for c in cs}
 
     def winner_at(mu: float) -> str:
@@ -254,11 +253,11 @@ def contract_transition(scores: Dict[str, float], omegas: Dict[str, float],
 # --------------------------------------------------------------------------------------------------
 # Bundle -- both channels + a plain-language robustness read
 # --------------------------------------------------------------------------------------------------
-def response_spectrum(*, energies: Optional[Dict[str, float]] = None,
-                      beta: Optional[float] = None,
-                      scores: Optional[Dict[str, float]] = None,
-                      omegas: Optional[Dict[str, float]] = None,
-                      mu_c: Optional[float] = None) -> dict:
+def response_spectrum(*, energies: dict[str, float] | None = None,
+                      beta: float | None = None,
+                      scores: dict[str, float] | None = None,
+                      omegas: dict[str, float] | None = None,
+                      mu_c: float | None = None) -> dict:
     """Assemble whichever channels are available into one response read-out.
 
     Provide (energies, beta) for the Level-A readout channel and/or (scores, omegas, mu_c) for the
@@ -268,7 +267,7 @@ def response_spectrum(*, energies: Optional[Dict[str, float]] = None,
     Returns {readout, contract, summary} where absent channels are None and `summary` is a short
     human-readable robustness verdict combining both.
     """
-    out: Dict[str, object] = {"readout": None, "contract": None, "summary": ""}
+    out: dict[str, object] = {"readout": None, "contract": None, "summary": ""}
 
     if energies is not None and beta is not None and len(energies) > 0:
         out["readout"] = gibbs_susceptibility(energies, beta)

@@ -30,7 +30,9 @@ the outcome to improve the corpus. So the router is never WORSE than the bake-of
 and is much cheaper when confident. A warm default corpus ships so it is useful out of the box.
 """
 from __future__ import annotations
+
 import json
+
 import numpy as np
 
 

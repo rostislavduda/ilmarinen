@@ -31,17 +31,19 @@ Level 2 -- GRID-RANK dispatch (existing machinery). For a dense tensor, pick the
 The class exposes a single .fit(data, y) that routes, builds, trains, and reports.
 """
 from __future__ import annotations
+
+from contextlib import contextmanager
+
 import numpy as np
 import torch
 import torch.nn as nn
-from contextlib import contextmanager
 
-from .mode_structure import discover_mode_structure
-from .allgraph_types import _SweepCtx, _EDGE_NN_FACTOR
-from .allgraph_reports import _ReportsMixin
-from .allgraph_persistence import _PersistenceMixin
-from .allgraph_selection import _SizeSelectionMixin
 from .allgraph_contracts import _ContractFitMixin
+from .allgraph_persistence import _PersistenceMixin
+from .allgraph_reports import _ReportsMixin
+from .allgraph_selection import _SizeSelectionMixin
+from .allgraph_types import _EDGE_NN_FACTOR, _SweepCtx
+from .mode_structure import discover_mode_structure
 
 
 # --------------------------------------------------------------------------- the input container
@@ -528,7 +530,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # standard validation runner turns it on. progress_desc is set per-fit by the caller (e.g. the
         # dataset name) to label the bar; it falls back to the routed contract.
         self.progress = progress
-        self.progress_desc: "str | None" = None
+        self.progress_desc: str | None = None
         # auto_epoch: early-stop the DEPLOYED training loop on a plateau. None/False = off (train the full
         # budget). "train" = monitor the epoch's mean TRAIN loss. "val" = hold out ~15% of the training data
         # and monitor VALIDATION loss (more overfitting-robust). Stop when the relative reduction stays below
@@ -771,7 +773,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         and data-dependent (machinery.contract_mdl). A richer contract must beat the cheaper one by more
         than mu_c times its added structural code length. mu_c is the contract price (0 -> pure best-fit).
         """
-        from ..machinery import clean_solo_select, dataset_omega_struct, select_contract_mdl, marginal_value_contract
+        from ..machinery import clean_solo_select, dataset_omega_struct, marginal_value_contract, select_contract_mdl
         # under streaming, run the whole contract bake-off on the bounded resident subsample (drawn once); the
         # winning contract then deploy-trains on the FULL stream. _tiebreak_candidates reads the source metadata.
         cands = candidates or self._tiebreak_candidates(data)
@@ -1051,8 +1053,9 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         behind the discovery's null-baseline confirmation; honest that chart fidelity bounds the benefit."""
         try:
             import torch
-            from .nonlinear_symmetry import discover_nonlinear_symmetries_joint
+
             from ..models.latent_equivariant_contract import build_latent_equivariant_contract
+            from .nonlinear_symmetry import discover_nonlinear_symmetries_joint
             if data.positions is None:
                 return None
             clouds = [np.asarray(p, dtype=np.float32).ravel() for p in data.positions]
@@ -1154,6 +1157,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         a nonlinear symmetry exists in a learned latent space, without altering the contract."""
         try:
             import torch
+
             from .nonlinear_symmetry import discover_nonlinear_symmetries
             # assemble a matrix of flattened clouds as the coordinate space X (n, d)
             clouds = []
@@ -1240,6 +1244,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         if not getattr(self, "_canonicalization_applied", False):
             return data
         import copy
+
         from .canonicalization import canonicalize_data
         cdata, _ = canonicalize_data(data)
         out = copy.copy(data)
@@ -1256,7 +1261,8 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         the forward pass uses, with no auxiliary model. Pass the dict returned by fit() as `result` to
         surface the selection scores (gibbs energies) and the fit metric. Returns the report dict, or the
         formatted text block if as_text=True."""
-        from .interpretability import explain as _explain, format_report
+        from .interpretability import explain as _explain
+        from .interpretability import format_report
         R = _explain(self, result=result, **kwargs)
         return format_report(R) if as_text else R
 
@@ -1278,8 +1284,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         singular-complexity pricing to estimate the LLC on the converged candidate. Default False keeps
         the plain float-returning contract used by the size/primitive sweeps."""
         data, contract, tr, va, task, n_out, epochs, edge_cutoff = ctx
-        from ..models import (build_graph_schema, build_equivariant_graph_schema,
-                              build_set_schema)
+        from ..models import build_equivariant_graph_schema, build_graph_schema, build_set_schema
         torch.manual_seed(self.seed)
         n_in = data.node_feats[0].shape[1]
         y = np.asarray(data.y); yt = torch.as_tensor(y)
@@ -1631,9 +1636,9 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             return
         try:
             if self.discover_equivariant_contract == "extended":
+                from .emlp_layer import special_linear_generators, symplectic_generators
                 from .extended_groups import discover_group
                 from .metric_discovery import generators_for_metric
-                from .emlp_layer import symplectic_generators, special_linear_generators
                 spec, ddetail = discover_group(data)
                 # the dispatcher's routes emit a group name but often no explicit generators; synthesize
                 # them so the EMLP contract can be built. Metric/unitary -> so(g); Sp -> sp(2n); SL ->
@@ -1863,10 +1868,15 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
     def _train_score_solo_primitive(self, data, task, n_out, primitive):
         """One primitive, trained alone from scratch on a train split, scored on a held-out split, in the
         current contract. Mirrors _train_candidate_contract but at the primitive granularity."""
-        from ..models import (build_schema, build_spatial_schema,
-                              build_volumetric_schema, build_grid4d_schema,
-                              build_graph_schema, build_equivariant_graph_schema,
-                              build_set_schema)
+        from ..models import (
+            build_equivariant_graph_schema,
+            build_graph_schema,
+            build_grid4d_schema,
+            build_schema,
+            build_set_schema,
+            build_spatial_schema,
+            build_volumetric_schema,
+        )
         mod = self.contract
         # split
         n = len(data.node_feats) if data.node_feats is not None else len(data.dense)
@@ -2041,10 +2051,15 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         """Train the winning single-primitive net on ALL training data (full epochs) for deployment.
         Mirrors the per-contract fit paths but with a fixed one-primitive vocabulary. Returns the trained
         net, or None if the contract isn't cell-based."""
-        from ..models import (build_schema, build_spatial_schema,
-                              build_volumetric_schema, build_grid4d_schema,
-                              build_graph_schema, build_equivariant_graph_schema,
-                              build_set_schema)
+        from ..models import (
+            build_equivariant_graph_schema,
+            build_graph_schema,
+            build_grid4d_schema,
+            build_schema,
+            build_set_schema,
+            build_spatial_schema,
+            build_volumetric_schema,
+        )
         n_out = self._infer_nout(data.y, task, n_out)
         mod = self.contract
         torch.manual_seed(self.seed + 3); np.random.seed(self.seed + 3)
@@ -2157,7 +2172,8 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         so the copy starts untrained. Full reinit (not just modules exposing reset_parameters, which covers
         only a subset here) is required so no trained weight leaks into the developmental trajectory --
         verified by premise-check (the rebuilt net returns to an untrained loss ~ ln(#classes))."""
-        import copy, math
+        import copy
+        import math
         net = self.net
         if net is None or not hasattr(net, "parameters") or isinstance(net, dict):
             return None
@@ -2564,7 +2580,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
     def _iter_val_member(self, sample_id):
         """Whether a sample id falls in the iterable regime's held-out val bucket (a seed-keyed blake2b hash),
         used both to SKIP val samples during training and to KEEP them in the val-loss pass."""
-        from .allgraph_streaming import _iter_val_key, _ITER_VAL_PERMILLE
+        from .allgraph_streaming import _ITER_VAL_PERMILLE, _iter_val_key
         return _iter_val_key(sample_id, self.seed) % 1000 < _ITER_VAL_PERMILLE
 
     def _resolve_pin(self):

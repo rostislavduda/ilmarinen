@@ -26,6 +26,7 @@ deploys as the `generated_equivariant` contract. Retained as the documented, val
 realization; exported but no longer invoked by fit(). See core/equivariant_supergraph.py.
 """
 from __future__ import annotations
+
 import numpy as np
 import torch
 import torch.nn as nn

@@ -13,6 +13,7 @@ The router does NOT itself train; it returns (supergraph_kind, builder_kwargs, t
 detected_structure) so a caller (a runner) can build and metaoptimize on the correctly-shaped input.
 """
 from __future__ import annotations
+
 import numpy as np
 import torch
 

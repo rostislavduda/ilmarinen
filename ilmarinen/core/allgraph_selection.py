@@ -267,7 +267,7 @@ class _SizeSelectionMixin:
         we refit, up to max_depth_cap. This mirrors the width boundary-extension guard and the marginal-value
         depth rule: depth grows until the marginal accuracy benefit becomes insignificant, rather than being
         capped by hand."""
-        from .variable_width_area import fit_variable_width_area, certificate_lambda_scale
+        from .variable_width_area import certificate_lambda_scale, fit_variable_width_area
         # featurize to a fixed vector per example (relational node_feats OR dense grid).
         if getattr(data, "node_feats", None) is not None:
             feats = []

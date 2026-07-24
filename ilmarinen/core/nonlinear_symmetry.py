@@ -26,6 +26,7 @@ spurious or missed symmetry. This is a genuine architectural addition (it needs 
 call into the existing detector. It is the nonlinear counterpart of the linear Family-2 detector.
 """
 from __future__ import annotations
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -86,8 +87,8 @@ def discover_nonlinear_symmetries(task_model, X, latent_dim=None, ae_epochs=400,
     with the generators living in latent coordinates, plus the classified latent group. If return_ae,
     also returns the autoencoder (so the caller can pull back / route).
     """
-    from ilmarinen.core.symmetry_discovery import discover_symmetries
     from ilmarinen.core.equivariance_discovery import identify_group
+    from ilmarinen.core.symmetry_discovery import discover_symmetries
 
     X = X if isinstance(X, torch.Tensor) else torch.tensor(X, dtype=torch.float32)
     if ae is None:
@@ -140,8 +141,8 @@ def discover_nonlinear_symmetries_joint(task_model, X, latent_dim=None, epochs=6
     Returns dict with the discovered latent group and the learned generator; honest about the
     candidate family (antisymmetric/rotation) it searches -- the fully general version sweeps families.
     """
-    from ilmarinen.core.symmetry_discovery import discover_symmetries
     from ilmarinen.core.equivariance_discovery import identify_group
+    from ilmarinen.core.symmetry_discovery import discover_symmetries
 
     torch.manual_seed(seed)
     X = X if isinstance(X, torch.Tensor) else torch.tensor(X, dtype=torch.float32)
@@ -225,8 +226,8 @@ def discover_symmetries_with_nonlinear_fallback(task_model, X, tol_ratio=1.8, no
     autoencoder's ability to linearize the action -- it reliably recovers moderate warps (tanh, mild
     polynomial) of a rotation symmetry and is guarded against false positives by the null-baseline check,
     but a severe coordinate warp can still defeat the AE (recorded limitation, not a silent failure)."""
-    from ilmarinen.core.symmetry_discovery import discover_symmetries
     from ilmarinen.core.equivariance_discovery import identify_group
+    from ilmarinen.core.symmetry_discovery import discover_symmetries
 
     X = X if isinstance(X, torch.Tensor) else torch.tensor(X, dtype=torch.float32)
     lin = discover_symmetries(task_model, X, tol_ratio=tol_ratio)

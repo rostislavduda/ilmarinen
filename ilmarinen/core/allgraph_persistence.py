@@ -4,6 +4,8 @@ predict / predict_proba run the trained net on fresh data; save / load persist a
 allgraph.py to keep the controller focused; AllGraph mixes this in, so `self` and `cls` resolve exactly
 as before. NOTE: _default_model_dir uses __file__ -- this module lives in the same package dir as
 allgraph.py (ilmarinen/core/), so the default out/ location is unchanged."""
+from datetime import UTC
+
 import numpy as np
 import torch
 
@@ -127,7 +129,7 @@ class _PersistenceMixin:
         runners pass the dataset name here. Pass `path` for a fully explicit filename, or `dirpath` to change
         only the directory. Returns the absolute path written. Requires a fitted model (call fit() first)."""
         import os
-        from datetime import datetime, timezone
+        from datetime import datetime
         if self.net is None or self.contract is None:
             raise RuntimeError("nothing to save -- call fit() before save().")
         payload = {
@@ -147,7 +149,7 @@ class _PersistenceMixin:
         except Exception:
             payload["ilmarinen_version"] = None
         if path is None:
-            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")   # microseconds -> collision-free
+            stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S_%fZ")   # microseconds -> collision-free
             d = dirpath or self._default_model_dir()
             os.makedirs(d, exist_ok=True)
             prefix = stem or f"allgraph_{self.contract}"
@@ -169,7 +171,7 @@ class _PersistenceMixin:
         """Load a model saved with save() and return an AllGraph ready for predict() on new data. `device`
         selects where inference runs (auto|mps|cuda|cpu or a torch.device); the net is moved there. The
         returned instance is inference-only -- its selection/training config is not fully reconstructed."""
-        from ..device import resolve_device, prefer_cpu_on_mps
+        from ..device import prefer_cpu_on_mps, resolve_device
         dev = resolve_device(device)
         # weights_only=False: the checkpoint holds a full nn.Module, not just tensors (torch>=2.6 default is True)
         payload = torch.load(path, map_location="cpu", weights_only=False)

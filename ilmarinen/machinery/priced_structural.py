@@ -27,6 +27,7 @@ the cheapest candidate whose accuracy is within tol of the best, i.e. the analyt
 description-length-optimal receptive field / angular order.
 """
 from __future__ import annotations
+
 import numpy as np
 
 

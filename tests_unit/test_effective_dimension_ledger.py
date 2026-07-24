@@ -10,10 +10,13 @@ unification; (2) the ledger assembles the available legs onto one axis with dist
 import numpy as np
 import pytest
 
-from ilmarinen.machinery.effective_dimension_ledger import (participation_ratio,
-                                                          effective_dimension_ledger, LEDGER_LEVELS)
-from ilmarinen.machinery.sparsity_priced_alpha import participation
 from ilmarinen.core.redundancy_reduction import effective_dimension
+from ilmarinen.machinery.effective_dimension_ledger import (
+    LEDGER_LEVELS,
+    effective_dimension_ledger,
+    participation_ratio,
+)
+from ilmarinen.machinery.sparsity_priced_alpha import participation
 
 
 # ============================================================ the shared functional

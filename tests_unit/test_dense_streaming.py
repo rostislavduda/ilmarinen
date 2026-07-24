@@ -11,8 +11,8 @@ import numpy as np
 import pytest
 import torch
 
-from ilmarinen import AllGraph, AllData, DenseSource, InMemoryDenseSource, MemmapDenseSource
-from ilmarinen.core.allgraph_streaming import _GridView, _StreamMetric, _reservoir_ids
+from ilmarinen import AllData, AllGraph, DenseSource, InMemoryDenseSource, MemmapDenseSource
+from ilmarinen.core.allgraph_streaming import _GridView, _reservoir_ids, _StreamMetric
 
 
 # --------------------------------------------------------------------------- helpers

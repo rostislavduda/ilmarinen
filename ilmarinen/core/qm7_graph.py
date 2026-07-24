@@ -6,6 +6,7 @@ in second neighbors (avg degree ~2.5). Node features = one-hot atom type (5 elem
 """
 import numpy as np
 import torch
+
 from .qm7 import load_qm7
 
 
@@ -15,7 +16,7 @@ def _build_qm7(path, cutoff_bohr, n_max, with_pos):
     pos (n,3) Bohr coordinates when `with_pos` (the equivariant contract needs geometry). Returns
     (graphs, y). build_qm7_graphs / build_qm7_equivariant are the thin public wrappers over this."""
     if path is None:
-        from .data_sources import qm7_mat_path; path = qm7_mat_path()
+        from .data_sources import qm7_mat_path; path = qm7_mat_path()  # noqa: I001
     R, T, M, y = load_qm7(path)
     graphs, ys = [], []
     N = len(R) if n_max is None else min(n_max, len(R))

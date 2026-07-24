@@ -1,9 +1,9 @@
 # Pre-commit hooks. Activate locally once with:  pre-commit install
 # Run against the whole tree on demand with:      pre-commit run --all-files
 #
-# NOTE: the ruff hooks below are intentionally left un-installed until the
-# existing tree has been reviewed (see the report-only lint job in CI). Enable
-# them by running `pre-commit install` after the first clean-up pass.
+# The tree is lint-clean under the configured rule set, so these are ready to
+# enable. Install pre-commit into your env first (it is in the `dev` extra):
+#   pip install -e ".[dev]" && pre-commit install
 default_language_version:
   python: python3
 
@@ -26,7 +26,7 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.0
     hooks:
-      # Linter (report-only for now: no --fix, so it never rewrites your code).
+      # Lint — matches the enforced CI rule set. No --fix, so it never rewrites code.
       - id: ruff-check
-      # Formatter. Left here for when you opt in; it WILL reformat on commit.
-      - id: ruff-format
+      # Formatter deferred (whole-repo reformat not adopted). Uncomment to enable:
+      # - id: ruff-format

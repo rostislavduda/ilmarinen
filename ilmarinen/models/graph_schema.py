@@ -43,6 +43,7 @@ here without external dependencies (pure torch scatter via index_add / scatter_r
 All prior modules are left UNTOUCHED; this is a new capability in a new module.
 """
 from __future__ import annotations
+
 import numpy as np
 import torch
 import torch.nn as nn

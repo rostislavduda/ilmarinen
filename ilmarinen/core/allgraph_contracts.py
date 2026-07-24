@@ -243,7 +243,7 @@ class _ContractFitMixin:
         soft-subsets A, B (a genuine, generally nonzero Sp-invariant); SL uses determinants of learned
         soft-frames of vec_dim weighted point-combinations (an SL-invariant volume). A learned scalar MLP
         of node features gates the attention; the resulting invariants feed a readout."""
-        from .emlp_layer import symplectic_generators, determinant_invariants, symplectic_invariants
+        from .emlp_layer import determinant_invariants, symplectic_generators, symplectic_invariants
         is_sp = gname.startswith("Sp(")
         H = max(2 * vec_dim, self._SKEW_MIN_GROUPS)                     # number of learned soft-groups / frame-vectors
         # The soft-grouping must be based on FIXED node features (a canonical labeling: which points are q
@@ -320,7 +320,7 @@ class _ContractFitMixin:
         self.generated_equivariant_group, using each datum's positions as its set of group vectors. A
         per-datum invariant readout is pooled over the set. This realises a contract for a discovered group
         that the eight built-ins may not cover (e.g. Lorentz O(1,3) on particle 4-vectors)."""
-        from .emlp_layer import EquivariantMLP, equivariant_bilinear_invariants
+        from .emlp_layer import equivariant_bilinear_invariants
         spec = self.generated_equivariant_group
         gens = [np.asarray(A, float) for A in spec["gens"]]
         vec_dim = spec["vec_dim"]
@@ -330,8 +330,10 @@ class _ContractFitMixin:
         # equivariant vectors is still equivariant), then form invariants from the POOLED vectors and read
         # out. Pooling BEFORE the invariant step is what captures cross-node invariants (e.g. a jet's
         # invariant mass <sum p, sum p>), which a per-node-then-pool design misses.
-        from .emlp_layer import (EquivariantLinear, direct_sum, hidden_rep,
-                                  symplectic_invariants, determinant_invariants, symplectic_generators)
+        from .emlp_layer import (
+            EquivariantLinear,
+            direct_sum,
+        )
         hv = self.width // 8 + 2
         # invariant family: metric bilinear (O(p,q)/U(n)) uses an equivariant-linear hidden map; symplectic
         # (Sp) and special-linear (SL) do NOT -- their vector->vector commutant is 1-dimensional (Schur),
@@ -518,9 +520,10 @@ class _ContractFitMixin:
         M* where the per-mode reduction stops beating mu * (added spectral code length). Returns the selection
         detail (with selected_modes) or None on failure -- falls back to the heuristic."""
         try:
+            import torch
+
             from ..machinery.spectral_selection import measure_mode_curve, select_modes
             from ..models import build_operator_schema
-            import torch
             n = a.shape[0]
             rng = np.random.RandomState(self.seed); perm = rng.permutation(n)
             ntr = max(8, int(0.75 * n)); tr, va = perm[:ntr], perm[ntr:]

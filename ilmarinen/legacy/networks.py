@@ -13,10 +13,11 @@ Both expose `.init_report()` hooks so validation code can read gradient norms
 at initialization.
 """
 from __future__ import annotations
+
 import torch
 import torch.nn as nn
 
-from ..models.init_utils import _init_linear   # canonical home is init_utils; re-exported here for legacy importers
+from ..models.init_utils import _init_linear  # canonical home is init_utils; re-exported here for legacy importers
 
 
 class PlainMLP(nn.Module):

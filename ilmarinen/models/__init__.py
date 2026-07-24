@@ -1,19 +1,14 @@
 # CURRENT schemas -- the eight peer contracts (see AllGraph._BUILTIN_CONTRACTS)
-from .schema import build_schema, Schema
-from .spatial_schema import build_spatial_schema, SpatialSchema
-from .volumetric_schema import (build_volumetric_schema,
-                                            VolumetricSchema)
-from .graph_schema import build_graph_schema, GraphSchema
-from .equivariant_graph_schema import (build_equivariant_graph_schema,
-                                                   EquivariantGraphSchema)
-from .equivariant_graph_schema_l2 import (build_equivariant_graph_schema_l2,
-                                                      EquivariantGraphSchemaL2)
+from .equivariant_graph_schema import EquivariantGraphSchema, build_equivariant_graph_schema
+from .equivariant_graph_schema_l2 import EquivariantGraphSchemaL2, build_equivariant_graph_schema_l2
+from .graph_schema import GraphSchema, build_graph_schema
+from .grid4d_schema import Grid4dSchema, build_grid4d_schema, conv4d
 from .neural_ode import *  # noqa
-from .set_schema import build_set_schema, SetSchema
-from .grid4d_schema import build_grid4d_schema, Grid4dSchema, conv4d
-from .operator_schema import (build_operator_schema,
-                                          OperatorSchema,
-                                          build_standalone_deeponet, StandaloneDeepONet)
+from .operator_schema import OperatorSchema, StandaloneDeepONet, build_operator_schema, build_standalone_deeponet
+from .schema import Schema, build_schema
+from .set_schema import SetSchema, build_set_schema
+from .spatial_schema import SpatialSchema, build_spatial_schema
+from .volumetric_schema import VolumetricSchema, build_volumetric_schema
 
 # LEGACY re-exports (superseded by AllGraph + the per-contract build_*_schema contracts; consolidated under ilmarinen/legacy).
 # DEPRECATED: resolved lazily with a DeprecationWarning, kept for one release for backward compatibility.

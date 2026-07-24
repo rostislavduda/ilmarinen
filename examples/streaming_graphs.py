@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ilmarinen import AllGraph, AllData, LazyGraphSource
+from ilmarinen import AllData, AllGraph, LazyGraphSource
 
 warnings.filterwarnings("ignore")                        # silence torch index_reduce beta warning in the demo
 

@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 import torch
 
-from ilmarinen import (AllGraph, AllData, GraphSource, InMemoryGraphSource, LazyGraphSource)
+from ilmarinen import AllData, AllGraph, GraphSource, InMemoryGraphSource, LazyGraphSource
 
 
 # --------------------------------------------------------------------------- helpers / data
@@ -254,7 +254,7 @@ def test_lazy_source_retries_after_transient_loader_error():
     def loader(i):
         if state["fail_next"]:
             state["fail_next"] = False
-            raise IOError("transient backend hiccup")
+            raise OSError("transient backend hiccup")
         return {"node": nf[i], "edge": ed[i]}
 
     src = LazyGraphSource(loader, n=4, n_in=4, has_edges=True)

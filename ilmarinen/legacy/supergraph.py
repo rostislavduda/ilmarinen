@@ -28,6 +28,7 @@ Design notes (fairness of the test):
     by bad initialization.
 """
 from __future__ import annotations
+
 import torch
 import torch.nn as nn
 
@@ -359,7 +360,7 @@ class DiscreteRNN(nn.Module):
     primitive performance that the soft mixture diluted.
     """
 
-    def __init__(self, super_net: "SuperGraphRNN"):
+    def __init__(self, super_net: SuperGraphRNN):
         super().__init__()
         self.width = super_net.width
         self.depth = super_net.depth
@@ -401,7 +402,7 @@ class DiscreteRNN(nn.Module):
         return w0, self.head.weight
 
 
-def discretize(super_net: "SuperGraphRNN") -> DiscreteRNN:
+def discretize(super_net: SuperGraphRNN) -> DiscreteRNN:
     """Extract the discrete architecture from a trained supergraph."""
     return DiscreteRNN(super_net)
 

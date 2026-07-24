@@ -23,6 +23,7 @@ moments underlying SOAP and the ACE/MACE body-order expansion, so "how much angu
 data" is measured with the same objects the equivariant model uses internally.
 """
 from __future__ import annotations
+
 import numpy as np
 
 

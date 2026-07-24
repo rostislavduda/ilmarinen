@@ -33,6 +33,7 @@ seed; this generalizes it to message passing + tensor-product nonlinearities on 
 All prior modules are UNTOUCHED; this is a new capability in a new module.
 """
 from __future__ import annotations
+
 import numpy as np
 import torch
 import torch.nn as nn

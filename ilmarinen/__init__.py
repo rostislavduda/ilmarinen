@@ -37,46 +37,59 @@ spectral primitives fall back to CPU transparently on PyTorch/macOS versions lac
 """
 
 # ---- the primary entry point (the physicist's pipeline) -----------------------------------------------
-from .core.allgraph import AllGraph, AllData
+# ---- validation subpackage -----------------------------------------------------------------------------
+from . import validation
+from .core.allgraph import AllData, AllGraph
 
 # ---- opt-in dataset streaming (train on data larger than RAM/VRAM) ------------------------------------
-from .core.allgraph_streaming import (DenseSource, InMemoryDenseSource, MemmapDenseSource,
-                                      GraphSource, InMemoryGraphSource, LazyGraphSource,
-                                      OperatorSource, InMemoryOperatorSource, MemmapOperatorSource,
-                                      IterableDenseSource, InMemoryIterableDenseSource)
-
-# ---- device selection ----------------------------------------------------------------------------------
-from .device import best_device, resolve_device, mps_available
+from .core.allgraph_streaming import (
+    DenseSource,
+    GraphSource,
+    InMemoryDenseSource,
+    InMemoryGraphSource,
+    InMemoryIterableDenseSource,
+    InMemoryOperatorSource,
+    IterableDenseSource,
+    LazyGraphSource,
+    MemmapDenseSource,
+    MemmapOperatorSource,
+    OperatorSource,
+)
+from .core.feature_attribution import feature_selection_path, fit_feature_attribution
+from .core.ib_rg_flow import critical_betas, gib_spectrum, ib_effective_dimension, ib_rg_flow, layer_rg_flow
+from .core.interpretability import explain, format_report
+from .core.redundancy_reduction import effective_dimension, reduce_redundancy
 
 # ---- stage-level building blocks (import from the subpackages for the full surface) --------------------
 from .core.route import route_by_structure
-from .core.symmetry_pipeline import discover_and_reduce, continuous_invariant_features
-from .core.interpretability import explain, format_report
-from .core.feature_attribution import fit_feature_attribution, feature_selection_path
 from .core.symbolic_readout import symbolic_readout, symbolify_model
-from .core.redundancy_reduction import effective_dimension, reduce_redundancy
-from .core.ib_rg_flow import ib_rg_flow, layer_rg_flow, gib_spectrum, ib_effective_dimension, critical_betas
-from .core.variable_width_area import (fit_variable_width_area, area_price_path,
-                                       certificate_lambda_scale, VariableWidthNet)
-from .machinery.priced_depth import measure_depth_curve, select_depth, significant_elbow
-from .machinery.contract_evidence import contract_evidence, score_to_nll
-from .machinery.singular_complexity import estimate_llc, free_energy
-from .machinery.singular_mdl import (omega_func, total_code_length,
-                                     singular_complexity_of, singular_free_energy)
-from .machinery.developmental_llc import developmental_llc, default_checkpoints
-from .machinery.thermodynamic_potential import (wbic_beta, free_energy_form,
-                                                assert_temperature_consistency, POTENTIAL_LEVELS)
-from .machinery.response_spectroscopy import (gibbs_susceptibility, contract_transition,
-                                              response_spectrum)
-from .machinery.effective_dimension_ledger import (participation_ratio, effective_dimension_ledger,
-                                                    LEDGER_LEVELS)
-from .models.latent_equivariant_contract import build_latent_equivariant_contract
-from .models.scalable_equivariant import build_scalable_equivariant_mlp, ScalableEquivariantMLP
-from .models.approximate_equivariance import ApproxEquivariantModel, select_relaxation, price_relaxation
-from .machinery.spectral_selection import select_modes, measure_mode_curve, spectral_code_length
+from .core.symmetry_pipeline import continuous_invariant_features, discover_and_reduce
+from .core.variable_width_area import (
+    VariableWidthNet,
+    area_price_path,
+    certificate_lambda_scale,
+    fit_variable_width_area,
+)
 
-# ---- validation subpackage -----------------------------------------------------------------------------
-from . import validation
+# ---- device selection ----------------------------------------------------------------------------------
+from .device import best_device, mps_available, resolve_device
+from .machinery.contract_evidence import contract_evidence, score_to_nll
+from .machinery.developmental_llc import default_checkpoints, developmental_llc
+from .machinery.effective_dimension_ledger import LEDGER_LEVELS, effective_dimension_ledger, participation_ratio
+from .machinery.priced_depth import measure_depth_curve, select_depth, significant_elbow
+from .machinery.response_spectroscopy import contract_transition, gibbs_susceptibility, response_spectrum
+from .machinery.singular_complexity import estimate_llc, free_energy
+from .machinery.singular_mdl import omega_func, singular_complexity_of, singular_free_energy, total_code_length
+from .machinery.spectral_selection import measure_mode_curve, select_modes, spectral_code_length
+from .machinery.thermodynamic_potential import (
+    POTENTIAL_LEVELS,
+    assert_temperature_consistency,
+    free_energy_form,
+    wbic_beta,
+)
+from .models.approximate_equivariance import ApproxEquivariantModel, price_relaxation, select_relaxation
+from .models.latent_equivariant_contract import build_latent_equivariant_contract
+from .models.scalable_equivariant import ScalableEquivariantMLP, build_scalable_equivariant_mlp
 
 # ---- legacy / early-theory exports (DEPRECATED; removed in a future release) ---------------------------
 # Resolved LAZILY with a DeprecationWarning (PEP 562): keeps them working for one release, drops them from
@@ -100,6 +113,7 @@ def __getattr__(name):          # PEP 562: lazily resolve + deprecation-warn the
     source = _LEGACY_EXPORTS.get(name)
     if source is not None:
         import importlib
+
         from ._deprecation import warn_legacy
         warn_legacy(name, source)
         return getattr(importlib.import_module(source), name)

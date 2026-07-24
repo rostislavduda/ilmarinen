@@ -24,6 +24,7 @@ Primitive interface (each *Core implements):
   readout_h(state)          -> h               (the vector the head reads; = output)
 """
 from __future__ import annotations
+
 import numpy as np
 import torch
 import torch.nn as nn

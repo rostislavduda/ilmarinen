@@ -83,7 +83,6 @@ from __future__ import annotations
 
 import math
 
-
 # The three levels of the one free-energy form, as data (single source of truth for the report + the check).
 POTENTIAL_LEVELS = (
     {

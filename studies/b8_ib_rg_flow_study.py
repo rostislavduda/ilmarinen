@@ -10,10 +10,11 @@ Run: python studies/b8_ib_rg_flow_study.py
 """
 import warnings; warnings.filterwarnings("ignore")
 import sys
+
 import numpy as np
 
 sys.path.insert(0, ".")
-from ilmarinen.core.ib_rg_flow import ib_rg_flow, layer_rg_flow, gib_spectrum, critical_betas  # noqa: E402
+from ilmarinen.core.ib_rg_flow import critical_betas, gib_spectrum, ib_rg_flow, layer_rg_flow  # noqa: E402
 
 
 def controlled_gaussian(rho=(0.95, 0.8, 0.5, 0.2, 0.05), n=4000, seed=0):

@@ -17,6 +17,7 @@ This does NOT itself train; it returns a recommended kernel size (and the measur
 can pass to the spatial/volumetric schema, or use to price a kernel-size selection.
 """
 from __future__ import annotations
+
 import numpy as np
 
 

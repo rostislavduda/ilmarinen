@@ -8,6 +8,7 @@ energies (n_conf,), forces (n_conf,n_atoms,3), plus old_* variants. Energies in 
 Angstrom, forces in kcal/mol/Angstrom. Obtain from figshare 12672038 (Revised MD17).
 """
 from __future__ import annotations
+
 import numpy as np
 
 

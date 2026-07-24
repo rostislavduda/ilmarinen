@@ -26,6 +26,7 @@ Permutation-primitive vocabulary (the set analogue of the six irreducibles):
   norm        : element-wise normalization (parameter-light stabilizer).
 """
 from __future__ import annotations
+
 import torch
 import torch.nn as nn
 

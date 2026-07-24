@@ -12,7 +12,9 @@ the one condition that is NOT automatic (it tests whether the selected
 dictionary was rich enough that no unselected feature violates the certificate).
 """
 from __future__ import annotations
+
 from dataclasses import dataclass
+
 import numpy as np
 
 

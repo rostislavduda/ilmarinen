@@ -36,7 +36,7 @@ reuses the existing estimators and states them on one axis.
 """
 from __future__ import annotations
 
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -95,10 +95,10 @@ LEDGER_LEVELS = (
 # Assemble the ledger from whatever pieces are available (no recomputation of selections)
 # --------------------------------------------------------------------------------------------------
 def effective_dimension_ledger(*,
-                               cov_spectrum: Optional[Sequence[float]] = None,
-                               ib_flow: Optional[dict] = None,
-                               alpha: Optional[Sequence[float]] = None,
-                               llc: Optional[dict] = None) -> dict:
+                               cov_spectrum: Sequence[float] | None = None,
+                               ib_flow: dict | None = None,
+                               alpha: Sequence[float] | None = None,
+                               llc: dict | None = None) -> dict:
     """Assemble the effective-dimension ledger from already-computed pieces. Every argument is
     optional; a level is included only when its input is supplied (a run may have data modes but no
     fitted mixture, or a model lambda but no IB flow, etc.).

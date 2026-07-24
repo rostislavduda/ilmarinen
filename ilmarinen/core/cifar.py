@@ -9,7 +9,9 @@ from disk rather than caching the full set -- the schema test needs only
 a few thousand images.
 """
 from __future__ import annotations
+
 import os
+
 import numpy as np
 
 CIFAR_CLASSES = ["airplane", "automobile", "bird", "cat", "deer",

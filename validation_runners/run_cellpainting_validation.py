@@ -31,9 +31,10 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-from ilmarinen.core.cellpainting import load_cellpainting, CLASSES
 # inherit the standard suite's shared pipeline machinery (identical flags + model construction)
-from run_standard_validation import add_pipeline_args, resolve_pipeline, make_allgraph, BUDGET
+from run_standard_validation import BUDGET, add_pipeline_args, make_allgraph, resolve_pipeline
+
+from ilmarinen.core.cellpainting import CLASSES, load_cellpainting
 
 
 def _embeddings(mg, X, batch=128):

@@ -22,6 +22,7 @@ default/lighter option; this one trades cost for angular resolution. Not registe
 -- an additional capability. See tests/l2_irrep_validation.md.
 """
 from __future__ import annotations
+
 import numpy as np
 import torch
 import torch.nn as nn

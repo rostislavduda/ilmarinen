@@ -24,6 +24,7 @@ This module is retained as the documented, validated Family-2 realization; it is
 invoked by fit().
 """
 from __future__ import annotations
+
 import numpy as np
 import torch
 import torch.nn as nn

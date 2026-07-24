@@ -14,8 +14,7 @@ Fast, exact tests -- no training. Two channels with DIFFERENT analytic character
 import numpy as np
 import pytest
 
-from ilmarinen.machinery.response_spectroscopy import (gibbs_susceptibility, contract_transition,
-                                                     response_spectrum)
+from ilmarinen.machinery.response_spectroscopy import contract_transition, gibbs_susceptibility, response_spectrum
 
 
 # =============================================================== Level A: readout susceptibility

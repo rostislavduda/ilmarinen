@@ -32,6 +32,7 @@ to split set-vs-graph by adjacency once rotation-invariance is settled), and it 
 label source for the learned contract router than a from-scratch bake-off.
 """
 from __future__ import annotations
+
 import numpy as np
 
 
@@ -272,9 +273,9 @@ def _raw_features(clouds, d):
 
 
 def _fit_r2_features(feats, y, seed=0, epochs=200, width=48):
+    import numpy as _np
     import torch
     import torch.nn as nn
-    import numpy as _np
     torch.manual_seed(seed)
     X = torch.tensor(_np.asarray(feats), dtype=torch.float32)
     yt = torch.tensor(_np.asarray(y), dtype=torch.float32).reshape(-1, 1)
@@ -294,9 +295,9 @@ def _fit_r2_on(Ftr, ytr, Fte, yte, seed=0, epochs=200, width=64):
     """Fit an MLP on (Ftr, ytr) and return R^2 on a SEPARATE (Fte, yte). Standardization is learned on
     train and applied to test, so this is a genuine transfer score -- used by the stability selector, where
     Fte may be the descriptor of GROUP-TRANSFORMED clouds while yte (an invariant target) is unchanged."""
+    import numpy as _np
     import torch
     import torch.nn as nn
-    import numpy as _np
     torch.manual_seed(seed)
     X = torch.tensor(_np.asarray(Ftr), dtype=torch.float32)
     yt = torch.tensor(_np.asarray(ytr), dtype=torch.float32).reshape(-1, 1)

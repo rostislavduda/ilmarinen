@@ -21,7 +21,13 @@ Usage:
   python run_qm7_symmetry.py --qm7 /path/to/qm7.mat --n_train 800 --protocol solo
   python run_qm7_symmetry.py --qm7 /path/to/qm7.mat --n_train 800 --protocol mixing
 """
-import argparse, os, sys, numpy as np, torch, torch.nn as nn
+import argparse
+import os
+import sys
+
+import torch
+import torch.nn as nn
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from ilmarinen.core.qm7 import load_qm7, random_rotation
 

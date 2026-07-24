@@ -15,6 +15,7 @@ Each entry is a callable loader(reduced: bool, device) -> dict with keys:
 Loaders raise FileNotFoundError / ImportError if their data isn't present; the runner skips those.
 """
 from __future__ import annotations
+
 import numpy as np
 
 
@@ -66,9 +67,10 @@ def _seq_ucr(name, field, sota, reduced, max_T=400, max_test=1000):
     ECG5000 4500 -> 1000). Both are evenly-spaced so class proportions and the accuracy diagnostic stay
     representative while the dominant cost (per-sample length and per-epoch eval size) drops. Full mode is
     unchanged (whole UCR train/test)."""
-    from aeon.datasets import load_classification
-    from .allgraph import AllData
     import torch
+    from aeon.datasets import load_classification
+
+    from .allgraph import AllData
     Xtr, ytr = load_classification(name, split="train")
     Xte, yte = load_classification(name, split="test")
     cls = sorted(set(ytr)); m = {c: i for i, c in enumerate(cls)}
@@ -120,9 +122,10 @@ def load_basicmotions(reduced, device):
 
 # --------------------------------------------------------------------------- SPATIAL
 def load_bloodmnist(reduced, device):
-    from .benchmark_datasets import load_bloodmnist as _l
-    from .allgraph import AllData
     import torch
+
+    from .allgraph import AllData
+    from .benchmark_datasets import load_bloodmnist as _l
     d = _l()
     def zc(x):
         m = x.reshape(-1, 3, 784).mean((0, 2))[None, :, None, None]
@@ -139,9 +142,11 @@ def load_bloodmnist(reduced, device):
 
 
 def load_mnist(reduced, device):
+    import torch
+    import torchvision
+
     from .allgraph import AllData
     from .paths import data_dir
-    import torch, torchvision
     # python-native fetch via torchvision (auto-downloads + caches); uses MNIST's canonical train/test split
     root = data_dir()
     tr = torchvision.datasets.MNIST(root=root, train=True, download=True)
@@ -162,9 +167,10 @@ def load_mnist(reduced, device):
 
 # --------------------------------------------------------------------------- VOLUMETRIC
 def load_organmnist3d(reduced, device):
-    from .benchmark_datasets import load_organmnist3d as _l
-    from .allgraph import AllData
     import torch
+
+    from .allgraph import AllData
+    from .benchmark_datasets import load_organmnist3d as _l
     d = _l()
     def zn(x): return torch.tensor((x - x.mean()) / x.std()).unsqueeze(1)
     ntr = qscale(400) if reduced else len(d["train_y"])
@@ -176,8 +182,8 @@ def load_organmnist3d(reduced, device):
 
 # --------------------------------------------------------------------------- GRAPH
 def load_esol(reduced, device):
-    from .moleculenet import load_esol as _l
     from .allgraph import AllData
+    from .moleculenet import load_esol as _l
     graphs, y = _l(n_max=qscale(500) if reduced else None)
     ym, ys = y.mean(), y.std()
     nf = [g["x"].numpy() for g in graphs]; ed = [g["edge_index"].numpy() for g in graphs]
@@ -190,8 +196,8 @@ def load_esol(reduced, device):
 
 
 def load_tox21(reduced, device):
-    from .moleculenet import load_tox21 as _l
     from .allgraph import AllData
+    from .moleculenet import load_tox21 as _l
     graphs, y = _l(task="NR-AR", n_max=qscale(1600) if reduced else None)
     nf = [g["x"].numpy() for g in graphs]; ed = [g["edge_index"].numpy() for g in graphs]
     tr, te = _split(len(graphs))
@@ -203,10 +209,11 @@ def load_tox21(reduced, device):
 
 # --------------------------------------------------------------------------- EQUIVARIANT
 def load_rmd17(reduced, device):
-    from .rmd17 import load_rmd17 as _l
-    from .data_sources import rmd17_npz
-    from .allgraph import AllData
     import tempfile
+
+    from .allgraph import AllData
+    from .data_sources import rmd17_npz
+    from .rmd17 import load_rmd17 as _l
     # fetch-with-fallback: rmd17_npz resolves the file (upload/RMD17_DIR); _l parses it
     npz = rmd17_npz("ethanol")
     tmp = tempfile.NamedTemporaryFile(suffix=".npz", delete=False)
@@ -250,9 +257,9 @@ def load_qm7(reduced, device):
 
 
 def load_qm9(reduced, device):
-    from .qm9 import load_qm9_dir
-    from .data_sources import qm9_xyz_dir
     from .allgraph import AllData
+    from .data_sources import qm9_xyz_dir
+    from .qm9 import load_qm9_dir
     # fetch-with-fallback: qm9_xyz_dir extracts a bounded xyz subset from the uploaded zip or figshare tarball
     n_files = qscale(1500) if reduced else 15000
     inner = qm9_xyz_dir(n_files)
@@ -281,8 +288,8 @@ def load_qm9(reduced, device):
 
 # --------------------------------------------------------------------------- SET
 def load_jetnet(reduced, device):
-    from .jetnet import load_jetnet as _l
     from .allgraph import AllData
+    from .jetnet import load_jetnet as _l
     particles, mask, labels, names = _l(n_per_class=qscale(700, lo=40) if reduced else None)
     nf = [particles[i][mask[i]] for i in range(len(labels))]
     tr, te = _split(len(labels))
@@ -358,9 +365,10 @@ def load_burgers1d(reduced, device):
 def load_darcy2d(reduced, device):
     """2D Darcy flow operator: permeability field a(x) -> pressure field u(x), -div(a grad u)=1, u=0 on the
     boundary (elliptic, non-periodic). The canonical 2D FNO benchmark (Li et al. 2021)."""
-    from .allgraph import AllData
-    from scipy.sparse import lil_matrix, csr_matrix
+    from scipy.sparse import csr_matrix, lil_matrix
     from scipy.sparse.linalg import spsolve
+
+    from .allgraph import AllData
     N = 20; n = 130 if not reduced else qscale(90)
     def solve(a, f=1.0):
         h = 1.0 / (N - 1); Ni = N - 2; idx = lambda i, j: i * Ni + j

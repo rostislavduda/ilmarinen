@@ -506,7 +506,7 @@ class TestDeviceRoutingMPS:
 
     def test_routed_set_and_cuda_safety(self):
         """T-MG-23: the routed contract set is exact; CUDA/CPU are never forced to CPU; spatial/operator excluded."""
-        from ilmarinen.device import prefer_cpu_on_mps, MPS_CPU_FASTER_CONTRACTS
+        from ilmarinen.device import MPS_CPU_FASTER_CONTRACTS, prefer_cpu_on_mps
         assert MPS_CPU_FASTER_CONTRACTS == {"graph", "equivariant", "set", "sequence", "volumetric", "4d"}
         for c in MPS_CPU_FASTER_CONTRACTS:
             assert prefer_cpu_on_mps(c, "mps") and prefer_cpu_on_mps(c, __import__("torch").device("mps"))

@@ -6,7 +6,12 @@ tensors plus convenient subset / binary-task helpers used by the validation
 pipelines.
 """
 from __future__ import annotations
-import gzip, struct, os, urllib.request
+
+import gzip
+import os
+import struct
+import urllib.request
+
 import numpy as np
 
 _MIRROR = "https://raw.githubusercontent.com/zalandoresearch/fashion-mnist/master/data/fashion/"

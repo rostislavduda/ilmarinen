@@ -11,8 +11,7 @@ import pytest
 import torch
 
 from ilmarinen.machinery.contract_mdl import omega_struct
-from ilmarinen.machinery.singular_mdl import (omega_func, singular_complexity_of,
-                                            singular_free_energy, total_code_length)
+from ilmarinen.machinery.singular_mdl import omega_func, singular_complexity_of, singular_free_energy, total_code_length
 
 
 # --------------------------------------------------------------------------- exact identities (fast)

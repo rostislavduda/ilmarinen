@@ -33,6 +33,7 @@ NOT a validated instance of the depth-freedom scaling law. `arc_length` and
 `leading_jacobian_re` are retained as measurement tools (they produced the refutation).
 """
 from __future__ import annotations
+
 import numpy as np
 import torch
 import torch.nn as nn

@@ -17,8 +17,8 @@ This is a DEPLOYMENT optimization; the searchable schema is untouched and remain
 object. It complements (does not replace) the joint-search compaction of width/depth.
 """
 from __future__ import annotations
+
 import torch
-import torch.nn as nn
 
 
 def selected_primitives(net):

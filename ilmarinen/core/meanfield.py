@@ -14,7 +14,9 @@ This is the corrected diagnostic: phase is decided by chi_1 and c* directly,
 never by a decay-rate fit (which conflates 'approaching 1' with 'fleeing 1').
 """
 from __future__ import annotations
+
 from dataclasses import dataclass
+
 import numpy as np
 
 # Gauss-Hermite nodes/weights: E_{z~N(0,q)}[f] = (1/sqrt(pi)) sum_i w_i f(sqrt(2q) x_i)

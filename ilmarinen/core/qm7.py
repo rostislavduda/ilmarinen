@@ -15,6 +15,7 @@ The .mat file is not redistributed with the package; point `path` at a local cop
 canonical quantum-machine.org / deepchem qm7.mat).
 """
 from __future__ import annotations
+
 import numpy as np
 
 QM7_ELEMENTS = [1, 6, 7, 8, 16]   # H, C, N, O, S

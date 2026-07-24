@@ -10,7 +10,14 @@ Usage:
 
 Reports TEST accuracy (official split) and parameter count for each baseline.
 """
-import argparse, os, sys, numpy as np, torch, torch.nn as nn
+import argparse
+import os
+import sys
+
+import numpy as np
+import torch
+import torch.nn as nn
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from aeon.datasets import load_classification
 
