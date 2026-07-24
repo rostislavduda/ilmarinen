@@ -95,7 +95,7 @@ def measure_lambda_vs_depth(depths=(1, 2, 3, 4, 5), H=16, steps=1500, seed=0, n_
                 loss.backward()
                 opt.step()
 
-            def closure():
+            def closure(net=net):
                 return ((net(X).squeeze(-1) - y) ** 2).mean()
 
             out = estimate_llc(net, closure, n=n, chains=4, steps=200, burn=60, eps=2e-5, seed=seed)

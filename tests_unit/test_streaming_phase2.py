@@ -237,7 +237,7 @@ def test_prefetch_all_families_bit_identical():
                     AllData.functions_stream(InMemoryOperatorSource(a, u)), dict(task="regression", n_out=1)),
     ]
     for case in cases:
-        def fit(pf):
+        def fit(pf, case=case):
             mg, data, kw = case(pf)
             mg.fit(data, **kw)
             return _wsd(mg.net)
