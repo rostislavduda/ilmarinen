@@ -57,8 +57,24 @@ jobs:
           generate_release_notes: true
 
   docker-image:
-    name: docker image (GHCR)
+    name: docker image (${{ matrix.variant }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # CPU image -> ghcr.io/<repo>:<version>, :latest
+          - variant: cpu
+            dockerfile: Dockerfile
+            tags: |
+              type=semver,pattern={{version}}
+              type=raw,value=latest
+          # CUDA image -> ghcr.io/<repo>:<version>-cuda, :cuda
+          - variant: cuda
+            dockerfile: Dockerfile.cuda
+            tags: |
+              type=semver,pattern={{version}},suffix=-cuda
+              type=raw,value=cuda
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -75,14 +91,13 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=raw,value=latest
+          tags: ${{ matrix.tags }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

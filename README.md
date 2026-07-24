@@ -42,6 +42,19 @@ dataset/model extras are imported lazily and only when a given dataset or primit
 **Running from a tarball** (no install): unpack and run in place — `python -m ilmarinen._selfcheck`,
 then the runners below.
 
+**Docker.** Reproducible **CPU** and **CUDA** images build from this repo:
+
+```bash
+docker build -t ilmarinen .                            # CPU (deps pinned via requirements.lock)
+docker run --rm ilmarinen                              # -> INTEGRITY OK
+
+docker build -f Dockerfile.cuda -t ilmarinen:cuda .    # CUDA (host needs NVIDIA driver + nvidia-container-toolkit)
+docker run --gpus all --rm ilmarinen:cuda python -c "import torch; print(torch.cuda.is_available())"
+```
+
+Tagged releases publish both to GHCR: `ghcr.io/rostislavduda/ilmarinen:<version>` / `:latest` (CPU) and
+`:<version>-cuda` / `:cuda` (CUDA).
+
 ## Quick start
 
 ```python
