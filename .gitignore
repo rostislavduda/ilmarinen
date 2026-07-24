@@ -1,0 +1,64 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Packaging / build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Local dataset cache & downloads (portable data dir; see ilmarinen/core/paths.py)
+ilmarinen_data/
+*.npz
+*.mat
+*.hdf5
+
+# LaTeX build intermediates
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+*.bbl
+*.blg
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+.ipynb_checkpoints/
+
+# Environment
+.env
+.env.*
+.venv/
+venv/
+
+# pytest runtime cache
+.pytest_cache/
+
+# Coverage artifacts (embed local file paths)
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Local tool / machine config (Claude Code local settings: permissions, PIDs, machine state)
+.claude/
+
+# Trained models / generated output (AllGraph.save default dir + checkpoints; machine-local artifacts)
+out/
+*.pt
+*.pth
+*.ckpt
+
+# Generated files (regenerated from tests/*.md by studies/regenerate_study_log.py)
+STUDY_LOG.md

@@ -1,0 +1,160 @@
+# Ilmarinen — a physics-principled neural-architecture meta-optimizer
+
+`ilmarinen` selects a neural architecture — its computational *contract* (arena), its primitive
+operations, and its width and depth — for a dataset, by minimizing a single description-length
+objective. Every choice is priced as *risk + complexity*, `J = R + mu * Omega`, with each complexity
+charge `Omega` a **derived** code length rather than a hand-set constant. The organizing idea is a
+physicist's ordering: fix the kinematics (symmetry, effective dimension) first, then let the dynamics
+(training) select the remaining degrees of freedom under one Occam objective.
+
+This is a research package. Findings — including first-class negatives — are recorded in
+`STUDY_LOG.md` (generated from the write-ups in `tests/*.md`) and written up in three PDF reports
+(see **Reports** below).
+
+## Install / instantiate a container
+
+Two environment files are provided so a container can be brought up in one command.
+
+**conda** (recommended for the heavy binary deps — torch, rdkit):
+
+```bash
+conda env create -f environment.yml
+conda activate ilmarinen
+python -m ilmarinen._selfcheck            # -> "INTEGRITY OK: all modules and primitives present"
+```
+
+**pip:**
+
+```bash
+pip install -r requirements.txt         # core runtime + dataset/model extras
+python -m ilmarinen._selfcheck
+```
+
+The package runs on **CPU** out of the box and uses a **GPU** (CUDA or Apple-Silicon MPS) when asked —
+see **Device** below. Python 3.11/3.12 recommended. For a minimal image, only the CORE block of `requirements.txt`
+(`numpy`, `scipy`, `torch`) is needed to import `ilmarinen` and run a fit on in-memory tensors; the
+dataset/model extras are imported lazily and only when a given dataset or primitive is used.
+
+**Running from a tarball** (no install): unpack and run in place — `python -m ilmarinen._selfcheck`,
+then the runners below.
+
+## Quick start
+
+```python
+import numpy as np
+from ilmarinen import AllGraph, AllData
+
+# in-memory data: a batch of sequences (N, T, C) with integer labels
+X = np.random.randn(256, 40, 3).astype("float32")
+y = (X[:, :, 0].mean(axis=1) > 0).astype("int64")
+data = AllData.dense_tensor(X, y)
+
+mg = AllGraph(width=32, depth=1, epochs=20)
+result = mg.fit(data, task="classification", select="gibbs")
+print(result["architecture"], result["value"])
+```
+
+`AllData` constructors cover every arena: `dense_tensor(X, y)` (grids/sequences),
+`point_sets(node_feats, y, positions=...)`, `graphs(node_feats, edges, y, positions=...)`, and
+`functions(a, y, grid)` (operators). `AllGraph.route`/`.fit` dispatch to the right contract
+automatically; `explain`/`AllGraph.explain` reports the selected architecture as its own explanation.
+
+## Device (CPU / GPU)
+
+`AllGraph(device=...)` accepts `"cpu"` (default), `"cuda"`, `"mps"`, or `"auto"` (picks CUDA >
+Apple-Silicon MPS > CPU). On **Apple Silicon**, the contracts whose fit is launch- or scatter-bound —
+`sequence`, `volumetric`, `4d`, and the relational `graph`/`equivariant`/`set` — are automatically pinned
+to the CPU, where they run **1.4–4× faster** than MPS at this package's model sizes; `spatial` and
+`operator` stay on the MPS GPU (**2–5× faster** there). This routing is MPS-only — on **CUDA** every
+contract runs on the GPU. The same policy applies to a model reloaded with `AllGraph.load(...)`. Set
+`PYTORCH_ENABLE_MPS_FALLBACK=1` for the most robust MPS path (any op lacking an MPS kernel then runs on CPU).
+
+## What it does
+
+**Eight computational contracts (arenas).** `sequence`, `spatial`, `volumetric`, `4d`, `graph`,
+`equivariant`, `set`, `operator` — one meta-router over all eight. The contract choice near a fit tie
+is itself folded into `J = R + mu * Omega` with a derived structural code length `Omega_struct`.
+
+**One priced-selection ladder.** Contract, primitive, depth, width, and weights are all rungs of the
+same MDL functional — discrete at the top (contract, and the primitive argmax), continuous below.
+Width and depth are chosen by a marginal-value rule; the primitive by a Gibbs readout over
+clean-solo energies; the mixture (optionally) by a sparsity-priced `alpha`.
+
+**A symmetry-discovery front-end.** Continuous symmetry via the Lie-derivative nullspace, discrete
+symmetry via equivariance testing, enforcement via a commutant equivariant layer, with false-positive
+guards — the kinematic rung that removes exact redundancy before training.
+
+**Faithful-by-construction read-outs** (interpretability as a corollary, all opt-in, none change the
+selection):
+
+| flag | what it reports |
+|---|---|
+| `report_llc` | the local learning coefficient (RLCT) `lambda` at the converged optimum |
+| `price_singular` | fuse the functional code length `lambda*log n` into the contract charge (guarded) |
+| `developmental_llc` | the complexity trajectory `lambda(t)` over training (staged-learning onsets) |
+| `report_thermo` | the single free-energy form's three-level temperature hierarchy, with a consistency guard |
+| `report_response` | the curvature of the selection (readout specific heat + first-order contract transitions) |
+| `report_ledger` | the effective-dimension ledger: one participation-ratio functional across the coarse-graining axis, plus `lambda` |
+| `contract_posterior`, `price_equivariance`, `price_modes` | a contract posterior; priced approximate equivariance; priced spectral-mode selection |
+
+## Running the validation suites
+
+```bash
+python -m validation_runners.run_quick_validation      # quick multi-dataset run
+python -m validation_runners.run_standard_validation   # the fuller suite
+
+# any read-out/pricing flag can be turned on, e.g.:
+python -m validation_runners.run_quick_validation --only QM7-equiv --tiebreak --price_singular
+python -m validation_runners.run_quick_validation --report_llc --report_ledger --report_response
+```
+
+Both runners expose every opt-in flag (`--help` lists them). `studies/` holds the standalone study
+reproducers referenced by `STUDY_LOG.md`.
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt      # dev-only: pytest
+python -m pytest tests_unit/             # full suite (~10 s on CPU)
+python -m pytest tests_unit/ -m "not smoke"   # fast subset (skips the slower end-to-end fits)
+```
+
+The suite locks the public API and the physics invariants: the pricing/MDL identities, the Gibbs
+readout, routing, symmetry, the LLC/RLCT guard, the effective-dimension ledger, and one end-to-end fit
+per arena.
+
+## Reports
+
+Three LaTeX reports ship with their `.tex` sources and PDFs:
+
+- **`ilmarinen_report`** — *A Variational and Field-Theoretic Formulation*: the theory/formulation.
+- **`ilmarinen_implementation_report`** — the implementation: the pipeline, the priced ladder, the
+  contract/primitive/size machinery, the symmetry front-end, the interpretability read-outs, and
+  validation.
+- **`ilmarinen_technical_report`** — *A Symbolic Technical Reference*: a symbolic catalogue of what the
+  package computes.
+
+## Structure
+
+```
+ilmarinen/
+├── core/          the AllGraph controller + AllData, the 8 contracts, routing, dataset loaders,
+│                  symmetry discovery, IB-RG flow, redundancy reduction, interpretability
+├── machinery/     the priced-selection primitives: MDL pricing (contract/depth/width/mixture),
+│                  the Gibbs readout, singular complexity (LLC) + functional pricing, the
+│                  thermodynamic potential, response spectroscopy, the effective-dimension ledger
+├── models/        primitive operations and schema realizations (incl. equivariant, neural ODE)
+└── _selfcheck.py  integrity check over all modules and primitives
+
+validation_runners/   the quick + standard validation CLIs (every flag exposed)
+studies/              standalone study reproducers (source for STUDY_LOG.md)
+tests_unit/           the unit suite
+tests/                per-study write-ups (compiled into STUDY_LOG.md)
+```
+
+## Data locations (portable)
+
+Nothing is written to hard-coded system paths. Downloads are cached under a single base dir, resolved
+as `$ILMARINEN_DATA_DIR` if set, else `<os-temp>/ilmarinen_data`. For offline use, drop pre-downloaded
+dataset files into `$ILMARINEN_UPLOADS_DIR` (defaults to `<base>/uploads`); loaders fall back to those.
+See `ilmarinen/core/paths.py`; set `ILMARINEN_DATA_VERBOSE=1` to log data provenance.

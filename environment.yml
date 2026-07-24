@@ -1,0 +1,63 @@
+# ilmarinen conda environment
+# ==========================
+# Instantiate a ready-to-run container/environment with:
+#
+#     conda env create -f environment.yml
+#     conda activate ilmarinen
+#
+# then, from the package root:
+#
+#     python -m ilmarinen._selfcheck            # -> "INTEGRITY OK"
+#     pip install pytest && python -m pytest tests_unit/   # optional: run the unit suite
+#
+# This installs the CORE runtime plus the dataset/model extras needed to run the
+# validation suites. For a leaner image, drop the extras under the marked block.
+# CPU-only by design (the package and its SGLD estimator run on CPU); for CUDA,
+# replace the pytorch line with the appropriate pytorch-cuda build.
+
+name: ilmarinen
+
+channels:
+  - conda-forge
+  - pytorch
+
+dependencies:
+  # ---- interpreter ----
+  - python=3.12
+
+  # ---- CORE (import ilmarinen, build an AllGraph, run a fit) ----
+  - numpy>=1.26
+  - scipy>=1.11              # symmetry / equivariance machinery (EMLP, Lie nullspace, discrete groups)
+  - pytorch>=2.2             # training + the SGLD singular-complexity estimator (CPU build)
+  - tqdm>=4.60               # AllGraph.fit() training progress bar (guarded: falls back to no bar if absent)
+
+  # ---- MODEL EXTRAS ----
+  # - torchdiffeq>=0.2.4       # continuous-depth (neural ODE) primitive
+
+  # ---- DATASET EXTRAS (only to LOAD the corresponding validation datasets) ----
+  - rdkit>=2023.09           # MoleculeNet / ESOL / Tox21
+  - h5py>=3.8                # JetNet (.hdf5 reader)
+  - requests>=2.28           # JetNet .hdf5 download from Zenodo (Cloudflare 403s urllib)
+  - torchvision>=0.17        # MNIST download/loading
+  - scikit-image>=0.22       # CIFAR
+  # - ucimlrepo>=0.0.7       # (optional) UCI Superconductivity loader; guarded, falls back to the public
+  #                          # UCI zip URL / a local zip, so only needed for the fastest fetch path
+  # - pandas>=2.0           # (optional) Top Quark Tagging HDF5 reader (extended_datasets.load_toptagging)
+  # - pytables>=3.8         # (optional) ditto -- pandas-HDFStore backend for the Top Tagging .h5 (pip: tables)
+  # aeon and medmnist are pip-only on conda-forge; installed via pip below
+
+  # ---- DEV ----
+  - pytest>=7.0
+
+  # ---- pip-only extras ----
+  - pip
+  - pip:
+      - torchdiffeq>=0.2.4       # continuous-depth (neural ODE) primitive
+      - aeon>=0.11           # UCR/UEA time-series datasets
+      - medmnist>=3.0        # MedMNIST 2D/3D
+      # - jump-portrait>=0.1.1  # (optional) JUMP Cell Painting Gallery images for the separate Cell Painting
+      #                         # suite; pulls boto3/s3fs/duckdb and needs S3 access at first build
+      # - pyarrow>=14.0      # (optional) Cell Painting metadata tables; usually pulled transitively by
+      #                      #            jump-portrait, listed here for the explicit cell-painting extra
+      # - cairosvg>=2.7      # (optional) render the AllGraph SVG schematic to PNG
+      # - pypdf>=4.0         # (optional) PDF metadata tooling for the reports

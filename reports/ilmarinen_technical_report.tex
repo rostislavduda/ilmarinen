@@ -1,0 +1,497 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\emergencystretch=3em % absorb tiny (<1 char) overfulls from unbreakable inline-math tokens
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{bm}
+\usepackage{enumitem}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\hypersetup{colorlinks=true,linkcolor=blue!55!black,citecolor=blue!55!black,urlcolor=blue!55!black}
+
+\newcommand{\allowbreakhere}{\discretionary{}{}{}}
+\newcommand{\code}[1]{\texttt{\def\_{\char`_\allowbreakhere}#1}}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Prob}{\mathbb{P}}
+\newcommand{\M}{\mathcal{M}}
+\newcommand{\Pcal}{\mathcal{P}}
+\newcommand{\F}{\mathcal{F}}
+\newcommand{\J}{\mathcal{J}}
+\newcommand{\Lcal}{\mathcal{L}}
+\newcommand{\Dcal}{\mathcal{D}}
+\newcommand{\Zpart}{\mathcal{Z}}
+\newcommand{\Wmet}{\mathcal{W}}
+\newcommand{\TV}{\mathrm{TV}}
+\newcommand{\KL}{\mathrm{KL}}
+\newcommand{\sign}{\operatorname{sign}}
+\newcommand{\supp}{\operatorname{supp}}
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\half}{\tfrac{1}{2}}
+\newcommand{\Lstar}{L^{\star}}
+\newcommand{\Kstar}{K^{\star}}
+\newcommand{\alphapar}{\bm{\alpha}}
+\newcommand{\softmax}{\operatorname{softmax}}
+\newcommand{\relu}{\operatorname{ReLU}}
+\newcommand{\silu}{\operatorname{SiLU}}
+\newcommand{\sig}{\sigma}
+\newcommand{\lerp}{\operatorname{lerp}}
+\newcommand{\rhat}{\hat{\bm{r}}}
+\newcommand{\som}{\mathfrak{so}(3)}
+\newcommand{\SO}{\mathrm{SO}(3)}
+\newcommand{\Sn}{S_n}
+\newcommand{\Cin}{C_{\mathrm{in}}}
+\newcommand{\gp}{\!\cdot\!}
+
+\newtheorem{definition}{Definition}
+
+\title{\bf Ilmarinen: A Symbolic Technical Reference\\[4pt]
+\large Contracts, Schemas, Primitives, and Selection Operators}
+\author{Technical reference notes}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This is a reference catalogue of what the \code{ilmarinen} package computes, expressed symbolically. It
+enumerates the eight computational \emph{contracts} (contracts), the \code{AllGraph} controller and its
+selection operators, every \emph{schema} and its meta-cell algebra, and every \emph{primitive} with
+the exact tensor operation it realizes. Notation follows the analytical report (\emph{the action}
+$J=R+\mu\Omega$; the mixture weight $\alphapar$ as a point on the primitive simplex) and the
+implementation report (module and symbol names in \code{typewriter}). The goal is a compact map from
+code element to mathematical operation, not a derivation; derivations live in the other two reports and
+are cited by section name where relevant.
+\end{abstract}
+
+\tableofcontents
+
+\section{Common objects and the schema algebra}
+\label{sec:algebra}
+
+\paragraph{Data container.} A dataset is wrapped in \code{AllData}, which fixes the \emph{type} by how it
+is built: \code{dense\_tensor}$(X)$ for a fixed-size array $X$ (a grid of some rank), \code{graphs}$(\{V_i\},\{E_i\})$
+for node features with edges, \code{point\_sets}$(\{V_i\})$ for unordered sets, and \code{functions}$(a,y)$
+for field-valued input/target pairs sampled on a grid (the neural-operator interface). Positions
+$\{\bm{x}_i\}\subset\R^3$ may accompany graphs/sets to signal geometry.
+
+\paragraph{Primitive.} A primitive is a map $f_p:\mathcal{X}\to\mathcal{X}$ on a contract's carrier space,
+type-preserving so that primitives compose across depth and mix within a layer. Each contract $c$ has a
+finite \emph{vocabulary} $\Pcal_c=\{f_p\}$; the vocabularies are catalogued in \S\ref{sec:seq}--\S\ref{sec:operator}.
+
+\paragraph{Meta-cell (the relaxation).} A cell places the vocabulary in parallel and mixes it by a softmax
+over a learnable logit vector $\alphapar\in\R^{|\Pcal_c|}$. Writing $w=\softmax(\alphapar)$, the cell map is
+\begin{equation}
+\label{eq:cell}
+\Phi_{\alphapar}(h)\;=\;\sum_{p\in\Pcal_c} w_p\, f_p(h),
+\qquad w_p=\frac{e^{\alpha_p}}{\sum_{q}e^{\alpha_q}} .
+\end{equation}
+Every contract reuses \eqref{eq:cell} verbatim; the cell classes are
+\code{UnifiedCell}, \code{\_GraphCell},
+\code{\_EquivCell}, \code{UnifiedSetCell}, \code{\_OperatorCell}, and so on, differing only in the
+carrier space and $\Pcal_c$. The mixture is a convex combination on the simplex $\Delta^{|\Pcal_c|-1}$,
+so at a vertex ($w\to e_p$) the cell collapses to a single primitive.
+
+\paragraph{Schema (depth composition).} A depth-$L$ schema stacks $L$ independent cells; layer
+$\ell$ consumes the previous layer's mixed output,
+\begin{equation}
+\label{eq:depth}
+h^{(0)}=\text{input},\qquad h^{(\ell)}=\Phi^{(\ell)}_{\alphapar^{(\ell)}}\!\big(h^{(\ell-1)}\big),\quad \ell=1,\dots,L,
+\end{equation}
+each layer carrying its own $\alphapar^{(\ell)}$ (independent per-layer selection). A read-out head $g$ maps
+the top representation to the prediction $\hat y=g(h^{(L)})$ (\S\ref{sec:readout}). The first layer maps
+input width $\Cin$ to hidden width $K$; subsequent layers are $K\to K$.
+
+\paragraph{The action.} All selection in \code{AllGraph} minimizes a single description-length action
+\begin{equation}
+\label{eq:action}
+J \;=\; R \;+\; \mu\,\Omega,
+\end{equation}
+with $R$ the empirical risk (cross-entropy or MSE) and $\Omega$ a complexity charge; the different
+selection stages (\S\ref{sec:select}) are instances of \eqref{eq:action} with different $\Omega$
+(structure, width, depth, mixture sparsity, spectral modes). The price $\mu$ is the accuracy/complexity
+exchange rate (\emph{Pareto slope}); $\mu=0$ recovers pure fit.
+
+\section{Contracts and the \texorpdfstring{$\code{AllGraph}$}{AllGraph} controller}
+\label{sec:contracts}
+
+\paragraph{The eight contracts.} \code{AllGraph.\_ARENAS} enumerates the contracts, each an equivariance/interface
+class with its own carrier space, symmetry group $G$, and vocabulary:
+\begin{center}
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+contract & carrier & symmetry $G$ & \S \\
+\midrule
+\code{sequence}    & $(b,T,\Cin)$ time series           & time translation (soft)     & \ref{sec:seq}\\
+\code{spatial}     & $(b,\Cin,H,W)$ image               & 2D translation              & \ref{sec:grid}\\
+\code{volumetric}  & $(b,\Cin,D,H,W)$ volume            & 3D translation              & \ref{sec:grid}\\
+\code{4d}          & $(b,\Cin,T,D,H,W)$ space--time     & 4D translation              & \ref{sec:grid}\\
+\code{graph}       & nodes $(N,F)$ + edges $E$          & node permutation $\Sn$      & \ref{sec:graph}\\
+\code{equivariant} & geometric graph $(s,\bm v,\bm x,E)$& $\Sn\times\SO$              & \ref{sec:equiv}\\
+\code{set}         & elements $(N,F)$ + membership      & element permutation $\Sn$   & \ref{sec:set}\\
+\code{operator}    & fields $a(\bm x)\!\mapsto\!u(\bm x)$& discretization-invariance  & \ref{sec:operator}\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Routing $\rho$.} \code{route}$(\Dcal)$ maps data to a contract by its kinematics: rank and
+structure of the tensor decide the grid family (\code{sequence}/\code{spatial}/\code{volumetric}/\code{4d}),
+presence of edges lifts to \code{graph}, positions lift to \code{equivariant}, edgeless node collections
+route to \code{set}, and field pairs to \code{operator}. A flat vector $(b,d)$ routes to \code{sequence}
+(unstructured rank-1). If the routed contract is disabled, \code{\_resolve\_enabled\_fallback} degrades along a
+constructibility order (e.g. $\code{equivariant}\!\to\!\code{graph}\!\to\!\code{set}\!\to\!\code{sequence}$),
+dropping the structure the fallback cannot honor.
+
+\paragraph{Tie-break $\tau$.} When several contracts are admissible (e.g.\ a geometric graph could be run as
+\code{set}, \code{graph}, or \code{equivariant}), \code{tiebreak} trains each admissible contract solo and
+selects by the priced action
+\begin{equation}
+\label{eq:tiebreak}
+c^\star=\arg\min_{c}\;\Big[\,R(c)+\mu_c\,\Omega_{\mathrm{struct}}(c)\,\Big],
+\end{equation}
+i.e.\ the contract whose structural prior pays for itself in fit (\code{machinery/contract\_mdl.py};
+Bayesian-evidence reading in \code{contract\_evidence.py}).
+
+\paragraph{Controller API.} \code{AllGraph} exposes: \code{route} and \code{tiebreak} (contract choice),
+\code{select\_architecture} and \code{select\_architecture\_by\_area} (size choice, \S\ref{sec:select}),
+\code{fit} (build the chosen schema, train, optionally price the mixture and discretize),
+\code{apply\_canonicalization} (pose alignment for geometric data), and \code{explain} (attribution/report).
+The controller holds width $K$, depth $L$, seed, and the enabled-contract restriction.
+
+\section{Sequence contract}
+\label{sec:seq}
+
+Carrier $(b,T,\Cin)\!\to\!(b,T,K)$; module \code{schema.py}. Recurrences carry a state
+$h_t\in\R^K$; nonrecurrent primitives act on the whole sequence. Weights are initialized with an
+edge-of-chaos gain $\sigma_w^2\!\approx\!1.76$ (the critical variance of the analytical report). Table
+\ref{tab:seq} lists the eleven cores; $x_t\in\R^\Cin$ is the input at time $t$, and all outputs are in $\R^K$.
+
+\begin{center}
+\footnotesize
+\renewcommand{\arraystretch}{1.35}
+\begin{longtable}{@{}p{1.55cm}p{2.5cm}p{9.4cm}@{}}
+\caption{Sequence primitives $\Pcal_{\code{sequence}}$ (\code{\_SEQ\_CORES}).}\label{tab:seq}\\
+\toprule
+name & class & operation\\
+\midrule
+\endfirsthead
+\toprule name & class & operation\\ \midrule \endhead
+\code{plain}   & \code{\_PlainSeq}   & $h_t=\tanh(W_x x_t + W_h h_{t-1})$ (vanilla RNN)\\
+\code{gated}   & \code{\_GatedSeq}   & GRU: $r,z=\sig(\cdot)$, $n=\tanh(W^n_x x_t + r\odot W^n_h h_{t-1})$, $h_t=(1{-}z)\odot n + z\odot h_{t-1}$\\
+\code{lstm}    & \code{\_LSTMSeq}    & LSTM gates $i,f,o=\sig(\cdot)$, $c_t=f\odot c_{t-1}+i\odot\tanh g$, $h_t=o\odot\tanh(c_t)$; optional chrono-init of $b_f$~\cite{tallec2018chrono}\\
+\code{conv}    & \code{\_ConvSeq}    & causal 1D conv: $h=\tanh\big(\mathrm{Conv1d}_{k}(\text{pad}\,x)\big)$, kernel $k{=}5$\\
+\code{dilconv} & \code{\_DilatedConvSeq} & multiscale causal conv $\tanh\big(\big\|_{d}\mathrm{Conv1d}_{k,d}(x)\big)$, $d\in\{1,2,4,8\}$, then $1{\times}1$ mix (TCN~\cite{bai2018tcn}, InceptionTime~\cite{ismail2020inceptiontime})\\
+\code{attention}& \code{\_AttentionSeq}& causal self-attention $A=\softmax\!\big(\text{tril}(QK^\top/\sqrt{d})\big)$, $h=\tanh(W_o AV)$\\
+\code{dense}   & \code{\_DenseSeq}   & per-step affine $h_t=\tanh(W x_t+b)$ (no time mixing)\\
+\code{norm}    & \code{\_NormSeq}    & $h_t=\tanh\big(W\,\mathrm{LN}(x_t)\big)$ (per-step LayerNorm stabilizer)\\
+\code{linssm}  & \code{\_LinearSSMSeq}& diagonal LTI SSM $h_t=a\odot h_{t-1}+B x_t$, $y_t=\tanh(C h_t)$, $a=\sig(\cdot)\!\in\!(0,1)$~\cite{gu2022s4,smith2023s5}; scan $h_t=a^{t}\!\sum_{s\le t}a^{-s}B x_s$\\
+\code{selssm}  & \code{\_SelectiveSSMSeq}& Mamba/S6, input-dependent decay $\bar A_t=e^{-\Delta_t A}$; state $h_t=\bar A_t\odot h_{t-1}+(\Delta_t B_t)\odot x'_t$, gated readout $y_t=\tanh(C_t\odot h_t + D\odot x'_t)$~\cite{gu2023mamba}\\
+\code{spectral}& \code{\_SpectralSeq}& $\mathrm{rFFT}_t$ log-power $\to$ (mean$\|$max) over freq $\to \tanh(W\cdot)$ broadcast over $t$ (frequency-diagonal)\\
+\bottomrule
+\end{longtable}
+\end{center}
+
+\noindent The mixture \eqref{eq:cell} contracts the $P$ per-primitive sequence outputs,
+$\Phi_{\alphapar}(x)=\sum_p w_p f_p(x)$ (an \code{einsum} $p,pbtw\!\to\!btw$). When every selected core is
+recurrent, the stack streams one timestep at a time (\code{step}); a nonrecurrent core
+(\code{conv}/\code{dilconv}/\code{attention}/\code{dense}/\code{norm}/\code{spectral}) forces whole-sequence
+evaluation.
+
+\section{Grid contracts: spatial, volumetric, 4d}
+\label{sec:grid}
+
+Carriers $(b,\Cin,H,W)$, $(b,\Cin,D,H,W)$, $(b,\Cin,T,D,H,W)$; modules \code{unified\_spatial\_}/
+\code{volumetric\_}/\code{grid4d\_schema.py}. The three vocabularies are the same primitive \emph{ideas} at
+ranks $r=2,3,4$: local convolution (weight sharing under translation), separable/depthwise variants,
+pointwise channel mixing, dense (no locality), normalization, and attention. All convolutional cores apply
+$\tanh$ after the (padded) convolution.
+
+\begin{center}
+\footnotesize
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}p{2.3cm}p{10.6cm}@{}}
+\toprule
+name & operation ($\mathrm{Conv}_r$ = rank-$r$ convolution)\\
+\midrule
+\code{conv2d/3d}         & $\tanh(\mathrm{Conv}_r^{k}(x))$, $k{=}3$ local kernel (weight-shared under $r$D translation)\\
+\code{conv2d\_k5,\,k7}    & same with $k{=}5,7$ (larger receptive field; distinct simplex points)\\
+\code{conv3d\_k5}         & rank-3, $k{=}5$\\
+\code{conv\_dw}          & depthwise conv (per-channel spatial) then $1{\times}\!\cdots$ mix (separable)\\
+\code{atrous}            & dilated conv, rates $\{1,2,4\}$ (multiscale 2D receptive field)\\
+\code{pointwise}         & $1^r$ conv $=$ per-voxel channel mixing $\tanh(Wx)$\\
+\code{conv4d}, \code{\_kt1}& exact 4D conv (space--time coupling); \code{\_kt1} sets $K_t{=}1$ (space--time separable)\\
+\code{dense}             & affine over the flattened grid (no locality; $O((\Cin\!\cdot\!\text{vol})^2)$)\\
+\code{norm}              & normalization $+$ affine (stabilizer)\\
+\code{attention}         & flattened-grid self-attention (content routing over positions)\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent conv4d is realized exactly by decomposing the 4D correlation into a temporal loop of 3D
+convolutions (there is no native \code{conv4d}); the space--time separable \code{conv4d\_kt1} drops temporal
+mixing. Depth composition and the $\alphapar$-mixture are \eqref{eq:depth}--\eqref{eq:cell} as elsewhere.
+
+\section{Graph contract}
+\label{sec:graph}
+
+Carrier: node features $X\in\R^{N\times F}$, directed edges $E$ with rows $[\text{src},\text{dst}]$ (messages
+flow src$\to$dst); module \code{graph\_schema.py}. Let $\mathcal{N}(v)=\{u:(u,v)\in E\}$ and let
+$\bigoplus$ denote a permutation-invariant neighbor aggregation. All cores map $\R^{N\times F}\!\to\!\R^{N\times K}$
+and are $\Sn$-equivariant (a node permutation permutes the rows identically).
+
+\begin{center}
+\footnotesize
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{@{}p{1.5cm}p{2.0cm}p{9.5cm}@{}}
+\toprule
+name & class & operation (per node $v$, $h=Wx$)\\
+\midrule
+\code{gcn}  & \code{\_GCNGraph}  & isotropic mean: $h_v+\operatorname{mean}_{u\in\mathcal N(v)}h_u$~\cite{kipf2017gcn}\\
+\code{sage} & \code{\_SAGEGraph} & max-pool: $W_s x_v + \max_{u\in\mathcal N(v)}\relu(W_m x_u)$~\cite{hamilton2017graphsage}\\
+\code{gin}  & \code{\_GINGraph}  & sum + MLP: $\mathrm{MLP}\big((1{+}\epsilon)x_v+\sum_{u\in\mathcal N(v)}x_u\big)$~\cite{xu2019gin}\\
+\code{pna}  & \code{\_PNAGraph}  & multi-aggregator $\{$mean,max,min,std$\}\times$ degree-scalers $\{1,\log(d{+}1),1/\log(d{+}1)\}$, then $h_v+W_{\!p}(\cdot)$~\cite{corso2020pna}\\
+\code{gat}  & \code{\_GATGraph}  & attention: $a_{uv}=\softmax_u\!\big(\mathrm{LeakyReLU}(\bm a^\top[h_u\|h_v])\big)$, $h_v+\sum_u a_{uv}h_u$~\cite{velickovic2018gat}\\
+\code{dense}& \code{\_DenseGraph}& per-node $Wx_v$ (edges ignored; no-structure baseline)\\
+\code{norm} & \code{\_NormGraph} & $\mathrm{LN}(Wx_v)$ (over-smoothing stabilizer)\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Graphs are batched by concatenating nodes and offsetting edge indices; a per-graph readout
+(\S\ref{sec:readout}) pools nodes to a graph vector. The aggregators differ in their 1-WL discriminative
+power: \code{gin} (injective sum) $\succeq$ \code{gcn} (mean), and \code{pna}'s multi-aggregator design lifts
+the single-aggregator injectivity gap.
+
+\section{Equivariant contract}
+\label{sec:equiv}
+
+Carrier: geometric graph with type-0 (scalar) features $s\in\R^{N\times C_0}$ and type-1 (vector) features
+$\bm v\in\R^{N\times C_1\times 3}$, positions $\bm x\in\R^{N\times 3}$, edges $E$; module
+\code{equivariant\_graph\_schema.py}. All cores are $\SO$-equivariant and type-preserving:
+under $\bm x\mapsto \mathbf{R}\bm x$, scalars are invariant and vectors rotate, $\bm v\mapsto \bm v\mathbf{R}^\top$.
+Edge geometry enters through the unit direction $\rhat_{uv}=(\bm x_v-\bm x_u)/\lVert\bm x_v-\bm x_u\rVert$ and
+length $d_{uv}$.
+
+\paragraph{Equivariant building blocks.} Type-preserving linear \code{\_EquivLinear}: $s\mapsto sW_s+b_s$,
+$\bm v\mapsto \bm v\,W_v$ (channel mix shared across the $2\ell{+}1$ components, no vector bias). Gated
+nonlinearity \code{\_GatedNonlin}: $s\mapsto\tanh s$, $\bm v\mapsto \sig(\text{Lin}(s))\odot\bm v$ (an
+\emph{invariant} gate scales vectors, preserving direction). Norm \code{\_EquivNorm}: $\mathrm{LN}(s)$ on
+scalars; $\bm v$ divided by the RMS of its per-channel invariant norms $\lVert\bm v_c\rVert$.
+
+\paragraph{Clebsch--Gordan message.} \code{\_tensor\_product\_message} couples source features with the edge
+spherical harmonics $Y_0{=}1,\,Y_1{=}\rhat$ for $\ell\le1$:
+\begin{equation}
+\label{eq:cg}
+\underbrace{s\text{-out}}_{0}\!:\ \{\,s_u,\ \langle \bm v_u,\rhat\rangle\,\},\qquad
+\underbrace{\bm v\text{-out}}_{1}\!:\ \{\,s_u\,\rhat,\ \bm v_u\times\rhat\,\},
+\end{equation}
+i.e.\ the CG paths~\cite{thomas2018tfn,geiger2022e3nn} $0{\times}0{\to}0$, $1{\times}1{\to}0$ (dot), $0{\times}1{\to}1$ (scale), $1{\times}1{\to}1$
+(cross). Table \ref{tab:equiv} lists the eight cores.
+
+\begin{center}
+\footnotesize
+\renewcommand{\arraystretch}{1.4}
+\begin{longtable}{@{}p{1.95cm}p{2.35cm}p{9.2cm}@{}}
+\caption{Equivariant primitives $\Pcal_{\code{equivariant}}$ (\code{\_EQUIV\_CORES}).}\label{tab:equiv}\\
+\toprule name & class & operation \\ \midrule
+\endfirsthead
+\toprule name & class & operation \\ \midrule \endhead
+\code{e\_tp}      & \code{\_TPMessage}   & CG message \eqref{eq:cg} weighted by Gaussian-RBF radial $w(d)$, summed over $\mathcal N(v)$, then \code{\_EquivLinear} mix (NequIP~\cite{batzner2022nequip}, MACE~\cite{batatia2022mace})\\
+\code{e\_kan}     & \code{\_KANMessage}  & as \code{e\_tp} but $w(d)$ is a \emph{learnable} piecewise-linear spline $\lerp(\text{knots},d)$ (equivariant KAN~\cite{hu2025equivkan,liu2024kan}; radial curve inspectable)\\
+\code{e\_painn}   & \code{\_PaiNNMessage}& scalar MLP $\phi(s_u)$ split into $(s\text{-msg},a,b)$, radial-gated; $\bm v\text{-msg}=a\,\rhat + b\,\bm v_u$, summed, mixed (PaiNN~\cite{schutt2021painn})\\
+\code{e\_painn\_kan}&\code{\_PaiNNKAN}    & PaiNN message with a learnable-spline radial gate (KAN sibling of \code{e\_painn})\\
+\code{e\_mean}    & \code{\_EquivMean}   & CG message with degree-normalized \emph{mean} aggregation, no RBF (isotropic equivariant ``gcn'')\\
+\code{e\_linear}  & \code{\_EquivSelf}   & \code{\_EquivLinear} self-interaction, no message passing (equivariant ``dense'')\\
+\code{e\_gate}    & \code{\_EquivGate}   & \code{\_EquivLinear} then \code{\_GatedNonlin} (equivariant nonlinear update)\\
+\code{e\_norm}    & \code{\_EquivNormCore}& \code{\_EquivLinear} then \code{\_EquivNorm} (stabilizer)\\
+\bottomrule
+\end{longtable}
+\end{center}
+
+\noindent The \code{\_l2} variant (\code{equivariant\_graph\_schema\_l2.py}) extends the type
+ladder to $\ell\le2$ (adds rank-2 tensor features $C_2$)~\cite{finzi2021emlp,thomas2018tfn}. Scalable non-CG realizations
+(vector-neuron~\cite{deng2021vn} / G-RepsNet~\cite{basu2023grepsnet} style) live in \code{models/scalable\_equivariant.py}, and priced
+\emph{approximate} equivariance (a free non-equivariant pathway gated by a breaking-power price) in
+\code{models/approximate\_equivariance.py}.
+
+\section{Set contract}
+\label{sec:set}
+
+Carrier: elements $X\in\R^{N\times F}$ with a batch map $b:\{1{:}N\}\to\{1{:}n_{\mathrm{sets}}\}$; module
+\code{set\_schema.py}. Cores are $\Sn$-\emph{equivariant} element maps $\R^{N\times F}\!\to\!\R^{N\times K}$;
+a permutation-\emph{invariant} pool at readout gives the per-set output (Deep Sets~\cite{zaheer2017deepsets} factorization
+$\rho(\bigoplus_i\phi(x_i))$).
+
+\begin{center}
+\footnotesize
+\renewcommand{\arraystretch}{1.35}
+\begin{tabular}{@{}p{1.9cm}p{11.0cm}@{}}
+\toprule name & operation ($h=Wx$, pooling within each set)\\
+\midrule
+\code{deepsets}    & element MLP $\phi(h)$; invariant pool applied at readout ($\rho(\bigoplus_i\phi(x_i))$)\\
+\code{element\_mlp}& per-element MLP $\phi(h)$ (minimal set map / stabilizer)\\
+\code{sab}         & Set-Attention Block~\cite{lee2019settransformer}: $a=\mathrm{LN}(h+\mathrm{MHA}(h))$, $\mathrm{LN}(a+\mathrm{FF}(a))$\\
+\code{isab}        & Induced SAB: $m$ learned inducing points attend to elements, elements attend back ($O(Nm)$)\\
+\code{pma\_block}  & element MLP feeding a Pooling-by-Multihead-Attention readout\\
+\code{norm}        & element-wise normalization (parameter-light stabilizer)\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Multihead attention \code{\_MHA} masks cross-set pairs, $\text{scores}_{qk}=\langle q,k\rangle/\sqrt{d_k}$
+with a $-\infty$ mask off-set, so equivariance holds by construction; the pool
+$\bigoplus\in\{\text{sum},\text{mean},\text{max},\text{FSPool}\}$ selects the invariant readout, where
+FSPool~\cite{zhang2020fspool} sorts each feature across elements and reads an order-weighted descriptor (retains distributional
+shape, not just a moment).
+
+\section{Operator contract}
+\label{sec:operator}
+
+Carrier: input field $a(\bm x)$ and target field $u(\bm x)$ sampled on a grid, lifted to a channel field
+$h\in\R^{b\times K\times\text{grid}}$; module \code{operator\_schema.py}. Cores are
+resolution-independent maps $h\mapsto h$ (a trained operator transfers zero-shot across grid resolutions).
+Let $\mathcal F$ be the (real) FFT along the spatial axes.
+
+\begin{center}
+\footnotesize
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{@{}p{2.0cm}p{2.35cm}p{8.65cm}@{}}
+\toprule name & class & operation\\
+\midrule
+\code{fourier}      & \code{\_FourierOp}     & FNO~\cite{li2021fno} layer: $\relu\big(\mathcal F^{-1}(R_{\le m}\,\mathcal F h)+W_{1{\times}1}h\big)$; keep $m$ low modes with learnable complex weights $R$\\
+\code{fourier\_wide}& \code{\_FourierWideOp} & FNO layer with more modes $m'{>}m$ (higher spectral capacity)\\
+\code{local}        & \code{\_LocalOp}       & pointwise (Nemytskii) operator $\relu(W_{1{\times}1}h)$ (no global coupling)\\
+\code{deeponet}     & \code{\_DeepONetOp}    & branch $b_k=\text{Br}(\operatorname{mean}_{\text{grid}}h)$, trunk $t_k(\bm y)=\text{Tr}(\bm y)$; $u(\bm y)=\sum_k b_k t_k(\bm y)$ (DeepONet~\cite{lu2021deeponet}; mesh-free)\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent The spectral cores exist at ranks 1/2/3 (\code{\_SpectralConv1d/2d/3d}); \code{deeponet}'s trunk is a
+continuous function of the query coordinate, so it evaluates off the training grid (mesh-free). The
+per-primitive mode budget $m$ is itself a priced degree of freedom (\S\ref{sec:select}, spectral selection).
+
+\section{Selection operators (instances of \texorpdfstring{$J=R+\mu\Omega$}{J=R+muOmega})}
+\label{sec:select}
+
+The controller turns the fixed hyperparameters (contract, width, depth, mixture support, mode count) into
+\emph{outputs} of priced measurements. Each is a marginal-value rule on \eqref{eq:action}.
+
+\paragraph{Contract.} \eqref{eq:tiebreak}: argmin over admissible contracts of $R(c)+\mu_c\Omega_{\mathrm{struct}}(c)$;
+$\Omega_{\mathrm{struct}}$ is the description length of the contract's structural prior
+(\code{contract\_mdl.py}), with a Bayesian-evidence equivalent (\code{contract\_evidence.py}). Optionally
+(\code{price\_singular}, \code{singular\_mdl.py}) the charge is augmented by the \emph{functional} code
+length $\omega_{\mathrm{func}}=\lambda\log n$ from singular learning theory~\cite{lau2023llc,watanabe2009slt},
+$\Omega_{\mathrm{total}}(c)=\Omega_{\mathrm{struct}}(c)+(\mu_s/\mu_c)\lambda_c\log n$, where $\lambda_c$ is
+the local learning coefficient (RLCT) of the contract's converged candidate; a non-negativity clamp and a
+non-convergence guard keep a noisy $\hat\lambda$ from entering $J$. This prices the effective, not the
+nominal, dimensionality of the fitted function, and is second-order to $\Omega_{\mathrm{struct}}$ on
+realistic converged data.
+
+\paragraph{Width $\Kstar$.} \code{select\_architecture} sweeps width and reads the marginal value of neurons;
+the analytical certificate sets the price scale. \code{width\_sparsity.py} realizes a two-layer fit
+$f(x)=\sum_k a_k\tanh(w_k^\top x+b_k)$ by conditional-gradient atom insertion, adding the neuron of maximal
+residual correlation while the dual certificate $\eta=A^\ast q/\lambda$, $\lVert\eta\rVert_\infty\le1$, is
+unsaturated (\code{dual\_certificate.py}, \code{tv\_certificate.py}). A boundary-extension guard widens the
+grid when the optimum sits on its edge.
+
+\paragraph{Depth $\Lstar$.} \code{machinery/priced\_depth.py}: measure the depth curve $S(L)$ (validation
+loss) over seeds and add layers while the per-layer marginal exceeds the price,
+\begin{equation}
+\label{eq:depth-rule}
+\Lstar=\max\Big\{L:\ -\big(S(L)-S(L{-}1)\big) > \mu\Big\},
+\end{equation}
+or, price-free, the last depth whose marginal clears $n_{\mathrm{se}}$ standard errors
+(\code{significant\_elbow}, $n_{\mathrm{se}}{=}2$ the empirically safe bar). \code{select\_architecture\_by\_area}
+minimizes total area (width$\times$depth) subject to a within-noise accuracy tolerance and extends depth past
+the grid boundary up to a cap when the deeper column beats the noise floor.
+
+\paragraph{Mixture sparsity.} \code{sparsity\_priced\_alpha.py}: charge the in-layer mixture its description
+length so a layer keeps extra primitives only when they pay,
+\begin{equation}
+\label{eq:alpha-price}
+J(\alphapar)=R(\alphapar)+\mu\,\Omega(\alphapar),\qquad
+\Omega(\alphapar)=H(w)\ \text{or}\ \lVert w\rVert_0^{\mathrm{soft}},\quad w=\softmax(\alphapar),
+\end{equation}
+driving $w$ toward a simplex vertex (a single primitive) unless the fit rewards a genuine mixture. This is
+the deployment analogue of the width and depth charges: one more $\Omega$-term in \eqref{eq:action}.
+
+\paragraph{Spectral modes.} \code{spectral\_selection.py}: for the operator contract, price the number of
+retained Fourier modes $m$ by the same marginal-value rule, so spectral capacity is selected, not fixed.
+
+\paragraph{Price $\mu$.} \code{price\_selection.py}: $\mu$ is the exchange rate in the scalarized
+multi-objective $(\min R,\min\Omega)$; sweeping $\mu$ traces the Pareto frontier, and an ``elbow'' / L-curve
+criterion picks the operating point. $\mu{=}0$ is pure fit.
+
+\section{Deriving \texorpdfstring{$\alphapar$}{alpha}, co-adaptation, and discretization}
+\label{sec:alpha}
+
+\paragraph{$\alphapar$ as a Gibbs measure.} \code{gibbs\_alpha.py} identifies the softmax mixture weight as
+the stationary measure of a free-energy flow on the simplex: with free energy
+$\F_{\alphapar}=\langle\alphapar,\Psi\rangle-\tfrac1\beta H(\alphapar)$, the minimizer is the Gibbs form
+$w_p\propto e^{-\beta\Psi_p}$, its Fisher--Rao gradient flow is the replicator equation, and DARTS~\cite{liu2019darts} is that
+flow in a mildly preconditioned metric. The variational principle forces the per-primitive energy $\Psi_p$
+to be the \emph{solo} marginal risk.
+
+\paragraph{Co-adaptation.} \code{coadapt.py}: in a supernet all primitives run and mix, so their gradients
+couple and a high-capacity primitive is over-credited. The fix reads the \emph{solo} marginal (each
+primitive scored alone) as the selection signal and arbitrates a clean single-primitive winner, aligning the
+selection energy with the $\alphapar$-derivation above.
+
+\paragraph{Bilevel selection.} \code{bilevel.py}: weights are trained on a $w$-split and $\alphapar$ on a
+disjoint $\alphapar$-split (three-way split with a held-out test), removing the training-loss bias that
+selects capacity; \code{discretize\_and\_finetune} then collapses the mixture to its argmax primitive and
+fine-tunes, converting a soft selection into a deployed discrete architecture. \code{robust\_discretize.py}
+additionally collapses a redundant depth (adjacent layers selecting the same primitive) when doing so does
+not raise the loss beyond noise.
+
+\paragraph{Singular complexity.} \code{singular\_complexity.py}: the classical $\Omega=\tfrac{k}{2}\log n$
+(parameter count) is replaced, where a local minimum is genuinely reached, by the local learning coefficient
+(RLCT) $\lambda$ of singular learning theory~\cite{watanabe2009slt,lau2023llc}, $\Omega=\lambda\log n$; a negative measured $\lambda$ signals
+non-convergence rather than low complexity, so the estimate is only used at a converged minimum and only
+comparatively across independently-converged architectures.
+
+\section{Read-outs and heads}
+\label{sec:readout}
+
+The top representation $h^{(L)}$ is mapped to a prediction by a contract-appropriate head $g$.
+\emph{Sequence}: \code{last} $h^{(L)}_T$ (recall/copy), \code{mean} $\tfrac1T\sum_t h^{(L)}_t$
+(classification), or \code{flatten} $\mathrm{vec}(h^{(L)})$ (position-aware), then a linear map to $n_{\mathrm{out}}$;
+optional deep supervision attaches an early linear head to each layer. \emph{Graph/set}: a permutation-invariant
+pool over nodes/elements $\bigoplus\in\{\text{mean},\text{sum},\text{max}\}$ to a graph/set vector, then linear.
+\emph{Equivariant}: an \emph{invariant} read-out of the scalar channels (and vector norms) so the target is
+$\SO$-invariant (energies) or, for vector targets, a type-1 output. \emph{Grid}: global pool over the spatial
+axes then linear. \emph{Operator}: the field itself is the output (a $1{\times}1$ projection to the target
+channels on the grid). A symbolic read-out option (\code{core/symbolic\_readout.py}) fits a closed-form
+expression to the pooled features when an interpretable law is sought.
+
+\paragraph{Auxiliary pipelines.} Beyond the eight forward contracts, \code{core/} provides the
+symmetry-discovery pipeline (linear/$\SO$ and nonlinear-latent breaking tests, canonicalization,
+metric/group discovery), the interpretability stack (feature attribution, the inspectable KAN radial curves
+of \S\ref{sec:equiv}), and the information-theoretic diagnostics (IB~\cite{tishby2015ib}/RG-flow~\cite{mehta2014rg}, correlation length, mean-field
+and exponent estimates) used to instrument the selections above. A family of singular/thermodynamic
+read-outs sits on the same objects (\code{machinery/}): the local learning coefficient $\lambda$ at the
+optimum and its training trajectory $\lambda(t)$; the single free-energy \emph{form}
+$F=\langle\rho,E\rangle-\beta^{-1}H(\rho)$ with its three decoupled temperatures ($\beta_W=1/\log n$ at the
+weights, $\beta_A$ at the primitive readout, $\beta_C=1$ at the contracts) and a consistency guard; the
+response susceptibility (readout specific heat and the first-order contract transitions in the price); and
+the effective-dimension ledger, one participation-ratio functional $1/\sum p^2$ read across the
+coarse-graining axis (data modes, primitive mixture) with $\lambda$ as the model-level cap. All are pure
+read-outs that change no selection; they are catalogued in the implementation report.
+
+
+\section*{Provenance and references}
+\code{ilmarinen} is an integrative repackaging: each primitive and selection rule realizes an idea from the
+published literature, recombined under the common action $J=R+\mu\Omega$ and the meta-cell relaxation
+\eqref{eq:cell}. The citations attached to the primitive tables and selection operators above point to the
+originating works; the consolidated list follows. The package's own contribution is the unification and the
+honest empirical auditing of when each component pays for itself, not the primitives themselves.
+
+\bibliographystyle{plain}
+\bibliography{bibliography}
+
+\end{document}

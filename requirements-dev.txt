@@ -1,0 +1,8 @@
+# Development-only dependencies (not required to use the package).
+# Install with:  pip install -r requirements-dev.txt
+#
+# Runtime dependencies (numpy, scipy, torch, and the per-dataset extras) are
+# documented in the README and imported lazily; nothing here is needed to
+# import ilmarinen or run a fit -- only to run the unit test suite.
+
+pytest>=7.0

@@ -1,0 +1,1228 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\emergencystretch=3em % absorb tiny (<1 char) overfulls from unbreakable inline-math tokens
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{bm}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\hypersetup{colorlinks=true,linkcolor=blue!55!black,citecolor=blue!55!black,urlcolor=blue!55!black}
+
+\newtheorem{proposition}{Proposition}
+\newtheorem{lemma}{Lemma}
+\newtheorem{remark}{Remark}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Prob}{\mathbb{P}}
+\newcommand{\M}{\mathcal{M}}
+\newcommand{\Pcal}{\mathcal{P}}
+\newcommand{\F}{\mathcal{F}}
+\newcommand{\J}{\mathcal{J}}
+\newcommand{\Lcal}{\mathcal{L}}
+\newcommand{\Wmet}{\mathcal{W}}
+\newcommand{\TV}{\mathrm{TV}}
+\newcommand{\KL}{\mathrm{KL}}
+\newcommand{\sign}{\operatorname{sign}}
+\newcommand{\supp}{\operatorname{supp}}
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\Dcal}{\mathcal{D}}
+\newcommand{\Zpart}{\mathcal{Z}}
+\newcommand{\rhostar}{\rho^{\star}}
+\newcommand{\Lstar}{L^{\star}}
+\newcommand{\half}{\tfrac{1}{2}}
+\newcommand{\alphapar}{\bm{\alpha}}
+
+\title{\bf A Variational and Field-Theoretic Formulation of\\
+Neural Architecture Meta-Optimization\\[4pt]
+\large Least Complexity, Least Time, and Criticality}
+\author{Analytical reference notes}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We give a self-contained account of a family of meta-optimization formulations for
+neural networks, in which the choice of \emph{width}, \emph{depth}, and ultimately
+\emph{architecture} is cast as a variational problem over measures and fields. The
+organizing principle is physical: the training objective is read as an \emph{action},
+its minimizers as \emph{least-action trajectories}, and the associated statistical
+ensemble as a \emph{path integral} over network configurations. We present the material
+from the general to the specific. We first state the master description-length principle
+and its causally ordered rung hierarchy---%
+$\text{kinematics}\to\text{degrees of freedom}\to\text{dynamics}\to\text{observables}$---%
+the order in which a physicist writes down an effective theory (symmetry before dynamics,
+ultraviolet before infrared). We then descend the hierarchy one rung at a time. The
+outermost \emph{kinematic} rung is the choice of computational contract (the contract and its
+symmetry); it is intrinsically discrete, because distinct contracts have incompatible
+interfaces and cannot be relaxed into one another, and it is settled by a description-length
+bake-off. The \emph{degrees-of-freedom} rungs then fix the size of the network in that contract:
+\textbf{Scenario~0} (fixed architecture) lifts
+two-layer training to a convex problem over a measure of neurons, whose optimality
+condition is a dual certificate guaranteeing a finite-width (atomic) solution, and
+whose dynamics are a Wasserstein gradient flow of a free energy; \textbf{Scenario~1} promotes
+\emph{depth} to an optimized quantity, in two
+Legendre-dual ways: \emph{Route~2}, a grand-canonical ensemble that prices layers with a
+chemical potential $\mu$ and yields an optimal depth $\Lstar\sim\mu^{-1/(\alpha+1)}$; and
+\emph{Route~1}, a reparameterization-invariant continuum-depth (neural-ODE) formulation
+in which complexity becomes arc length in a learned metric and the least-complexity
+network is a geodesic. A renormalization-group (RG) analysis~\cite{mehta2014rg} of the depth map supplies a
+criticality condition and a tower of critical exponents that make these depth objectives
+computable. The innermost \emph{dynamics} rung is the trained weights as a saddle of the
+action, with finite width appearing as loop corrections; the \emph{observable} rung reads
+off the derived architecture parameter. Throughout we make explicit which structures are exact
+(two-layer convexity, the dual certificate, finite atomicity) and which degrade with
+depth (joint convexity, the fixed-operator certificate), and we identify criticality~\cite{poole2016chaos,schoenholz2017deepinfo} as
+the locus where the depth objectives become well posed. We close with an honest ledger:
+the construction is a faithful \emph{synthesis} of established results, and its sharpest
+depth-scaling predictions are heuristic and, where tested, not empirically confirmed.
+\end{abstract}
+
+\tableofcontents
+
+\section{Introduction and physical viewpoint}
+\label{sec:intro}
+
+The premise of these notes is that the minimum-description-length (MDL) view of learning
+---\emph{find the simplest model consistent with the data}---is naturally expressed as a
+variational principle, and that the variational principle has the same formal structure
+as least-action mechanics and its quantum (path-integral) completion. Under this
+dictionary the depth index $\ell$ of a network plays the role of \emph{time}, the
+composition of layers plays the role of \emph{time ordering}, the trained network is a
+\emph{classical trajectory} (a saddle point of an action), and finite-width fluctuations
+are \emph{loop corrections} in a systematic expansion. The dictionary is summarized in
+Table~\ref{tab:dictionary}.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{ll}
+\hline
+\textbf{Learning object} & \textbf{Physical analogue}\\
+\hline
+Regularized training objective & Action $S$ / free energy $\F$\\
+Trained network & Classical (least-action) trajectory\\
+Depth index $\ell$ & Time $t$\\
+Layer composition & Time ordering / transfer operator\\
+Backpropagation & Adjoint (costate) equation, Pontryagin\\
+Infinite depth & Continuum (path-integral) limit\\
+Infinite width & Mean field / classical limit\\
+Neural tangent kernel (NTK) & Gaussian (free) propagator\\
+Finite-width correction & Loop expansion in $1/m$\\
+Depth-wise signal propagation & Renormalization-group flow\\
+\hline
+\end{tabular}
+\caption{The physical dictionary underlying the formulations. Each learning object is
+placed in correspondence with a mechanical/field-theoretic one; the correspondences are
+exact where noted and heuristic otherwise.}
+\label{tab:dictionary}
+\end{table}
+
+These notes are organized from the general to the specific, in the order a physicist would impose on
+an effective theory rather than in the order the pieces were historically assembled. \S\ref{sec:consolidated}
+states the master variational principle and its causally ordered rung hierarchy
+(kinematics~$\to$~degrees of freedom~$\to$~dynamics~$\to$~observables) in full. The subsequent sections
+descend that hierarchy one rung at a time: \S\ref{sec:metarouter} treats the outermost \emph{kinematic}
+rung (which computational contract, i.e.\ which contract and symmetry, the datum lives in); the two
+\emph{degrees-of-freedom} sections then fix the size of the network in that contract---%
+\S\ref{sec:scenario0} the \emph{width} at fixed architecture (\textbf{Scenario~0}), and
+\S\ref{sec:scenario1} the \emph{depth} promoted to an optimized variable (\textbf{Scenario~1}), via a
+discrete priced route (Route~2, \S\ref{sec:route2}) and a continuum geometric route
+(Route~1, \S\ref{sec:route1}); \S\ref{sec:path-integral} treats the \emph{dynamics} (the trained weights
+as a saddle of an action, with finite width as loop corrections); and \S\ref{sec:alpha-derivation} reads
+off the \emph{observables} (the derived architecture parameter). A \emph{criticality} thread
+(\S\ref{sec:criticality}) runs through the depth analysis and makes its objectives computable through a
+single critical exponent. The three formulations of increasing internal scope are thus:
+\begin{itemize}[leftmargin=1.4em]
+\item \textbf{Scenario~0} (\S\ref{sec:scenario0}): fixed architecture; the free variable
+is the \emph{width} (number of neurons), realized as a measure over neuron parameters.
+\item \textbf{Scenario~1} (\S\ref{sec:scenario1}): \emph{depth} is promoted to an
+optimized variable, via a discrete priced route (Route~2, \S\ref{sec:route2}) and a
+continuum geometric route (Route~1, \S\ref{sec:route1}).
+\item The \emph{criticality} thread (\S\ref{sec:criticality}), which threads through both
+and makes the depth objectives computable through a single critical exponent.
+\end{itemize}
+
+Notation is standard. Write a two-layer network with hidden width $m$ as
+$f(x)=\frac1m\sum_{j=1}^m a_j\,\sigma(u_j^\top x)$, with neuron parameters
+$\Theta_j=(u_j,a_j)\in\Theta$ and activation $\sigma$. Here $\M(\Theta)$ denotes finite signed
+measures on $\Theta$, and $\Pcal(\Theta)$ probability measures; $\rho\in\M(\Theta)$ is the neuron
+measure whose mass plays the role of width (and $\rho^{(\ell)}$ its per-layer copy in a deep net). We
+write $R[\cdot]$ for a
+data-fitting risk and reserve $\lambda,\mu$ for the chemical potentials (prices) conjugate
+to width and depth respectively, and $\beta$ for an inverse temperature. The subscript
+$\|\cdot\|_{\TV}$ denotes the total-variation (atomic) norm of a measure, the sparsity penalty whose
+minimizer is atomic (finitely many neurons).
+
+
+\section{The variational principle and its rung hierarchy}
+\label{sec:consolidated}
+
+We state the organizing principle in full at the outset, and devote the rest of the notes to deriving
+each of its pieces from the physical dictionary of \S\ref{sec:intro}. The entire meta-optimization is a
+single description-length problem---fit the data with the least total description---whose free variables
+are, from outermost to innermost, the computational \emph{contract} (which contract the datum lives in), the
+\emph{width} and \emph{depth} of the network in that contract, and the \emph{weights}. Written as one
+statement, with the fixed/variable boundary made explicit:
+\begin{equation}
+\min_{\substack{\text{activation }\sigma\ (\Rightarrow\{\Delta_k\},\alpha)\\ \text{depth }\Lstar(\mu)\ \text{or geodesic }\gamma^\star\\ \text{width }\rhostar\ (\text{atomic})\\ \text{weights}=\text{saddle of }S}}
+\Big[\ \underbrace{R[z^{(L)}]}_{\text{fit}}
++\underbrace{\lambda\textstyle\sum_\ell\|\rho^{(\ell)}\|_{\TV}}_{\text{width}}
++\underbrace{\mu L}_{\text{depth (Route 2)}}\ \Big],
+\label{eq:consolidated}
+\end{equation}
+subject to the nested stationarity hierarchy (each rung is derived in the section named against it below):
+\begin{itemize}[leftmargin=1.4em]
+\item \textbf{Weights} --- saddle of the action: forward pass $+$ backprop
+($\delta S/\delta z=0$), the innermost loop, always fixed-graph (\S\ref{sec:path-integral}).
+\item \textbf{Width} --- dual certificate $|\eta|\le1$ saturating on support: atomic
+$\rhostar$, finitely many neurons per layer (\S\ref{sec:scenario0}).
+\item \textbf{Depth} --- marginal-value rule $-\partial S^\star/\partial L=\mu$ (Route~2),
+$\Lstar\sim\mu^{-1/(\alpha+1)}$; or geodesic length minimization (Route~1), depth as gauge
+(\S\ref{sec:scenario1}).
+\item \textbf{Universality class} --- the exponent tower $\{\Delta_k\}$, selected to
+optimize the depth--complexity trade-off, tuned to criticality $\chi_1=1$ where the problem
+is well posed (\S\ref{sec:criticality}).
+\end{itemize}
+
+Above all four sits the \emph{kinematic} rung---the choice of contract itself---treated first, in
+\S\ref{sec:metarouter}, because the notion of a ``mode'' that width and depth count is undefined until
+the contract is fixed. The scope of validity of the inner rungs is previewed in Table~\ref{tab:status} and
+established in the sections that follow: convexity, the fixed dual
+certificate, and exact atomicity are two-layer facts; the saddle-point/RG structure survives
+to all depths \emph{perturbatively} because it is a local (around-a-point) analysis, whereas
+the global guarantees required linearity in a single measure, which composition destroys.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\hline
+\textbf{Structure} & \textbf{Two layers} & \textbf{Deep ($L\ge3$)}\\
+\hline
+Variational formulation ($\F$ over measures) & exact & survives\\
+Wasserstein flow, $\F$ as Lyapunov & exact & survives\\
+Gibbs stationarity, path-integral reading & exact & survives (self-consistent)\\
+Joint convexity & holds & \emph{lost} (multilinear-through-$\sigma$)\\
+Fixed-operator dual certificate $\eta=A^\ast q/\lambda$ & holds & \emph{lost} ($A$ is $\rho$-dependent)\\
+Exact finite atomicity (cardinality bound) & holds & \emph{lost}\\
+Saddle $=$ trained net; NTK $=$ propagator; $1/m$ loops & --- & holds (perturbative)\\
+Depth-RG criticality, exponent tower & --- & holds\\
+\hline
+\end{tabular}
+\caption{What transfers from two layers to deep networks. The variational and
+field-theoretic \emph{structure} survives; the global \emph{guarantees} (convexity,
+certificate, atomicity) do not.}
+\label{tab:status}
+\end{table}
+
+\paragraph{The rungs are causally ordered.} The nested optimizations above are not merely
+listed from outer to inner; their order is \emph{forced}, and it is the order a physicist
+imposes on an effective theory. The universality class (which contract, which symmetry group)
+is the \emph{kinematics}---it fixes the contract and its invariances, and it must be settled first
+because the very notion of a ``mode'' is undefined until the contract is chosen. Width and depth
+are then the \emph{degrees of freedom}: how many modes the fixed contract carries. Training the
+weights and the primitive parameter $\alphapar$ is the \emph{dynamics}: the couplings are solved
+on that fixed field content. The discretization of the trained mixture into a deployed
+architecture is the reading-off of \emph{observables}. This is the same sequence as
+symmetry-before-dynamics (Noether) and ultraviolet-before-infrared (the renormalization group):
+$\text{kinematics}\to\text{degrees of freedom}\to\text{dynamics}\to\text{observables}$, with the
+description-length action $J=R+\mu\,\Omega$---in which $\Omega$ is the generic complexity penalty, whose
+concrete instances are the width total-variation norm and the depth count in
+\eqref{eq:consolidated}---minimized \emph{at} each rung rather than constituting
+a rung of its own. The causal direction is not a stylistic preference but a consistency
+requirement: a mode count measured before the contract is fixed, or a symmetry quotient applied after
+the modes are counted, is ill-posed, and (as the implementation companion documents) attempting
+either produces concrete failures.
+
+\subsection{Two corollaries: interpretability by construction, and redundancy reduction as RG-by-measurement}
+\label{sec:corollaries}
+Two capabilities fall out of the same variational structure rather than being added on top of it.
+
+\paragraph{Interpretability is a corollary of MDL selection.} When the description-length action selects a
+sparse, discrete architecture---one primitive per cell, a definite width and depth---the selected object
+\emph{is} the explanation: there is no separate surrogate model to interrogate, because the quantity that was
+minimized is exactly the quantity that is read out. This yields three faithful-by-construction tiers. At the
+level of primitives, the Gibbs weights $\bm{\alpha}_k\propto e^{-\beta E_k}$ and the clean-solo energies say which
+primitive each cell chose and how decisively (the participation ratio of $\bm{\alpha}$ measures peakedness; ties
+are surfaced rather than broken silently). At the level of input features, an $L_0$-gated fit exposes which
+invariant coordinates carry the signal---but only when the certificate for a \emph{unique} sparse support
+exists; on a redundant (collinear) basis no unique support exists and the honest output is a reliability flag,
+not a fabricated ranking. At the level of learned functions, a Kolmogorov--Arnold-network (KAN~\cite{liu2024kan,kolmogorov1957}) radial can be projected onto an analytic
+dictionary, and here alone a genuine fidelity gap appears: the spline is ground truth and every closed form
+carries a residual, so the symbolic law is reported as ``a fit, not the law,'' declining when the residual is
+too large. The pattern is uniform: the explanation is trustworthy exactly to the extent that the selection
+problem had a well-posed unique answer, and the framework reports that well-posedness alongside the answer.
+
+\paragraph{Redundancy reduction is the RG ``keep the relevant modes'' move, by measurement.} Symmetry
+quotients remove redundancy that is known \emph{a priori} from a group; but data carries redundancy no group
+predicts---correlated, low-variance directions that a coarse-graining should integrate out. The same
+participation-ratio functional that measures the effective number of primitives, applied one level down to the
+covariance spectrum of the data, measures the effective number of \emph{modes} $d_{\mathrm{eff}}$; projecting
+onto the leading $\lceil d_{\mathrm{eff}}\rceil$ collective coordinates is the renormalization-group step of
+retaining the relevant operators and discarding the irrelevant ones, now driven by a measured spectral weight
+rather than a scaling dimension. This is the natural completion of the kinematics rung: the group fixes the
+\emph{exact} redundancy, and the measured effective dimension fixes the \emph{approximate, data-dependent}
+redundancy that remains, both before any mode is counted.
+
+\paragraph{From metaphor to a measured flow: the Gaussian information bottleneck~\cite{tishby1999ib,tishby2015ib} as an exact RG.} The
+participation-ratio $d_{\mathrm{eff}}$ above is a \emph{static} snapshot---a single number from the covariance
+of the data alone, with no scale and no notion of relevance. The renormalization group is properly about how
+such a quantity \emph{flows} as degrees of freedom are integrated out scale by scale, and that flow can be made
+exact here rather than analogical. For jointly Gaussian $(X,Y)$ the information bottleneck admits a closed-form
+solution (Chechik--Globerson--Tishby--Weiss): the optimal compressed representation is a noisy projection onto
+the eigenvectors of the normalized regression matrix $\Sigma_{X\mid Y}\Sigma_X^{-1}$---the canonical-correlation
+basis---with eigenvalues $\lambda_i\in(0,1)$, and this coarsening is formally a soft-cutoff non-perturbative RG
+map with a semigroup structure (Kline--Palmer). The bottleneck tradeoff parameter $\beta$ is an inverse RG
+scale: mode $i$ switches on only once $\beta$ exceeds a critical value $\beta_c(\lambda_i)=1/(1-\lambda_i)$, so
+the effective dimension
+\begin{equation}
+d_{\mathrm{IB}}(\beta)\;=\;\#\{\,i:\lambda_i<1-\tfrac{1}{\beta}\,\}
+\end{equation}
+is a \emph{staircase} that grows from full compression to full rank through a cascade of structural phase
+transitions, with each transition located exactly. This is the quantitative content the ``keep the relevant
+modes'' metaphor lacked: a flow with pinned transition scales, the most informative modes (smallest $\lambda$,
+largest canonical correlation with $Y$) surviving to the coarsest scales exactly as relevant operators persist
+under RG. The same Gaussian-IB spectrum, evaluated on the hidden representation at each layer of a trained
+network rather than along $\beta$, measures the RG reading of depth: on the data examined the top canonical
+correlation with the target rises monotonically through the layers, so the network is measurably coarse-graining
+toward the label. The construction is exact only for Gaussian statistics---on non-Gaussian data it is the
+second-order (canonical-correlation) reading of the bottleneck, not the full nonlinear one---and it is offered
+as a diagnostic rather than folded into the selection pipeline; but within that scope it replaces an analogy
+with a measured flow.
+
+\paragraph{One ledger: effective dimension across the coarse-graining axis.} The three quantities just
+named are not three coincidences of a shared word; they are one functional read at successive levels. The
+participation ratio $\mathrm{PR}(s)=(\sum_i s_i)^2/\sum_i s_i^2=1/\sum_i p_i^2$ (equal to $1$ on a
+single-mode spectrum and $m$ on a uniform $m$-mode one) is what counts the effective number of primitives
+when it eats the mixture weights $\bm{\alpha}$, and the effective number of data modes $d_{\mathrm{eff}}$ when
+it eats the covariance eigenvalues---the same map on two different spectra. The Gaussian-IB staircase
+$d_{\mathrm{IB}}(\beta)$ resolves that same data-mode count against an RG scale, and the real log canonical
+threshold $\lambda$ of \S\ref{sec:mixture-priced} measures the effective dimension of the whole fitted
+\emph{model}. Stated together these form a single \emph{effective-dimension ledger} along the
+coarse-graining axis: data modes (unsupervised $d_{\mathrm{eff}}$, or supervised $d_{\mathrm{IB}}(\beta)$),
+then the primitive mixture ($\mathrm{PR}(\bm{\alpha})$), then the model ($\lambda$). The unification is exact
+where it is exact and bounded where it is not: the two kinematic legs are \emph{literally} the same
+participation-ratio functional, so they share a measurement and not merely a metaphor; $\lambda$ is a
+\emph{different} functional (the RLCT, a geometric invariant of the loss-singular set, not a variance
+ratio) that answers the same question at the model level and caps the ledger at $\lambda\le k/2$. The one
+honest caveat, which the ledger states rather than hides, is that the levels are not one commensurable
+scalar---a count of effective data modes and a count of effective primitives carry different units and are
+never summed. So the object is one functional read at the kinematic levels plus $\lambda$ at the model
+level: the quantitative completion of the ``kinematics $\to$ degrees of freedom'' arrow that organizes the
+whole hierarchy, stated once as a measured quantity rather than as four separate metaphors.
+
+
+
+\section{Kinematics: the outermost rung, representation dispatch and the discrete--continuous boundary}
+\label{sec:metarouter}
+
+The consolidated formulation \eqref{eq:consolidated} nests four optimizations---weights, width,
+depth, universality class---all conducted \emph{inside a fixed computational contract}: a definite
+choice of how the datum is presented to the network (a sequence, a $2$D grid, a graph, an unordered
+set, a set of points with coordinates). \S\ref{sec:consolidated} already named this contract as the
+outermost, \emph{kinematic} rung; here we treat it. It sits \emph{above} all the others, and---as we now
+show---it is qualitatively different from them.
+
+\paragraph{Why the outer rung is qualitatively different.} Inside a contract the primitive is selected
+by relaxing a discrete choice to a simplex and letting a continuous parameter $\alphapar$ flow---the
+mechanism that the measure-space and Gibbs constructions of the degrees-of-freedom and observable rungs
+(\S\ref{sec:scenario0}, \S\ref{sec:alpha-derivation}) legitimize, because
+all primitives in a contract share one interface and their outputs are the \emph{same kind of tensor},
+so a convex combination
+\begin{equation}
+z^{(\ell+1)} \;=\; \sum_{p} \operatorname{softmax}(\alphapar)_p \, f_p\!\big(z^{(\ell)}\big),
+\qquad f_p:\ \mathcal{T}\to\mathcal{T},
+\label{eq:withinmix}
+\end{equation}
+is a well-defined element of the same tensor space $\mathcal{T}$. Across contracts this fails at the
+level of types. A sequence core maps $(b,T,c)\!\to\!(b,T,c)$; a volumetric core maps
+$(b,c,D,H,W)\!\to\!(b,c,D,H,W)$; a graph core maps a variable-node feature matrix with an edge set to
+itself; a set core maps an unordered collection to itself. There is no common space $\mathcal{T}$ in
+which their outputs live, hence no convex combination \eqref{eq:withinmix} to relax. The outermost
+selection is therefore \emph{intrinsically discrete}: a dispatch, not a continuous interpolation. The
+complexity ladder is \textbf{continuous within a contract and discrete across contracts}, and the
+boundary between the two regimes is exactly the boundary of interface compatibility.
+
+\paragraph{Structural dispatch (Level 1).} The contract is almost always fixed by the data's own type,
+not by a learned signal. Write the datum as a container that either carries an adjacency (edges), a
+coordinate map (positions), or neither, and is either a fixed-shape array or a variable-size
+collection. Then the contract is read off structurally:
+\begin{equation}
+\begin{aligned}
+\text{edges present}&\Rightarrow\text{graph}, &\quad
+\text{edges}+\text{positions}&\Rightarrow\text{equivariant},\\
+\text{collection, no edges}&\Rightarrow\text{set}, &\quad
+\text{fixed array}&\Rightarrow\text{grid family},
+\end{aligned}
+\end{equation}
+and within the grid family the tensor rank fixes the member (sequence/spatial/volumetric/$4$D), a flat
+feature vector being sent to the mutual-information mode-structure test that recovers a latent
+$1$D or $2$D lattice. This level is rule-based and certain because the container \emph{is} the answer;
+it is the coarsest description-length decision, taken before any weights exist.
+
+\paragraph{The one continuous shadow: contract as a hyperprior (Level 2).} There is a single genuinely
+ambiguous case---data carrying coordinates, which may legitimately be modelled as an equivariant graph
+(geometry used, $\mathrm{SO}(3)$-equivariant messages), a plain graph (topology only), or a bare point
+set (no relational structure). Here the ``right'' contract is not deducible from the container; it
+depends on whether the target function actually depends on geometry, topology, or neither. Because the
+contracts cannot be mixed, one cannot relax; the principled substitute is a \emph{bake-off}. Each
+admissible contract $c$ is fit in isolation on a held-out split and scored by validation risk
+$\widehat{R}_c$, and the winner minimises the same $R+\mu\,\Omega$ objective as every inner rung,
+\begin{equation}
+c^\star \;=\; \operatorname*{arg\,min}_{c\in\mathcal{C}(\text{data})}\ \widehat{R}_c
+\;+\;\mu_{\mathrm c}\,\Omega_{\mathrm{struct}}(c),
+\qquad
+\Omega_{\mathrm{struct}}(\text{set})<\Omega_{\mathrm{struct}}(\text{graph})<\Omega_{\mathrm{struct}}(\text{equivariant}),
+\label{eq:tiebreak}
+\end{equation}
+where---crucially---$\Omega_{\mathrm{struct}}(c)$ is not an ordinal fiat but a \emph{derived} structural
+code length: the description length of the scaffolding the contract commits to, per datum. Measuring each
+contract as excess over the cheapest (set), for a datum with $N$ units and $E$ edges in $d$ dimensions,
+\begin{equation}
+\begin{aligned}
+\Omega_{\mathrm{struct}}(\text{set})&=0,\\
+\Omega_{\mathrm{struct}}(\text{graph})&=\log\binom{N(N-1)/2}{E}\approx E\log\frac{N^2}{2E},\\
+\Omega_{\mathrm{struct}}(\text{equiv})&=\Omega_{\mathrm{struct}}(\text{graph})+\big(Nd-\tfrac{d(d-1)}2\big)\log\tfrac1\delta,
+\end{aligned}
+\label{eq:omega-struct}
+\end{equation}
+i.e.\ the bits to write down the adjacency (graph, the topology) and then the geometry ($Nd$ coordinates
+at resolution $1/\delta$ minus the $\dim\mathrm{SO}(d)$ gauge the equivariance quotients out). This is
+strictly monotone up the structure-inclusion lattice and data-dependent, and it is the \emph{structural}
+richness---the group/interface commitment---not the parametric complexity: the latter would misorder,
+since an equivariant model can be parameter-cheap yet structurally over-rich for a topological target. The
+charge is what makes a richer contract earn its keep: among contracts whose risks tie within noise, the
+cheapest is chosen (a geometry-blind topological target does not pay for $\mathrm{SO}(3)$-equivariance,
+because $\Omega_{\mathrm{struct}}(\text{equiv})\gg\Omega_{\mathrm{struct}}(\text{graph})$ breaks the tie).
+This is the identical least-description-length logic that governs the inner rungs---the atomic-width
+certificate, the marginal-value depth rule---now applied one level up, to the choice of interface itself,
+with a \emph{derived} code length in place of the earlier hand-set ordinal charge. The
+bake-off is precisely the across-contract analogue of the clean, from-scratch, single-primitive
+comparison that the within-contract theory uses to defeat co-adaptation: with no shared interface to
+support a mixed supernet, isolated training is not merely a robustness option but the \emph{only}
+available comparison.
+
+\paragraph{An amortized surrogate for the argmin.} The bake-off \eqref{eq:tiebreak} evaluates
+$\widehat R_c$ by training each contract, which is expensive and, run afresh per dataset, learns nothing
+across datasets. But $c^\star$ is a \emph{function} of the data, and that function is learnable: a cheap
+descriptor $\phi(\text{data})$---built from training-free correlations of the target with geometry-,
+topology-, and set-specific invariants---can predict $\arg\min_c[\widehat R_c+\mu_{\mathrm c}
+\Omega_{\mathrm{struct}}(c)]$ without computing any $\widehat R_c$. This is a standard amortization: the
+optimization \eqref{eq:tiebreak} is replaced, when a learned predictor is confident, by a forward pass of
+that predictor, with the bake-off retained as the ground-truth fallback that also supplies fresh training
+pairs $(\phi,c^\star)$. The construction changes nothing in the objective---$\Omega_{\mathrm{struct}}$ is
+still the structural prior, the label is still the MDL argmin---only \emph{how} the argmin is obtained.
+Two points are worth recording. The labels must come from an adequately-resolved bake-off: at too small a
+budget the risk $\widehat R_{\text{equiv}}$ is not yet converged and the $\Omega_{\mathrm{struct}}$ charge
+spuriously prefers the cheaper contract, so a surrogate trained on such labels inherits the error;
+supplying full-budget labels is what makes the amortization correct. And the descriptor's transferable
+coordinates are the \emph{dimensionless} ones (the invariant correlations, each in $[0,1]$), not the raw
+extensive counts (nodes, edges), which are not comparable across physical domains---a point that is
+empirical but has the flavour of a scaling argument. The implementation report documents the realization
+and its cross-domain validation.
+
+\paragraph{The revised ladder.} The consolidated statement \eqref{eq:consolidated} thus acquires an
+outermost, discrete rung:
+\begin{equation}
+\begin{aligned}
+&\underbrace{c^\star}_{\text{contract (discrete dispatch / MDL bake-off)}}
+\ \succ\
+\underbrace{\text{universality class}}_{\{\Delta_k\}}
+\ \succ\
+\underbrace{\text{depth}}_{\Lstar(\mu)}\\[2pt]
+\succ\ &
+\underbrace{\text{width}}_{\rhostar\ \text{atomic}}
+\ \succ\
+\underbrace{\text{primitive}}_{\alphapar\ \text{simplex}}
+\ \succ\
+\underbrace{\text{weights}}_{\text{saddle of }S},
+\end{aligned}
+\end{equation}
+read from coarse to fine. Everything to the right of the contract is continuous and lives in the
+variational/field-theoretic account of the preceding sections; the contract itself is the discrete
+seam where that account stops, because interface incompatibility forecloses relaxation. Two honest
+observations follow. First, this outermost rung is \emph{more} principled than the primitive rung
+immediately below it, not less: the dispatch \eqref{eq:tiebreak} is a bona fide description-length
+minimization. (The primitive parameter $\alphapar$ one level down, imported from differentiable
+architecture search, is derived from the same variational principle in \S\ref{sec:alpha-derivation}.)
+Second, the discreteness is not a defect to be
+relaxed away but a true feature of the object: the space of computational contracts is a finite set of
+incompatible categories, and the correct operation on a finite set of incompatible categories is
+selection, not interpolation.
+
+
+
+\subsection{Which contract? The group is discovered, not assumed}
+\label{sec:groupdiscovery}
+
+The dispatch above selects a contract by description length, but it treats the candidate contracts as
+given. A contract is, at bottom, the natural equivariant architecture for a symmetry group $G$; so the
+sharper question is which $G$ the data respects. This is answerable by the same variational hygiene
+used throughout: a group is admissible exactly when its invariants explain the target, and the correct
+$G$ is the one whose invariant structure the data actually carries.
+
+\paragraph{The invariance test.} For a candidate group with metric $g$, the quantities
+$\langle p_i,p_j\rangle_g=p_i^{\!\top}g\,p_j$ are exactly invariant under every transformation
+$L$ with $L^{\!\top}gL=g$. One fits the target from these invariants and compares against the
+frame-sensitive raw coordinates; the metric that fits is the group. Crucially, model selection here
+must be controlled not by in-sample fit---a sufficiently expressive invariant descriptor can overfit
+frame-dependent signal---but by \emph{stability}: the fit must survive the group's own
+transformations. Applying a random $L=\exp(\sum_k t_kA_k)$ to a held-out split leaves a genuinely
+$G$-invariant target's fit unchanged and collapses a spurious one. This is the discrete analogue of a
+Ward identity: the admissible symmetry is the one under whose action the fitted response is stationary.
+
+\paragraph{Discovering the metric.} The metric itself need not be assumed. A generator $A$ preserves
+$g$ iff $A^{\!\top}g+gA=0$; given generators, the invariant metric is the symmetric $g$ in the null
+space of this linear constraint, and its eigenvalue signature $(p,q)$---taken up to an overall sign
+gauge---names the pseudo-orthogonal group $\mathrm{O}(p,q)$. This is the identical null-space
+computation that produces an equivariant layer, with the metric rather than the layer as the unknown,
+and it recovers arbitrary signatures (Euclidean, Lorentz, and split forms such as
+$\mathrm{O}(2,2)$) exactly. When the target is a metric norm $y=\langle g,\,ss^{\!\top}\rangle$, the
+recovery is even simpler---linear in $g$, hence an exact least squares---which on real four-vector
+data returns the Minkowski metric with unit $R^2$.
+
+\paragraph{A lattice of invariant structures.} Not every symmetry preserves a symmetric bilinear form.
+The metric family $\mathrm{O}(p,q)$ preserves $g=g^{\!\top}$; the symplectic family $\mathrm{Sp}(2n)$
+preserves a skew form $\omega=-\omega^{\!\top}$; the special-linear family $\mathrm{SL}(n)$ preserves
+the alternating volume form; the unitary family $\mathrm{U}(n)$ preserves a Hermitian form, equivalently
+a Euclidean metric together with a compatible complex structure $J$; and the conformal family
+$\mathrm{Conf}(d)=\mathrm{O}(d+1,1)$ preserves the light-cone metric on the null-cone lift. Each is
+detected by regressing the target against the corresponding algebraic invariant---symmetric, skew,
+alternating, phase-invariant, or lifted---and each regression carries its own fit gate, so a target
+that carries no such invariant yields no group. Selecting among them is again description-length
+minimization in disguise: prefer the richest structure the data admits, and decline when it admits
+none. The outermost rung of the dispatch is thus not merely ``which container'' but ``which group,''
+and the answer is read off from the invariant the target is willing to be written in.
+
+
+
+\section{Degrees of freedom I: width at fixed architecture (Scenario~0)}
+\label{sec:scenario0}
+
+\subsection{Convexification by lifting to a measure}
+\label{sec:lift}
+
+The starting difficulty is that the empirical risk of a finite-width network is a
+non-convex function of the parameters $\{\Theta_j\}$. The lift that removes this is to
+replace the empirical measure $\frac1m\sum_j\delta_{\Theta_j}$ by an arbitrary measure
+$\rho\in\M(\Theta)$ and write the network as a \emph{linear} functional of $\rho$:
+\begin{equation}
+f_\rho(x) \;=\; (A\rho)(x) \;=\; \int_\Theta \phi(x;\Theta)\,\dd\rho(\Theta),
+\qquad \phi(x;\Theta)=a\,\sigma(u^\top x),
+\label{eq:forward-linear}
+\end{equation}
+where $A:\M(\Theta)\to L^2$ is a bounded linear operator. Because $f_\rho$ is linear in
+$\rho$, the squared-error risk $\rho\mapsto \half\|A\rho-y\|_{L^2}^2$ is \emph{convex}. This is
+the measure-space (mean-field) convexification: non-convexity in $\R^{d}$ becomes convexity
+in $\Pcal(\Theta)$.
+
+To promote \emph{sparsity} of the representation---i.e.\ to prefer few effective
+neurons---we regularize by the total-variation (atomic) norm $\|\rho\|_{\TV}$, giving the
+total-variation-regularized free energy $\F_{\TV}$:
+\begin{equation}
+\boxed{\;\F_{\TV}[\rho] \;=\; \half\,\|A\rho-y\|_{L^2}^2 \;+\; \lambda\,\|\rho\|_{\TV}.\;}
+\label{eq:scenario0-obj}
+\end{equation}
+This is the Beurling--LASSO / atomic-norm problem. Its role in the MDL reading is that
+$\lambda$ is the description-length price of one atom (neuron); larger $\lambda$ buys a
+coarser, cheaper model. (In \S\ref{sec:wasserstein} the same free energy $\F$ appears with
+an entropic penalty in place of the TV one; we write $\F_{\TV}$ and $\F$ for the two
+regularizations of the one objective.)
+
+\subsection{The dual certificate and finite atomicity}
+\label{sec:certificate}
+
+The optimality condition for \eqref{eq:scenario0-obj} is best stated through the
+\emph{dual certificate}. Let $q^\star = y - A\rhostar$ be the optimal residual and define
+\begin{equation}
+\eta \;=\; \frac{1}{\lambda}\,A^\ast q^\star \;\in\; C(\Theta),
+\qquad
+(A^\ast q)(\Theta) \;=\; \langle q,\phi(\cdot;\Theta)\rangle_{L^2}.
+\label{eq:eta}
+\end{equation}
+The Karush--Kuhn--Tucker conditions for the convex program \eqref{eq:scenario0-obj} are
+\begin{equation}
+\boxed{\;
+|\eta(\Theta)|\le 1\ \ \forall\Theta,
+\qquad
+\eta(\Theta)=\sign(\rhostar(\Theta))\ \text{on}\ \supp(\rhostar),
+\qquad
+|\eta(\Theta)|<1\ \text{off support}.
+\;}
+\label{eq:kkt}
+\end{equation}
+Geometrically, the support of the optimal measure sits exactly at the \emph{contact
+points} where the certificate saturates, $\{|\eta|=1,\ \nabla_\Theta\eta=0\}$.
+
+\begin{proposition}[Finite atomicity]
+\label{prop:atoms}
+Under \eqref{eq:kkt}, if the contact set $\{|\eta|=1\}$ is finite, the minimizer
+$\rhostar$ of \eqref{eq:scenario0-obj} is atomic with finitely many atoms; the minimal
+network is provably finite-width.
+\end{proposition}
+
+This is the representer theorem for TV-regularized measure recovery (extreme-point /
+Krein--Milman characterization of the TV ball). It is the crown jewel of Scenario~0: the
+\emph{optimal number of neurons emerges from convex geometry} rather than being fixed by
+hand.
+
+\begin{remark}[A subtlety exposed in practice]
+Greedy neuron insertion with ordinary least-squares refitting is \emph{not} the TV
+optimum: OLS forces the residual orthogonal to the active atoms, which drives $\eta\to0$
+on support and violates \eqref{eq:kkt}. The certificate is what exposes this; the correct
+frontier is obtained by conditional-gradient / column-generation against the TV penalty.
+The true support is typically large, not artificially sparse.
+\end{remark}
+
+\begin{remark}[The certificate fixes the price scale: $\lambda$ is calibrated, not free]
+The certificate also settles what value the width price $\lambda$ should take. Since $\eta=A^\ast q^\star/\lambda$
+must satisfy $|\eta|\le1$ with equality on the support, the largest price at which any atom still enters is
+$\lambda^\star=\|A^\ast q\|_\infty$, the peak correlation of the residual with the candidate neurons; above it
+the certificate is slack and every atom is pruned, below it new atoms enter. Evaluated at the null model
+$q=y$ this gives a data-driven \emph{scale} $\lambda^\star_0=\|A^\ast y\|_\infty$ (over a dictionary of
+candidate neurons), so the meaningful sweep of $\lambda$ is a fraction of $\lambda^\star_0$ rather than an
+arbitrary grid. This does not hand a single universal scalar---$\lambda^\star$ scales with the residual and,
+for a deep gated network, the effective per-neuron price is a depth- and conditioning-dependent fraction of
+the single-atom value---but it fixes the \emph{scale} per dataset from a measured quantity, turning $\lambda$
+from a free knob into a calibrated one. In the implementation this is the certificate-$\lambda$ used to set
+the operating range of the generalized-area gate.
+\end{remark}
+
+\subsection{Dynamics: Wasserstein gradient flow of a free energy}
+\label{sec:wasserstein}
+
+Replacing the TV penalty by an entropic one gives the free-energy form, with $\KL$ the
+Kullback--Leibler divergence (relative entropy),
+\begin{equation}
+\F[\rho] \;=\; R[\rho] \;+\; \tfrac{1}{\beta}\,\KL(\rho\,\|\,\pi),
+\label{eq:free-energy}
+\end{equation}
+with prior $\pi$ and inverse temperature $\beta$. The stationarity condition
+$\delta\F/\delta\rho=\mathrm{const}$ yields the self-consistent \emph{Gibbs law}
+\begin{equation}
+\frac{\dd\rhostar}{\dd\pi}(\Theta)\;\propto\;\exp\!\big(-\beta\,\Psi_{\rhostar}(\Theta)\big),
+\qquad \Psi_\rho=\frac{\delta R}{\delta\rho},
+\label{eq:gibbs}
+\end{equation}
+and the training dynamics are the Wasserstein gradient flow (McKean--Vlasov / mean-field
+Langevin equation)
+\begin{equation}
+\partial_t\rho
+\;=\;
+\nabla\!\cdot\!\Big(\rho\,\nabla\frac{\delta\F}{\delta\rho}\Big)
+\;+\;\tfrac{1}{\beta}\,\Delta\rho,
+\label{eq:wasserstein-flow}
+\end{equation}
+for which $\F$ is a Lyapunov function. Thus ``training as descent toward least
+complexity'' is literal: the flow monotonically decreases the free energy toward the
+Gibbs stationary measure. Equation~\eqref{eq:gibbs} is the seed from which the
+\emph{architecture} Gibbs measure of the outer loop later grows.
+
+
+\section{The obstruction at depth: where convexity dies}
+\label{sec:depth-obstruction}
+
+The convexity and the fixed-operator certificate are properties of the \emph{two-layer}
+lift. It is essential to see precisely how they fail at three layers, because the failure
+dictates the physics of the deep formulation.
+
+Write a three-layer network in mean-field scaling,
+\begin{equation}
+f(x)=\frac{1}{m_2}\sum_{k=1}^{m_2}a_k\,
+\sigma\!\Big(\underbrace{\tfrac{1}{m_1}\textstyle\sum_{j=1}^{m_1}w_{kj}\,\sigma(u_j^\top x)}_{\text{second-layer preactivation}}\Big).
+\label{eq:three-layer}
+\end{equation}
+Lifting each layer to a measure $\rho_1,\rho_2$ produces a \emph{nested} integral,
+\begin{equation}
+f(x)=\int a\,\sigma\!\Big(\int w(\Theta_2,\Theta_1)\,\sigma(u(\Theta_1)^\top x)\,\dd\rho_1(\Theta_1)\Big)\dd\rho_2(\Theta_2).
+\label{eq:nested}
+\end{equation}
+The inner integral sits \emph{inside} the nonlinearity $\sigma$, so $f$ is linear in the
+outer measure $\rho_2$ but \emph{nonlinear} in the inner $\rho_1$. The map
+$(\rho_1,\rho_2)\mapsto f$ is affine in each argument separately but not jointly, and the
+functional $\F[\rho_1,\rho_2]=R+\lambda_1\|\rho_1\|_{\TV}+\lambda_2\|\rho_2\|_{\TV}$ is
+convex in each argument with the other fixed but \emph{not jointly convex}. Global
+optimality collapses to local/critical-point statements, and because $A=A[\rho_1]$ now
+depends on the measure, there is no fixed adjoint $A^\ast$ and hence no fixed certificate
+$\eta=A^\ast q/\lambda$; \eqref{eq:kkt} weakens to a self-consistent fixed-point
+statement. Exact atomicity (Prop.~\ref{prop:atoms}) is likewise lost, as the
+extreme-point argument required linearity in a single measure. What \emph{survives} is the
+variational/free-energy \emph{formulation} itself: $\F$ over path measures is well defined,
+the Wasserstein flow still has $\F$ as a Lyapunov function, and stationary measures still
+exist.
+
+
+\section{Degrees of freedom II: depth as an optimized variable (Scenario~1)}
+\label{sec:scenario1}
+
+We now promote depth from a fixed parameter to an optimized variable. Classical mechanics
+offers exactly two ways to make ``elapsed time'' a variable---fixed-endpoint variation with
+a time cost, and free-endpoint (Maupertuis) variation---and depth-as-complexity inherits the
+fork. They are Legendre-dual.
+
+\subsection{Route 2: priced depth (canonical ensemble)}
+\label{sec:route2}
+
+Keep depth a discrete, countable resource and charge it with a chemical potential $\mu$.
+The Route-2 objective adds a linear depth price to the action,
+$\J_2[z,L]=S_L[z]+\mu L$, and the corresponding partition function sums over depth:
+\begin{equation}
+\Zpart=\sum_{L=1}^{\infty}e^{-\beta\mu L}\!\int\Dcal z\;e^{-\beta S_L[z]}
+=\sum_L e^{-\beta\,\J_2[z^\star,L]}\big(1+\text{fluctuations}\big),
+\qquad \J_2[z^\star,L]=S_L^\star+\mu L.
+\label{eq:grand-canonical}
+\end{equation}
+This is a \emph{grand-canonical ensemble in depth}: $\mu$ is conjugate to layer number
+exactly as a chemical potential is conjugate to particle number. There are now two
+stationarity conditions: the usual field equation \eqref{eq:fwd-bwd} at fixed $L$, and a
+new \emph{depth condition}
+\begin{equation}
+\boxed{\;-\frac{\partial S_L^\star}{\partial L}\bigg|_{\Lstar}=\mu.\;}
+\label{eq:depth-condition}
+\end{equation}
+In words: \emph{add layers until the marginal reduction in action per layer falls to the
+price $\mu$}. This is the depth analogue of the width certificate: neurons were added until
+the correlation potential fell below $\lambda$; layers are added until the marginal
+action-gradient falls below $\mu$.
+
+\begin{remark}[Discreteness]
+Because $L\in\mathbb{Z}$, \eqref{eq:depth-condition} is a discrete stopping rule
+$S_L^\star-S_{L+1}^\star\gtrless\mu$---a free-boundary / variational-inequality statement,
+not a smooth Euler--Lagrange equation. This is the same discreteness obstruction as the
+$\|\theta\|_0$ penalty, now in the depth direction; the continuum limit (Route~1) is what
+smooths it.
+\end{remark}
+
+\paragraph{Optimal depth from the exponent.} The RG analysis computes the left-hand side of
+\eqref{eq:depth-condition}. At criticality the marginal reduction from one more layer is
+dominated by the marginal mode \eqref{eq:marginal}: the irrelevant modes $k\ge2$ have finite
+mode-specific correlation lengths $\xi_k=-1/\log|\Delta_k|$ (the analogue of \eqref{eq:xi}
+for the $k$-th eigenvalue $\Delta_k$) and contribute exponentially decaying terms
+$e^{-\ell/\xi_k}$ (they stop paying after $O(\xi_k)$ layers), while the marginal mode
+contributes a power-law tail,
+\begin{equation}
+-\frac{\partial S_\ell^\star}{\partial \ell}\;\sim\;c_1\,\ell^{-(\alpha+1)}
++\sum_{k\ge2}c_k\,e^{-\ell/\xi_k},
+\label{eq:marginal-value}
+\end{equation}
+with mode amplitudes $c_1,c_k>0$ set by the projection of the loss onto each RG eigenmode.
+Equating the surviving power law to $\mu$ gives the optimal depth
+\begin{equation}
+\boxed{\;\Lstar\;\sim\;\mu^{-1/(\alpha+1)}\;}
+\qquad
+\big(\text{smooth }\alpha=1:\ \mu^{-1/2};\quad \text{ReLU }\alpha=2:\ \mu^{-1/3}\big).
+\label{eq:Lstar}
+\end{equation}
+Off criticality the marginal value decays exponentially, so $\Lstar$ saturates at the finite
+correlation length $\xi$ regardless of $\mu$: \emph{optimal depth becomes a tunable power law
+of the price only on the critical line}. This is the precise sense in which the depth
+chemical potential ``vanishes at criticality.''
+
+\begin{remark}[Generalized area: variable width-per-layer with emergent depth]
+The width penalty $\lambda\sum_\ell\|\rho^{(\ell)}\|_{\TV}$ is already a \emph{per-layer} sum of atomic norms,
+and $\|\rho^{(\ell)}\|_{\TV}\sim m_\ell$ counts the neurons kept in layer $\ell$. Collapsing to a common
+width $m_\ell\equiv m$ gives $\lambda\,m L=\lambda\cdot(\text{area})$, the uniform width-times-depth cost; the
+\emph{uncollapsed} penalty is the \textbf{generalized area} $\sum_\ell m_\ell$, the total neuron count. Pricing
+this single quantity, $R+\lambda\sum_\ell m_\ell$, makes both the per-layer width and the depth outputs of one
+functional: depth is emergent, $L=\#\{\ell:m_\ell>0\}$, since a closed layer costs zero neurons and zero
+depth, absorbing the $\mu L$ term into the same neuron count (the $\mu\to0$/critical face, up to an optional
+separate per-active-layer charge). This is the most general form of the size problem, and it is realized by
+per-neuron $L_0$ gates whose expected open-count is a differentiable $m_\ell$; empirically it recovers
+variable per-layer widths and closes redundant layers (emergent depth) on real data.
+\end{remark}
+
+\subsection{Route 1: geometric depth (microcanonical ensemble)}
+\label{sec:route1}
+
+In the continuum limit, $\sum_\ell\to\int_0^T\dd t$ and the network is a flow
+$\dot z=g(z,\theta(t))$. Now the number of layers has no invariant meaning---the Route-1
+objective $\J_1$ (the continuum counterpart of $\J_2$) should be invariant under monotone
+reparameterization $t\mapsto\tau(t)$. Demanding reparameterization invariance of the
+complexity term forces its integrand to be homogeneous of degree one in $\dot z$, hence a
+Finsler/Riemannian \emph{length}:
+\begin{equation}
+\boxed{\;\J_1[\gamma]=R\big(z(T)\big)+\int_0^T\|\dot z(t)\|_{M(z(t))}\,\dd t,\qquad
+\|\dot z\|_M=\sqrt{\dot z^\top M(z)\dot z}.\;}
+\label{eq:route1-obj}
+\end{equation}
+The Euler--Lagrange equation is the \emph{geodesic equation} in the learned metric $M(z)$,
+\begin{equation}
+\ddot z^i+\Gamma^i_{jk}(z)\,\dot z^j\dot z^k=0,
+\qquad
+\Gamma^i_{jk}=\half M^{il}\big(\partial_j M_{lk}+\partial_k M_{lj}-\partial_l M_{jk}\big),
+\label{eq:geodesic}
+\end{equation}
+with transversality $M\dot z\parallel\nabla R$ at the endpoint. The least-complexity network
+is the \emph{shortest curve} from the input manifold to the loss-minimizing terminal set;
+complexity is arc length; depth is the affine parameter (gauge).
+
+\paragraph{Depth-freedom from the exponent.} The metric component along the marginal
+direction scales, in the continuum limit of \eqref{eq:marginal}, as
+$M_{\mathrm{marg}}(t)\sim t^{-2\alpha}$, so the accumulated arc length in that direction is
+\begin{equation}
+\mathrm{Length}_{\mathrm{marg}}=\int^T\!\sqrt{M_{\mathrm{marg}}}\,\dd t\;\sim\;\int^T t^{-\alpha}\,\dd t,
+\label{eq:arclength}
+\end{equation}
+whose convergence is decided by $\alpha$:
+\begin{equation}
+\int^T t^{-\alpha}\dd t\;\longrightarrow\;
+\begin{cases}
+\text{converges (depth asymptotically free)}, & \alpha>1\ (\text{ReLU}),\\[2pt]
+\log T\ (\text{logarithmic cost per decade}), & \alpha=1\ (\text{smooth}),\\[2pt]
+\text{diverges as a power}, & \alpha<1.
+\end{cases}
+\label{eq:depth-freedom}
+\end{equation}
+This predicts that a ReLU continuum-depth model can be arbitrarily deep at finite complexity
+cost, whereas a smooth-activation model pays a logarithm per decade of depth.
+
+\subsection{Legendre duality of the two routes}
+\label{sec:duality}
+
+Routes~1 and~2 are related exactly as the free-time and fixed-time formulations of
+mechanics: the chemical potential $\mu$ (price of a layer) is conjugate to the depth/time
+$T$, as energy is conjugate to time. Concretely $\mu=-\partial S^\star/\partial L$ is the
+slope of the depth--loss curve and the geodesic length is its Legendre transform. Sweeping
+$\mu$ in Route~2 traces the same fit--depth Pareto frontier as choosing where to stop along
+the Route~1 geodesic.
+
+
+\section{Dynamics: the path-integral formulation of the trained network}
+\label{sec:path-integral}
+
+The clean way to carry the variational structure to arbitrary depth is to abandon
+per-layer measures in favor of a single measure over \emph{configurations of the whole
+network}, and to organize the calculation as a path integral.
+
+\subsection{Partition function over preactivation fields}
+\label{sec:partition}
+
+Let $z^{(\ell)}_i(x)$ be the preactivation of unit $i$ in layer $\ell$. The forward map is
+the constraint
+\begin{equation}
+z^{(\ell+1)}_i(x)=\frac{1}{\sqrt m}\sum_j W^{(\ell)}_{ij}\,\sigma\!\big(z^{(\ell)}_j(x)\big),
+\qquad W^{(\ell)}_{ij}\sim\mathcal N(0,\sigma_w^2).
+\label{eq:forward-preact}
+\end{equation}
+Integrating out the raw Gaussian weights $W^{(\ell)}_{ij}$ and appending the
+data/complexity term $R$ yields a path integral over the preactivation fields,
+\begin{equation}
+\Zpart=\int\Dcal z\;e^{-\beta\,S[z]},
+\qquad
+S[z]=R[z^{(L)}]+\half\sum_{\ell}\big\|z^{(\ell+1)}-\Wmet^{(\ell)}\sigma(z^{(\ell)})\big\|_2^2,
+\label{eq:action}
+\end{equation}
+where the script symbol $\Wmet^{(\ell)}$ denotes the \emph{effective} (integrated-out)
+coupling of layer $\ell$---distinct from the raw random weight $W^{(\ell)}_{ij}$ of
+\eqref{eq:forward-preact}, which no longer appears once integrated out. The norm
+$\|\cdot\|_2$ is the Euclidean norm on the layer's unit index. The crucial
+structural fact is that the action is \emph{local in depth}:
+$S=\sum_\ell \Lcal^{(\ell)}(z^{(\ell)},z^{(\ell+1)})$, nearest-neighbor in the ``time''
+index $\ell$, with $\sigma$ the interaction vertex. This makes the network a
+one-dimensional field theory in the depth direction, with a transfer-operator
+(time-ordered) structure.
+
+\subsection{Saddle point: the trained network and the neural ODE}
+\label{sec:saddle}
+
+The stationary configuration $\delta S/\delta z=0$ is, by depth-locality, a two-point
+boundary value problem:
+\begin{equation}
+\begin{cases}
+\text{forward:}\quad z^{(\ell+1)}=\Wmet^{(\ell)}\sigma(z^{(\ell)}), & \text{(input BC at }\ell=0)\\[2pt]
+\text{backward:}\quad p^{(\ell)}=(\Wmet^{(\ell)})^\top\big[\sigma'(z^{(\ell)})\odot p^{(\ell+1)}\big], & \text{(loss BC at }\ell=L)
+\end{cases}
+\label{eq:fwd-bwd}
+\end{equation}
+with costate $p^{(\ell)}=\delta S/\delta z^{(\ell)}$. These are exactly \emph{forward
+propagation and backpropagation}, read as the forward/adjoint legs of a discrete
+least-action problem with the loss as terminal condition. In the continuum-depth limit
+$\ell/L\to t\in[0,1]$,
+\begin{equation}
+\boxed{\;
+\dot z(t)=g\big(z(t),\theta(t)\big),
+\qquad
+-\dot p(t)=(\partial_z g)^\top p(t),
+\qquad
+p(1)=\nabla_z R.
+\;}
+\label{eq:node-pmp}
+\end{equation}
+Here $g$ is the continuum-limit vector field (the limit of the discrete update
+$z^{(\ell+1)}-z^{(\ell)}=\Wmet^{(\ell)}\sigma(z^{(\ell)})-z^{(\ell)}$), while $\theta(t)$ are the
+continuum-depth parameters and $p(t)$ is the continuum costate (the limit of $p^{(\ell)}$).
+The first equation is the \emph{neural ODE}; the pair is Pontryagin's maximum principle,
+with the adjoint ODE being continuous-depth backpropagation. The classical trajectory of
+the complexity path integral is the neural-ODE flow.
+
+\subsection{Gaussian fluctuations: the NTK as propagator; loops as \texorpdfstring{$1/m$}{1/m}}
+\label{sec:loops}
+
+Expanding $z=z^\star+\delta z$ to second order gives
+$S=S[z^\star]+\half\,\delta z^\top\mathbb{H}\,\delta z+O(\delta z^3)$ with Hessian
+$\mathbb{H}=\delta^2S/\delta z^2|_{z^\star}$. The Gaussian integral yields the propagator
+\begin{equation}
+\langle \delta z\,\delta z\rangle=\tfrac{1}{\beta}\,\mathbb{H}^{-1}=:\tfrac1\beta\,G,
+\end{equation}
+whose block-tridiagonal (nearest-neighbor) structure inverts into exactly the recursive
+kernel of infinite-width theory: the \emph{neural tangent kernel}. Concretely the layerwise
+recursion reproduces the standard NTK / neural-network-Gaussian-process (NNGP) relations,
+\begin{equation}
+\Theta^{(\ell+1)}=\Theta^{(\ell)}\odot\dot\Sigma^{(\ell+1)}+\Sigma^{(\ell+1)},
+\label{eq:ntk-recursion}
+\end{equation}
+with preactivation covariance $\Sigma^{(\ell)}$ and derivative kernel $\dot\Sigma^{(\ell)}$.
+Thus \emph{saddle $=$ trained network, propagator $=$ NTK}; the lazy/kernel regime is the
+free-field limit. Cubic and higher terms are interaction vertices, and power counting in
+width shows the connected $n$-point functions scale as
+$\langle\delta z^{n}\rangle_c=O(m^{-(n/2-1)})$: the tree level ($m=\infty$) is the free NTK
+theory and each loop costs $1/m$. Feature learning and NTK drift are the leading
+$1/m$ (four-point vertex) corrections, controlled by the depth-to-width ratio $L/m$; the
+loop expansion is well behaved precisely when $L/m\ll1$.
+
+\begin{remark}[Two scalings, two saddles]
+Under NTK scaling ($1/\sqrt m$) the saddle is the network at initialization and the kernel
+is frozen at leading order. Under mean-field scaling ($1/m$) the saddle itself moves and
+the leading-order dynamics are the nonlinear Wasserstein flow of \S\ref{sec:wasserstein};
+the ``free theory'' is already interacting. The MDL/TV functional, with its per-layer
+penalties, lives naturally in the mean-field scaling, which is why its leading order is the
+interacting flow and the certificate/atomicity structure appears already at tree level.
+\end{remark}
+
+
+\section{Criticality: the renormalization group of the depth map}
+\label{sec:criticality}
+
+The layer-to-layer covariance recursion \eqref{eq:ntk-recursion} is a renormalization-group
+map in the depth direction; its fixed-point structure controls whether signal propagates.
+For a tanh-type network the single relevant quantity is the slope of the correlation map,
+\begin{equation}
+\chi_1 \;=\; \sigma_w^2\,\E\big[\sigma'(z)^2\big],
+\label{eq:chi1}
+\end{equation}
+which classifies the phase: $\chi_1<1$ \emph{ordered} (correlations contract, gradients
+vanish), $\chi_1>1$ \emph{chaotic} (correlations expand, gradients explode), and $\chi_1=1$
+\emph{critical} (marginal propagation). The correlation length is
+\begin{equation}
+\xi=-\frac{1}{\log\chi_1},
+\label{eq:xi}
+\end{equation}
+diverging at criticality, where $\xi$ is the correlation length of the marginal mode and
+$\epsilon^{(\ell)}$ below denotes a perturbation to the layer-$\ell$ preactivation
+correlation. Away from criticality perturbations decay exponentially,
+$\epsilon^{(\ell)}\sim e^{-\ell/\xi}$; \emph{at} criticality the marginal mode decays only
+algebraically,
+\begin{equation}
+1-c^{(\ell)}\sim \ell^{-\alpha},
+\label{eq:marginal}
+\end{equation}
+where $c^{(\ell)}\in[0,1]$ is the depth-$\ell$ correlation (normalized overlap) between two
+nearby inputs propagated to layer $\ell$, so $c^{(\ell)}\to1$ is the fixed point and
+$1-c^{(\ell)}$ its approach; this defines the critical exponent $\alpha$. Using the Mehler/Hermite spectrum of the
+activation, the dual activation is $\hat\sigma(\rho)=\sum_n a_n^2\rho^n$ with $a_n$ the
+Hermite coefficients of $\sigma$, and this fixes both the tower of scaling dimensions
+$\{\Delta_k\}$ (the eigenvalues of the linearized RG map) and the marginal exponent
+$\alpha$: $\alpha=1$ for smooth activations and $\alpha=2$ for ReLU. The tower
+$\{\Delta_k\}$ is the universal data that will make the depth objectives computable in
+\S\ref{sec:scenario1}; it is the same tower referenced in the consolidated objective
+\eqref{eq:consolidated}.
+
+\begin{remark}[Status of criticality as a lever]
+As an \emph{initialization} prescription, criticality gives the textbook clean
+gradient-propagation behavior (ordered $\to$ vanishing, chaotic $\to$ exploding, critical
+$\to$ $O(1)$). As a \emph{trainability} lever, however, it is largely subsumed by
+normalization in practice. Its indispensable role in these notes is theoretical: it is the
+locus where the depth objectives below become nontrivial.
+\end{remark}
+
+
+\section{Observables: deriving the architecture parameter}
+\label{sec:alpha-derivation}
+
+The one component the preceding account imported rather than derived is the primitive-selection
+parameter $\alphapar$: within a contract, the mixture
+$z^{(\ell+1)}=\sum_p\operatorname{softmax}(\alphapar)_p f_p(z^{(\ell)})$ is trained by gradient descent
+on $\alphapar$ and discretized by $\arg\max$, a recipe taken wholesale from differentiable architecture
+search. We now show this is not a foreign object but the outer Gibbs law that
+Eq.~\eqref{eq:gibbs} already anticipated, and that DARTS (differentiable architecture search~\cite{liu2019darts}) is its gradient flow.
+
+\subsection{The free energy on the primitive simplex}
+Place on the primitive simplex $\Delta=\{\alphapar\in\R^P_{\ge0}:\sum_p\alphapar_p=1\}$ the same free
+energy that governs the neuron measure, now with a discrete index:
+\begin{equation}
+\F_{\alphapar}(\alphapar)=\langle\alphapar,\Psi\rangle-\tfrac{1}{\beta}H(\alphapar),
+\qquad H(\alphapar)=-\sum_p\alphapar_p\log\alphapar_p,
+\label{eq:Falpha}
+\end{equation}
+where $\Psi_p$ is the marginal risk (description-length cost) of primitive $p$ and $\beta$ is the same
+inverse temperature as $\F=R+\tfrac1\beta\KL$. This is $R+\tfrac1\beta(\text{rate})$ read on the
+lattice of primitives: $\langle\alphapar,\Psi\rangle$ is the expected fit cost of the mixture and
+$-H$ is its description length (how concentrated, hence how committed, the choice is).
+
+\subsection{Gibbs form, replicator dynamics, and the DARTS correspondence}
+The stationarity of \eqref{eq:Falpha} on the interior of $\Delta$ (Lagrange condition
+$\nabla\F_{\alphapar}\parallel\mathbf 1$) gives at once the \emph{Gibbs law}
+\begin{equation}
+\boxed{\ \alphapar_p\ \propto\ \exp(-\beta\,\Psi_p)\ }
+\label{eq:alpha-gibbs}
+\end{equation}
+which is exactly Eq.~\eqref{eq:gibbs}, $\dd\rhostar/\dd\pi\propto e^{-\beta\Psi}$, transported from the
+neuron measure to the primitive simplex---the ``architecture Gibbs measure of the outer loop'' promised
+there. The natural gradient flow of \eqref{eq:Falpha} in the Fisher--Rao (Shahshahani) metric of the
+simplex is the \emph{replicator equation}
+\begin{equation}
+\dot\alphapar_p=-\big[J\,\nabla\F_{\alphapar}\big]_p
+=\alphapar_p\big(-\Psi_p+\langle\alphapar,\Psi\rangle\big)+\tfrac1\beta\,\alphapar_p\big(\!-\!\log\alphapar_p+H\big),
+\qquad J=\operatorname{diag}(\alphapar)-\alphapar\alphapar^\top,
+\label{eq:replicator}
+\end{equation}
+i.e.\ selection dynamics with fitness $f_p=-\Psi_p$, whose fixed point is \eqref{eq:alpha-gibbs}. The
+DARTS update---gradient descent on the softmax logits---is, in continuous time,
+$\dot\alphapar=-J^2\nabla\F_{\alphapar}$: the replicator field \eqref{eq:replicator} pushed once more through
+the positive-semidefinite map $J$. Since $\ker J=\operatorname{span}(\mathbf 1)$ is exactly the simplex
+normal, $J$ changes only the metric, not the critical set: DARTS shares the replicator flow's entire
+stationary set and its interior Gibbs equilibrium (for $P=2$ the extra factor is the positive scalar
+$2\alphapar_1\alphapar_2$, so the two flows coincide up to a time reparameterization). \emph{The bolt-on
+is thus the gradient flow of the outer Gibbs measure}, in a mildly preconditioned metric.
+
+\subsection{One temperature, three regimes; and which energy is forced}
+The single knob $\beta$ organizes the selection exactly as $\mu$ organizes depth and $\lambda$ organizes
+width. Rewriting \eqref{eq:Falpha} as $\langle\alphapar,\Psi\rangle+\tfrac1\beta(-H)$ exhibits $1/\beta$
+as the \emph{price of committing}: at small $\beta$ the measure is broad (a hedged mixture, ``buy fit
+with capacity''), at large $\beta$ it sharpens, and as $\beta\to\infty$ it concentrates on
+$\arg\min_p\Psi_p$---the hard, single-primitive selection, the primitive-lattice analogue of the
+atomic-width dual certificate. Sweeping $\beta$ traces a fit-versus-commitment Pareto frontier just as
+sweeping $\mu$ traces the fit-versus-depth frontier.
+
+Finally, \eqref{eq:Falpha} \emph{forces} the identity of the energy. The variational principle does not
+merely permit $\Psi_p$; it requires the \emph{marginal} (solo) risk of primitive $p$---its
+description length as a standalone hypothesis---not the mixture gradient $\partial R/\partial\alphapar_p$
+that plain DARTS differentiates. The two differ precisely by co-adaptation: the mixture gradient credits
+a primitive for fitting the residual its neighbours leave, so a parameter-free branch can win a flat
+mixture. Because the derived energy is intrinsically a solo quantity, the derived selection is
+co-adaptation-robust \emph{by construction}, not by an added ablation heuristic. Thus the same step that
+derives $\alphapar$ also resolves the selection pathology the within-architecture theory left open: the
+$\alphapar$-derivation and the co-adaptation fix are one result.
+
+\subsection{One free-energy form, three temperatures}
+\label{sec:three-temperatures}
+The inverse temperature $\beta$ of \eqref{eq:alpha-gibbs} is not the only one in the framework, and it is
+worth being precise about how the several $\beta$'s relate, because a careless reader will suspect a single
+knob wearing three hats. They do share a single \emph{form}. Every priced read-out in the package is a
+Gibbs free energy of one shape,
+\begin{equation}
+\label{eq:one-form}
+F(\rho)\;=\;\langle\rho,E\rangle\;-\;\tfrac{1}{\beta}\,H(\rho),
+\end{equation}
+a mean energy against an entropy at an inverse temperature; the architecture free energy \eqref{eq:Falpha}
+is the instance on the primitive simplex, and the same shape recurs at two other levels. But the three
+instances carry three \emph{different} temperatures, and---this is the substantive point---they are
+deliberately decoupled, not one temperature.
+
+At the level of the \textbf{weights}, the singular free energy of \S\ref{sec:mixture-priced} is
+$F_n=nL(w)+\lambda\log n$, whose Gibbs form runs the posterior at $\beta_W=1/\log n$. This is not a free
+knob: only that value makes $n\beta_W(\mathbb{E}_{\mathrm{post}}[L]-L^\star)$ estimate the real log canonical
+threshold~\cite{watanabe2009slt,lau2023llc}, so $\beta_W$ is pinned by singular-learning theory. At the
+level of the \textbf{primitives}, \eqref{eq:one-form} with $E=\Psi_p$ on the simplex runs at
+$\beta_A=\beta$, the genuine free sharpness knob of the previous subsection (small $\beta_A$ hedges, large
+$\beta_A$ commits). At the level of the \textbf{contracts}, the evidence expansion of \S\ref{sec:mixture-priced}
+combines a per-datum negative log-likelihood with a structural code length, both already in nats, at
+$\beta_C=1$: an NLL against a description length admits no free exchange rate (nats against nats), so
+$\beta_C$ is unit-fixed. The derivative read-outs of this one form are then the three objects the framework
+already computes: $\lambda=\mathrm{d}F_n/\mathrm{d}\log n$ at the weights, the derived $\alphapar$ at the
+primitives, and the contract posterior (whose MAP is the priced-$J$ winner) at the contracts.
+
+The temptation is to ``unify'' by equating them---setting the readout temperature to the weight
+temperature, $\beta_A:=\beta_W=1/\log n$. That is a mistake, and seeing why sharpens the picture. At a
+representative $n\sim10^3$, $1/\log n\approx0.14$ whereas a useful $\beta_A$ is order $10$; equating them
+drops the readout temperature by nearly two orders of magnitude and flattens $\alphapar$ to nearly uniform,
+destroying the selection the observable exists to make. Nor is there a single partition function whose
+marginals are all three: the energies live on different spaces and in different units---$nL$ is $O(n)$ nats
+on weight space, $\Psi_p$ is an $O(1)$ dimensionless fit metric on the simplex, and the contract energy is
+$O(n)$ nats on the contract set---so no one $Z_n(\beta)$ produces all three. The honest statement is
+therefore one free-energy \emph{form} instantiated at three coarse-grainings, each with a temperature pinned
+by its own principle (theory-fixed $\beta_W$, free $\beta_A$, unit-fixed $\beta_C$)---three deliberately
+decoupled temperatures, not one. This closes a latent notational double-use rather than papering over it,
+and it is the thermodynamic backbone from which the singular complexity and its developmental and response
+read-outs are all read as derivatives of the \emph{same} object.
+
+
+\subsection{Mixtures: the dense blend collapses to DARTS, but can be priced}
+\label{sec:mixture-priced}
+
+The derivation selects, at $\beta\to\infty$, a single primitive. Does it extend to a genuine
+\emph{mixture}---a deployed map $\sum_p\alphapar_p f_p$ that can strictly beat every vertex? Here the
+variational structure draws a sharp and honest line. Over a \emph{frozen} basis $\{f_p\}$ the blended risk
+$R(\sum_p\alphapar_p f_p)$ is convex on the simplex, with a dual certificate identical in form to the
+width certificate \eqref{eq:kkt}---support primitives share a common marginal correlation with the
+residual, off-support primitives correlate no better---so the optimal mixture, and its finite support,
+are as well-characterised as the atomic width. But a frozen basis is exactly post-hoc \emph{ensembling}
+(a bag of separately trained models), which sits outside the single-network discipline. For a
+\emph{live} in-layer mixture the basis co-adapts: $\alphapar$ and the weights $\theta$ minimise the
+\emph{same} non-convex loss, $\partial R/\partial\alphapar_p$ is the gradient of that very loss, and the
+entropic-mirror-descent stationarity $\alphapar_p\propto e^{-\beta\,\partial R/\partial\alphapar_p}$ is
+therefore a \emph{reparametrisation of DARTS}, not an independent principle. The clean certificate had
+teeth in Scenario~0 precisely because the two-layer lift made the problem convex in a \emph{single}
+measure; composition destroys that here just as it does at depth (\S\ref{sec:depth-obstruction}).
+
+What remains, and is fully in keeping with the priced rungs of \eqref{eq:consolidated}, is to
+\emph{price} the mixture instead of deriving it. The description length of a mixture over $P$ primitives
+is, by the two-part code, $\sim k\log P + k\cdot(\text{weight bits})$ with $k=\|\alphapar\|_0$ the
+active count---linear in the support size, exactly as the width penalty is linear in the neuron count. A
+smooth surrogate for $\|\alphapar\|_0$ is the inverse participation ratio
+$\mathrm{IPR}(\alphapar)=1/\sum_p\alphapar_p^{2}\in[1,P]$, so the priced objective
+\begin{equation}
+\mathcal J_{\mathrm{mix}}=R\Big(\textstyle\sum_p\alphapar_p f_p\Big)+\mu\,\Omega(\alphapar),
+\qquad \Omega(\alphapar)=-\textstyle\sum_p\alphapar_p^{2}\ \ (\text{concentration reward, }\downarrow\mathrm{IPR}),
+\label{eq:sparsity-priced}
+\end{equation}
+is the primitive-dictionary analogue of the width atomic penalty: a primitive stays in the mixture only
+while its marginal risk reduction exceeds the price $\mu$, the same conditional-gradient stopping rule as
+the width certificate (neurons) and the depth marginal-value rule (layers), now on the primitive lattice.
+Sweeping $\mu$ traces an accuracy-versus-effective-primitive-count frontier; a single primitive is the
+$\mu$-large corner and a genuine mixture the interior, the data deciding which by where its frontier
+knees. This is the mixture extension the framework actually supports: not a richer derivation of the
+dense blend---which reduces to DARTS---but a description-length price with a certificate-flavoured reading,
+placed on the same ladder as width and depth.
+
+
+
+For future reference it is important to record what in this construction is novel and what
+is a synthesis of established results, and---separately---which predictions have been tested.
+
+\paragraph{Provenance.} Every load-bearing component is established, frequently foundational,
+literature: the measure-space convexification and Wasserstein/mean-field dynamics
+(Mei--Montanari--Nguyen; Chizat--Bach; Rotskoff--Vanden-Eijnden; Sirignano--Spiliopoulos);
+TV/atomic-norm sparsity with finite-atom certificates (Bach; Chizat; Parhi--Nowak;
+Pilanci--Ergen); the $1/m$ effective field theory with NTK-as-propagator
+(Roberts--Yaida--Hanin; Halverson et al.; the auxiliary-field/loop treatments);
+depth-RG criticality and correlation-length divergence (Poole et al.; Schoenholz et al.);
+critical exponents and activation universality classes; the Hermite/Mehler dual-activation
+spectrum and its fixed-point dynamics (Daniely et al.; Joudaki et al.); and
+depth-as-optimal-control with regularization-induced depth bounds
+(E; Benning et al.; Faulwasser et al.\ turnpike theory). The value of the construction is as
+a \emph{single internally consistent arc} connecting these programs, not as new results at
+the component level.
+
+\paragraph{Tested predictions.} The one component with a claim to modest novelty is the
+closed-form coupling $\Lstar\sim\mu^{-1/(\alpha+1)}$ (Route~2) and its Route~1 counterpart
+\eqref{eq:depth-freedom}. Both rest on a \emph{heuristic} marginal-mode-dominance argument
+and a continuum approximation of a discrete stopping rule. Where the Route~1 depth-freedom
+prediction has been tested numerically---by measuring arc length of a trained neural ODE as a
+function of integration time, at matched, strict criticality (leading Jacobian eigenvalue
+driven to $\approx0$)---it was \emph{not confirmed}: both smooth and ReLU vector fields
+produced \emph{linear} arc-length growth ($R^2\approx1$), with ReLU no more bounded than
+tanh, in contradiction to \eqref{eq:depth-freedom}. The interpretation is that at criticality
+the flow settles to approximately constant speed, giving arc length $\sim T$ independent of
+activation; the marginal-mode contribution does not dominate the arc length in a real
+finite-width, finite-$T$ flow. An earlier ``directionally consistent'' observation was traced
+to \emph{unmatched} criticality between the two activations and disappeared once the
+criticality was matched. The Route~2 scaling \eqref{eq:Lstar} was validated on synthetic
+ground truth---where a curve constructed to have a marginal $\sim\ell^{-(\alpha+1)}$ returns
+the exponent $-1/(\alpha+1)$ to within a few percent---but not on real networks. A subsequent
+sweep of trained networks (graph, sequence, and plain multilayer perceptrons) across a depth
+grid found the measured exponent to be \emph{seed-unstable} in this small-network regime:
+where depth engages at all (a message-passing regressor, useful to $\approx4$ layers) a
+two-seed average yields an apparent exponent near the smooth-activation value with a
+convincing power-law fit, yet a three-seed average of the identical setup gives a
+non-monotone marginal and a nonsensical exponent. The per-layer marginal-value signal near
+the saturation point is dominated by seed and optimization variance rather than a clean
+critical power-law tail; on the compact real datasets examined, optimal depth was frequently
+$\Lstar=1$ (depth-limited). The functional form can therefore be \emph{fit} to any single
+noisy curve without that fit \emph{confirming} the prediction. This is consistent with the
+criticality caveat below---real trained networks are not on the critical line---and we report
+it as an honest non-confirmation rather than a clean refutation.
+
+\paragraph{Scope of the criticality thread.} A recurring theme is that the sharpest
+predictions are \emph{criticality-conditional}: they are nontrivial only on the critical line.
+This makes them empirically delicate, because a network trained to solve a task is generically
+driven off criticality, and reaching (and matching) criticality needs explicit
+regularization. Where criticality was reachable (the neural-ODE arc-length test), a clean
+verdict was obtained (refutation); where it was not (coupled multi-site selection transitions),
+the prediction remained untested for want of an adequate substrate.
+
+\paragraph{Status of the outermost rung.} The representation-dispatch level of
+\S\ref{sec:metarouter} stands on a different footing from the depth-scaling corollaries. It is
+not a criticality-conditional scaling law but a structural claim---that interface
+incompatibility forecloses relaxation across contracts, forcing a discrete dispatch---together
+with a description-length selection rule \eqref{eq:tiebreak} for the one ambiguous (geometric)
+case. That rule was tested directly: on controlled targets whose dependence was engineered to be
+purely geometric, purely topological, or purely set-symmetric, the bake-off ranked by
+$\widehat{R}_c+\mu_{\mathrm c}\Omega_{\mathrm{struct}}(c)$ selected the equivariant, plain-graph, and set
+contracts respectively, the physically correct choice in every case---the topological and set targets
+being genuine near-ties in fit that the \emph{derived} structural code length \eqref{eq:omega-struct}
+broke toward the cheaper contract. Unlike the refuted depth-freedom prediction, this
+outermost rung is both principled (a genuine MDL minimization, now with a derived rather than ordinal
+structural charge) and empirically confirmed on its
+intended domain; its limitation is narrowness, not fragility---it decides only the contract, while
+the primitive parameter $\alphapar$ one level below it is derived separately in
+\S\ref{sec:alpha-derivation}.
+
+\paragraph{A Bayesian evidence reading of the contract rule.} The selection
+$\operatorname*{arg\,min}_c\,[\widehat{R}_c+\mu_{\mathrm c}\Omega_{\mathrm{struct}}(c)]$ is, once the fit term is put on a
+log-likelihood scale, an approximate Bayesian log-joint over contracts. Writing $\hat{L}_c$ for the mean
+per-datum negative log-likelihood of the fitted contract and $n$ for the sample size, the Laplace / Bayesian-information-criterion (BIC)
+expansion of the evidence is $-\log p(\mathrm{data}\mid c)\sim n\hat{L}_c+\tfrac{k_c}{2}\log n+O(1)$, and with
+a prior the log-joint adds $-\log p(c)$. Two facts specialize this to the contract choice. First,
+$\Omega_{\mathrm{struct}}(c)$ is a description length for the contract's \emph{structure}, hence exactly a
+$-\log p(c)$ structure prior, $p(c)\propto e^{-\Omega_{\mathrm{struct}}(c)}$. Second, the parameter-count
+Occam term $\tfrac{k_c}{2}\log n$ uses the raw weight count---the wrong complexity for singular
+over-parameterized networks, and moreover approximately \emph{common} across contracts, since the bake-off
+trains every candidate at a shared width/depth budget---so it cancels in the posterior
+$\propto\exp(-[\,n\hat{L}_c+\Omega_{\mathrm{struct}}(c)\,])$. What remains is precisely
+$n\hat{L}_c+\Omega_{\mathrm{struct}}(c)$: the tie-break objective with $\mu_{\mathrm c}$ fixed to unity
+(nats against nats, not a tuned exchange rate). The maximum-a-posteriori (MAP) estimate of this posterior coincides with the argmin of the
+priced $J$, so the reading does not change the winner; its value is that the fit-versus-structure tradeoff is
+now on a calibrated scale (the data can override the structure prior exactly when the likelihood gain
+warrants it) and that the argmin becomes a distribution with a reported entropy, so a near-tie is visible
+rather than resolved arbitrarily. The remaining gap to an exact evidence---a genuine marginal likelihood in
+place of the held-out $\hat{L}_c$, and the singular-model real-log-canonical-threshold (RLCT) complexity~\cite{watanabe2009slt,lau2023llc} in place of the cancelled
+$\tfrac{k_c}{2}\log n$---is the natural next refinement. That second half is now concrete: the package
+estimates the Real Log Canonical Threshold $\lambda\le k/2$ of a fitted network by the stochastic-gradient
+Local Learning Coefficient of Lau et al., replacing $\tfrac{k}{2}\log n$ in the free energy by
+$\lambda\log n$. On over-parameterized networks $\lambda$ is far below $k/2$---empirically, for a widening
+family fitting a fixed low-rank target, $\lambda$ grows sublinearly while $k/2$ grows linearly, so
+$\lambda/(k/2)\to 0$---which is exactly the degeneracy that the raw parameter count, and hence classical BIC,
+mis-measures. The estimate is meaningful only at a converged minimum (a strongly negative $\lambda$ diagnoses
+an unconverged $w^\ast$ rather than a small complexity), which fixes both its use and its guard: the package
+now folds the functional charge $\lambda\log n$ into the contract objective (an opt-in refinement of the
+tie-break) with a clamp for slightly-negative $\hat\lambda$ and a validity guard that declines to price a
+non-converged candidate. The result completes the evidence expansion above rather than replacing it: the
+functional term is second-order to the structural charge on realistic converged data, and a controlled
+study shows it changes the selected contract only in a near-tied, anti-correlated corner (the fit-leader
+being the more singular contract) that natural training does not reach---so it reprices and reports
+effective degrees of freedom honestly, without overturning the structural verdict in the common case.
+
+\paragraph{Summary.} The construction is best regarded as a rigorous and pedagogically
+complete \emph{map} of how variational calculus, the principle of least action, and the
+path-integral formalism organize neural network complexity across width and depth---exact and
+convex in its two-layer core, structurally faithful but only perturbatively controlled in the
+deep regime, and with its most quantitative depth-scaling corollaries flagged as heuristic and,
+where tested at criticality, empirically overturned. The one selection variable the account had
+imported rather than derived, the primitive parameter $\alphapar$, is now brought inside the same
+free-energy principle (\S\ref{sec:alpha-derivation}): it is the outer Gibbs measure
+$\alphapar_p\propto e^{-\beta\Psi_p}$ of Eq.~\eqref{eq:gibbs} on the primitive simplex, with DARTS its
+Fisher--Rao gradient flow and $\beta$ the same MDL temperature as $\mu$ and $\lambda$---so the ladder
+from contract to weights is, save for the necessarily discrete cross-contract dispatch, one variational
+object throughout. The same accounting reaches one rung further out still: the \emph{tensor shape} a flat
+input is given---which lattice, of which rank---is priced by the identical $R+\mu\,\Omega_{\mathrm{struct}}$
+with the grid-rank code length, so ``which representation'' joins ``which contract, primitive, depth,
+width'' as a decision of the one metaoptimality criterion rather than a preprocessing step.
+
+
+\section{Provenance and references}
+The formulations above recombine established ideas---differentiable architecture search, renormalization-group
+and information-bottleneck analyses of deep networks, edge-of-chaos criticality, singular learning theory,
+and the Kolmogorov--Arnold representation---under a single description-length action $J=R+\mu\Omega$ and a
+variational reading of architecture selection. Citations on first use point to the originating works; the
+consolidated list follows.
+
+\bibliographystyle{plain}
+\bibliography{bibliography}
+
+\end{document}

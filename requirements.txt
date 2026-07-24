@@ -1,0 +1,62 @@
+# ilmarinen runtime requirements
+# =============================
+# Install with:  pip install -r requirements.txt
+#
+# This installs the CORE runtime plus the common extras needed to run the
+# validation suites end to end. For a truly minimal install (import ilmarinen and
+# run a fit on in-memory tensors) only the CORE block is required; the
+# DATASET/MODEL/REPORTING extras below can be trimmed for a leaner image.
+#
+# Python 3.11 or 3.12 recommended (developed and tested on 3.12).
+
+# ---- CORE (required to import ilmarinen, build an AllGraph, and run a fit) ----
+# numpy: arrays throughout
+numpy>=1.26,<3
+# scipy: symmetry/equivariance machinery (EMLP, Lie-derivative nullspace, discrete groups)
+scipy>=1.11
+# torch: all network training and the SGLD-based singular-complexity estimator
+torch>=2.2
+# tqdm: AllGraph.fit() training progress bar -- core/allgraph.py (guarded: no bar if absent)
+tqdm>=4.60
+
+# ---- MODEL EXTRAS (only if the corresponding primitive/contract is used) ----
+# torchdiffeq: continuous-depth (neural ODE) primitive -- models/neural_ode.py
+torchdiffeq>=0.2.4
+
+# ---- DATASET EXTRAS (only to LOAD the corresponding validation datasets) ----
+# rdkit: MoleculeNet / ESOL / Tox21 (SMILES -> molecular graphs) -- core/moleculenet.py
+rdkit>=2023.9
+# aeon: UCR/UEA time-series (ECG5000, GunPoint, OSULeaf, ...) -- core/dataset_registry.py
+aeon>=0.11
+# h5py: JetNet particle-cloud datasets (.hdf5 reader) -- core/jetnet.py
+h5py>=3.8
+# requests: Cloudflare-gated downloads (JetNet .hdf5 from Zenodo, which 403s urllib) -- core/data_sources.py
+requests>=2.28
+# torchvision: MNIST download/loading -- core/dataset_registry.py
+torchvision>=0.17
+# scikit-image: CIFAR image loading/preprocessing -- core/cifar.py
+scikit-image>=0.22
+# medmnist: MedMNIST 2D/3D (BloodMNIST, OrganMNIST3D, ...) -- core/benchmark_datasets.py
+medmnist>=3.0
+# ucimlrepo: OPTIONAL -- fastest fetch path for UCI Superconductivity -- core/data_sources.py. Guarded, with
+# fallbacks to the public UCI zip URL then a local zip, so not needed unless you want the package fetch.
+# ucimlrepo>=0.0.7
+# pandas + tables: OPTIONAL -- read the Top Quark Tagging HDF5 (pandas-HDFStore format) in
+# extended_datasets.load_toptagging. Only needed to run that one dataset; the loader raises (and the runner
+# skips) if they are absent.
+# pandas>=2.0
+# tables>=3.8
+# jump-portrait: OPTIONAL -- JUMP Cell Painting Gallery images from the public S3 (no AWS account) for the
+# SEPARATE Cell Painting suite (validation_runners/run_cellpainting_validation.py, core/cellpainting.py).
+# Not installed by default: it pulls a heavy stack (boto3/s3fs/duckdb) and needs network S3 at first build.
+# jump-portrait>=0.1.1
+# pyarrow: OPTIONAL -- Cell Painting metadata tables -- core/cellpainting.py. Usually pulled transitively by
+# jump-portrait; listed for the explicit cell-painting extra.
+# pyarrow>=14.0
+
+# ---- REPORTING / BUILD EXTRAS (only for the schematic + PDF tooling; not needed to use the package) ----
+# cairosvg>=2.7   # render the AllGraph SVG schematic to PNG
+# pypdf>=4.0      # PDF metadata handling for the reports
+
+# ---- DEV (unit tests) ----
+# see requirements-dev.txt (pytest)

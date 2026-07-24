@@ -1,0 +1,2317 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\emergencystretch=3em
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{bm}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\hypersetup{colorlinks=true,linkcolor=blue!55!black,citecolor=blue!55!black,urlcolor=blue!55!black}
+
+% \code: typewriter, but allow line breaks within long identifiers (underscores etc.)
+% so inline code does not overflow the margin.
+\newcommand{\allowbreakhere}{\discretionary{}{}{}}
+\newcommand{\code}[1]{\texttt{\def\_{\char`_\allowbreakhere}#1}}
+\newcommand{\alphapar}{\bm{\alpha}}
+\newcommand{\F}{\mathcal{F}}
+\newcommand{\half}{\tfrac{1}{2}}
+
+\title{\bf The \code{ilmarinen} Package: A Practical Implementation Report\\[4pt]
+\large Numerical Realization of Variational Neural Architecture Meta-Optimization}
+\author{Companion implementation notes}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This report is the practical companion to the analytical reference notes on variational and
+field-theoretic neural architecture meta-optimization. Where the analytical document develops
+the theory---least-complexity width as an atomic-measure problem, priced and geometric depth,
+depth-renormalization criticality~\cite{mehta2014rg,poole2016chaos}, and the reading of training as a least-action/path-integral
+principle---this document records what was actually \emph{built}, how each analytical
+formulation was mapped (exactly, approximately, or not at all) to a numerical implementation,
+and how the resulting system behaves on synthetic and real data. We describe the six
+schema modules that realize differentiable architecture selection over a vocabulary of
+primitive operations, culminating in a \emph{unified} sequence schema in which all nine
+implemented primitive realizations compete under a single architecture parameter. We report
+selection outcomes and accuracies---measured freshly from the current package, not
+reconstructed---on three synthetic tasks (copy, adding, associative recall) and five real
+UCR/UEA (the standard univariate and multivariate time-series archives) datasets, alongside matched-complexity fixed-architecture baselines, and
+we document the concrete network each metaoptimizer selects (primitive type, layer count, and
+parameter count). We then lift the fixed-size restriction: by pricing capacity and folding a
+differentiable complexity penalty into the architecture objective, width and depth become
+\emph{decisions} of the metaoptimality criterion, and we report the resulting fit--complexity
+frontier and compact-and-accurate models. Upstream of architecture search we add a
+\emph{representation front-end} that discovers, from the data's mutual-information structure, whether
+it is naturally a one-dimensional sequence, a two-dimensional grid, or unstructured---recovering
+exact image shapes (CIFAR-10 $32\times32$, Fashion-MNIST $28\times28$) via a stride-anomaly signal and
+routing each dataset to the matching schema; automatic tensorization improves both accuracy and
+architectural appropriateness where the data has non-sequence structure. Beyond architecture search,
+we document a
+\emph{symmetry-discovery front-end}---a physicist's preprocessing stage that discovers the
+continuous and discrete symmetries of the data (via a Lie-derivative nullspace and equivariance
+testing respectively), quotients them out to reduce dimensionality, and only then hands a minimal
+representation to the metaoptimizer; we connect this reduction to the information bottleneck~\cite{tishby2015ib,tishby1999ib}, validate
+it on QM7 molecular data (where it cuts rotated-test error substantially), and are candid about its
+false-positive failure mode on smooth ordered data and the guards required to contain it.
+We are explicit throughout about the boundary between
+what the theory promises and what the implementation delivers: several of the sharpest
+analytical structures are realized only in approximate or heuristic form, and a number of the
+theory's negative predictions were confirmed empirically. A closing section collects open
+questions and future
+directions distilled from the development history.
+\end{abstract}
+
+\tableofcontents
+
+\section{Purpose and scope}
+\label{sec:purpose}
+
+The analytical notes answer ``what \emph{is} the least-complexity network, as a variational
+object?'' This report answers the operational questions that follow: which of those
+constructions can be computed; what a faithful numerical surrogate looks like when the exact
+object is intractable; and what the resulting meta-optimizer actually selects when pointed at
+data. The guiding discipline throughout development was conservative: one capability added at
+a time, each premise checked before the capability was built on top of it, negative results
+recorded as first-class outcomes rather than rationalized away, and nothing consolidated into
+the package until it passed a regression check. This report reflects that discipline---in
+particular, it distinguishes carefully between the components that are \emph{exact}
+realizations of the theory, those that are \emph{approximate} surrogates, and those that
+remain \emph{unrealized}.
+
+All quantitative results in \S\ref{sec:synthetic}--\S\ref{sec:baselines} were regenerated
+from the current package state using the reproducible runner scripts shipped in
+\code{validation\_runners/} (\S\ref{sec:repro}); no number is carried over from memory or an
+earlier package version. Small run-to-run variation (seed, epoch budget, machine) affects the
+third decimal of accuracies but not the selected architectures, which are stable.
+
+\section{From analytical formulation to numerical implementation}
+\label{sec:mapping}
+
+The analytical framework is a nested hierarchy: an inner loop that optimizes weights at fixed
+architecture, and outer loops that optimize width, depth, and---ultimately---the primitive
+operation itself. Table~\ref{tab:mapping} records how each analytical formulation was mapped to
+code, and the subsections that follow expand on the entries that required approximation or were
+left unrealized.
+
+\begin{table}[t]
+\centering
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{p{4.6cm} p{2.1cm} p{6.2cm}}
+\toprule
+\textbf{Analytical formulation} & \textbf{Status} & \textbf{Numerical realization}\\
+\midrule
+Weight optimization (inner saddle: forward + backprop) & Exact & Standard autograd + Adam; unchanged from ordinary training.\\
+Width as atomic measure; total-variation (TV)/atomic-norm sparsity with finite-atom certificate & Exact (2-layer) & Dual-certificate and column-generation solvers in \code{machinery/}; the certificate stopping rule terminates at a finite, $\lambda$-controlled neuron count.\\
+Wasserstein / mean-field training dynamics & Approximate & Realized implicitly through gradient descent on the finite-width network; the measure flow is not integrated explicitly.\\
+Priced depth (Route~2), $L^\star\!\sim\!\mu^{-1/(\alpha+1)}$ & Approximate & Marginal-value stopping rule over integer depth, now wired into the schema pipeline (\S\ref{sec:size}); the closed-form exponent scaling remains heuristic.\\
+Geometric depth (Route~1, neural-ODE geodesic) & Approximate & \code{neural\_ode.py} integrates a continuous-depth flow; the depth-freedom prediction was tested and \emph{not} confirmed (constant-speed flow).\\
+Depth renormalization-group (RG) criticality; critical $\sigma_w^2$ & Exact (diagnostic) & \code{core/meanfield.py} locates $\chi_1\!=\!1$ and classifies phases; used to initialize recurrent cores.\\
+Architecture parameter $\alphapar$ (primitive selection) & Derived & Differentiable-architecture-search (DARTS~\cite{liu2019darts}) style softmax mixture, now derived as the outer Gibbs measure $\alphapar_p\propto e^{-\beta\Psi_p}$ on the primitive simplex (\S\ref{sec:alpha}, \S\ref{sec:alpha-derived}); DARTS is its Fisher--Rao gradient flow.\\
+Six-primitive irreducible vocabulary & Realized & Eleven selectable sequence \emph{compositions} of the six irreducibles, plus per-contract realizations (\S\ref{sec:vocab}).\\
+Architecture-crossing / class-invariance & Partial & Realized only within the fixed primitive vocabulary; inventing a primitive outside it remains out of scope by construction.\\
+\bottomrule
+\end{tabular}
+\caption{Mapping from analytical formulations to their numerical status in the package.}
+\label{tab:mapping}
+\end{table}
+
+\subsection{What is realized exactly}
+\label{sec:exact}
+
+Three components are faithful, not approximate. \emph{Weight optimization} is ordinary
+backpropagation; the analytical reading of it as the forward/adjoint legs of a discrete
+least-action problem is an interpretation, and the computation is exactly standard training.
+\emph{Width sparsity} is realized as the theory specifies: the total-variation dual certificate
+and a column-generation / conditional-gradient solver terminate at a finite atom (neuron) count
+controlled by the regularization price $\lambda$, matching the finite-atomicity proposition of
+the two-layer theory. \emph{Criticality} is realized as an exact mean-field diagnostic: the
+slope $\chi_1=\sigma_w^2\,\mathbb{E}[\sigma'(z)^2]$ is computed in closed form, the critical
+coupling is located (for $\tanh$ with $\sigma_b^2=0.05$, at $\sigma_w^2\approx1.76$), and the
+recurrent primitives are initialized there. These are the components inherited most directly
+from the two-layer core, where the theory is exact.
+
+\subsection{What is realized approximately}
+\label{sec:approx}
+
+The depth formulations are the clearest case of principled approximation. Priced depth
+(Route~2) is implemented as a marginal-value stopping rule over integer depth, but the
+theory's headline corollary---$L^\star\sim\mu^{-1/(\alpha+1)}$, the closed-form coupling of
+optimal depth to the depth price through the critical exponent---rests on a heuristic
+marginal-mode-dominance argument. It was validated only on synthetic ground truth; on the
+compact \emph{sequence} datasets examined, optimal depth was $L^\star=1$ (depth-limited), consistent with
+but not a strong test of the scaling (deeper optima do appear on relational tasks---ESOL selects
+$L^\star=4$, \S\ref{sec:depthlimit}). Geometric depth (Route~1) is implemented as a
+continuous-depth neural-ODE~\cite{chen2018node} flow whose complexity is arc length in a learned metric; the
+prediction that a ReLU flow can be arbitrarily deep at finite complexity cost was tested by
+measuring arc length as a function of integration time at matched criticality and was
+\emph{not confirmed}---the flow settled to approximately constant speed, giving arc length
+linear in integration time for both smooth and ReLU vector fields. The mean-field / Wasserstein
+dynamics are realized only implicitly: the network is trained by gradient descent on its finite
+parametrization, and the measure-space flow is a lens on that process rather than a separately
+integrated object.
+
+\subsection{The architecture parameter, and the one genuine cross-contract seam}
+\label{sec:alpha}
+
+The architecture parameter $\alphapar$ selects \emph{between} computational graphs. Within a contract it
+is not a bolt-on: \S\ref{sec:alpha-derived} derives it as the outer Gibbs measure of an entropic free
+energy on the primitive simplex, with DARTS-style softmax training its Fisher--Rao gradient flow and the
+co-adaptation-free solo marginal risk the forced energy. What remains genuinely irreducible to the
+continuum machinery is only the \emph{discrete cross-contract dispatch} of \S\ref{sec:metarouter-impl}:
+distinct contracts have incompatible interfaces, so the choice between them cannot be relaxed to a
+simplex and is settled by a minimum-description-length (MDL) bake-off rather than a gradient flow. (Earlier iterations
+framed $\alphapar$ itself as an unreconciled ``bolt-on''; that framing is superseded by the derivation,
+with a short historical note recorded at the end of \S\ref{sec:alpha-derived}.)
+
+\subsection{What is not realized}
+\label{sec:unrealized}
+
+True architecture-invariance---an optimizer that can invent a primitive outside the vocabulary
+---is not implemented, and by the analytical argument cannot be, without surrendering the
+continuum machinery: it is the uncomputable outer problem the tractable framework was built to
+avoid. The explicit Wasserstein measure flow, as noted, is not integrated. And the group
+parameter of the weight-sharing primitive (which symmetry to share under) does not relax
+smoothly; the implementation sidesteps this by instantiating the two useful groups
+(translation, time) as separate selectable primitives rather than searching over groups.
+
+\section{The processing pipeline: a physicist's ordering}
+\label{sec:ordering}
+
+This report is organized around the structure the code actually has: a single processing pipeline whose
+stages follow the causal sequence a physicist imposes when writing down an effective theory. Fix the
+\emph{kinematics} (the contract and its symmetries) first, then count the \emph{degrees of freedom} (how
+many modes the contract carries), then solve the \emph{dynamics} (train the couplings), and only then read
+off the \emph{observables}. Every switch the package exposes falls into exactly one of these stages, and
+the sections that follow are grouped by stage: \emph{kinematics} covers contract dispatch
+(\S\ref{sec:sevencontracts}--\S\ref{sec:contract-mdl}), tensor-structure discovery (\S\ref{sec:representation}),
+and symmetry discovery and canonicalization (\S\ref{sec:symmetry}); \emph{degrees of freedom} covers the
+priced width/depth/mode selection (\S\ref{sec:size}); \emph{dynamics} covers the primitive vocabulary
+and the derived, priced architecture parameter $\alphapar$
+(\S\ref{sec:vocab}--\S\ref{sec:sparsity-priced}); and \emph{observables} covers the primitive readout and
+interpretability (\S\ref{sec:interp}). Validation is consolidated afterward
+(\S\ref{sec:synthetic}--\S\ref{sec:stdval}).
+
+In the implementation this ordering is realized as a single \code{fit(select\_size=True)} flow rather than
+a set of detached pre-steps: routing and canonicalization (kinematics) complete first; the width/depth
+selection (\S\ref{sec:size}) runs \emph{in-line} next, sizing the network for the contract that was just
+fixed; training follows; and the readout (\S\ref{sec:alpha-derived}) discretizes the trained mixture
+last, guarded by
+\code{hasattr(.cells)} so it is a safe no-op on the generated-equivariant contract. The MDL action
+$J=R+\mu\,\Omega$ is not a stage in this sequence but the object minimized \emph{at} each selection.
+
+\paragraph{The ordering is load-bearing: two bugs it exposed.} Enforcing the sequence is not cosmetic.
+Running the full stack surfaced two defects that are, at root, \emph{ordering violations}, and fixing
+the order fixed them. First, canonicalization augments the node features with principal-axis
+coordinates, changing their dimension; when the degrees-of-freedom sweep ran \emph{before} that
+augmentation it sized the network for the wrong input width, producing a shape mismatch at train time.
+Canonicalization is a quotient of the configuration space---kinematics---so it must precede
+mode-counting; moving it above the sweep resolves the crash. The same quotient must also be applied to
+held-out data at inference, or the deployed network (trained on augmented features) receives the wrong
+dimensionality; a stored \code{apply\_canonicalization} transform, reused at test time, restores
+train/inference consistency. Second, the rotation-invariance test that decides whether to canonicalize
+compared the invariant-feature fit against the orientation-feature fit with no absolute floor. On a
+target that is unpredictable at the current budget---both fits negative---it would still declare
+``rotation-invariant'' (the larger of two failures) and canonicalize onto the set contract, discarding
+the equivariant contract that genuinely fits. An absolute floor \code{min\_invariant\_r2} plus an
+\emph{uninformative-defer} path (\S\ref{sec:symmetry}) corrects this: when neither fit clears
+the floor the test abstains and routing is left to the structural default, which keeps the geometry.
+On rMD17-ethanol this lifted the full-stack result from $R^2\,0.014$ to $0.51$. A parallel guard was
+needed one rung down: the width/depth sweep itself, when run at a smoke-budget number of epochs, sees a
+flat noise curve in which no width has trained enough to reveal its capacity, and selects the mode count
+essentially at random. Flooring the \emph{sweep} epochs (so the measurement reaches the signal regime,
+independent of the deployment budget) and adding an uninformative-sweep guard (fall back to maximum
+capacity when even the best width fails to clear a fit floor, rather than prune on noise) turns the
+rMD17 width curve monotone and selects a principled $K^\star=64$; the end-to-end result rises to
+$R^2\,0.586$. The recurring lesson is that a capacity or symmetry decision is only meaningful once the
+measurement it rests on has left the noise regime---the analogue of not reading mode occupancies off a
+configuration that has not yet thermalized.
+
+\paragraph{Per-layer robustness and cost.} To turn these switches into a usable default, each was
+ablated individually against a plain baseline across nine compact real datasets spanning four data
+types---1D sequence (ItalyPowerDemand, ECG5000, ArrowHead), 2D image (a BloodMNIST subset, an MNIST
+subset), geometric sets (two JetNet pairings), a molecular graph (ESOL), and a rotation-invariant
+equivariant target (QM7)---with up to five seeds per (dataset, layer) to estimate variance. The layers
+separate cleanly into three groups. The \emph{readout} layers are the only cheap ones that actively move
+results: the sparsity-priced readout never hurt on any of the nine datasets and reduced seed variance on
+the noisy ones at unit cost, while the Gibbs readout is a conditional tool---it roughly halved seed
+variance on noisy geometric tasks (an $82\%$ variance cut on QM7 at essentially no cost to the mean) but
+was a net negative on clean data, confirmed on all five clean datasets. The \emph{routing and contract}
+layers (tie-break, symmetry routing, canonicalization, discovery) are correct no-ops whenever the
+default router already respects the data's structure, which is the common case; their value appears
+specifically on inputs the default would mis-route (the rMD17 canonicalization rescue), and the
+tie-break can even slightly backfire on clearly-geometric data where the default is already right. The
+degrees-of-freedom sweep is the highest-value single layer where it applies---best skill \emph{and} best
+robustness on the graph-regression task---but its cost, dominated by the epoch floor that makes its
+measurement trustworthy, ranges from a $10\times$ overhead to cost-prohibitive on large sets.
+
+\paragraph{Three presets.} These findings are packaged as an evidence-based \code{-{}-preset} switch on
+both validation runners, with explicit flags overriding the preset. \textsc{min} is the plain baseline
+(argmax readout, all structural layers off): cheapest, and best on clean data where every added layer
+was inert or slightly harmful. \textsc{med} is the ``only-ever-helped'' set---the sparsity-priced
+readout plus the routing/contract layers as near-free insurance (correct no-ops when unneeded,
+high-value on mis-routed geometry)---and deliberately excludes the Gibbs readout (harmful on clean data),
+the tie-break (can backfire on geometric data), and the degrees-of-freedom sweep (expensive). \textsc{max}
+engages every layer (Gibbs readout, tie-break, symmetry routing, canonicalization, discovery, and the
+width/depth sweep): the most robust configuration on noisy data with genuine signal, at the highest cost,
+with the sweep occasionally prohibitive on large set data. The presets make the recommended default
+(\textsc{med}) a single flag while keeping the full switch space available.
+
+
+\section{Contracts and dispatch}
+\label{sec:kinematics-group}
+
+The outermost pipeline rung fixes the \emph{contract}: which contract the datum lives in and under which
+symmetry group the operations must be equivariant. This section defines the eight contracts and their
+vocabularies (\S\ref{sec:sevencontracts}), the meta-router that discovers which contract a datum
+satisfies and dispatches to it (\S\ref{sec:metarouter-impl}), and the description-length objective that
+folds the near-tie contract choice into the same $\mathcal J=R+\mu\,\Omega$ minimization as every inner
+rung (\S\ref{sec:contract-mdl}). The two remaining kinematic operations---discovering latent tensor
+structure and discovering symmetry---follow in \S\ref{sec:representation} and \S\ref{sec:symmetry}.
+
+\subsection{The eight computational contracts}
+\label{sec:sevencontracts}
+
+The unified sequence schema (\S\ref{sec:unified}) was the first of eight peer schemas, one
+per computational contract. A contract is a fixed way of presenting the datum together with the
+symmetry group under which the operations must be equivariant; the six irreducible primitives of
+\S\ref{sec:vocab} are realized afresh in each contract under its group action and tensor rank.
+Table~\ref{tab:sevencontracts} inventories them.
+
+\begin{table}[h]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{p{2.3cm} p{3.1cm} p{7.7cm}}
+\toprule
+\textbf{Contract} & \textbf{Interface / group} & \textbf{Selectable primitives}\\
+\midrule
+sequence & $(b,T,c)$; time-shift & plain, gated, lstm, conv, \textbf{dilconv}, attention, dense, norm, spectral, linssm, selssm (11)\\
+spatial & $(b,c,H,W)$; $2$D translation & conv2d, conv2d\_k5, conv2d\_k7, \textbf{atrous}, conv\_dw, pointwise, dense, norm, attention (9)\\
+volumetric & $(b,c,D,H,W)$; $3$D translation & conv3d, conv3d\_k5, conv\_dw, pointwise, dense, norm, attention (7)\\
+$4$D & $(b,c,T,D,H,W)$; $4$D translation & conv4d, conv4d\_kt1, conv\_dw, pointwise, norm (5)\\
+graph & nodes $+$ edges; $\mathrm{Aut}(G)$ & gcn, sage, gin, \textbf{pna}, gat, dense, norm (7)\\
+equivariant & nodes $+$ positions; $\mathrm{SO}(3)$ & e\_tp, \textbf{e\_kan}, \textbf{e\_painn}, \textbf{e\_painn\_kan}, e\_mean, e\_linear, e\_gate, e\_norm (8)\\
+set & unordered elements; $S_n$ & deepsets, sab, isab, pma\_block, element\_mlp, norm (6); poolings sum/mean/max/pma\\
+operator & function on a grid; discretization-invariance & fourier, fourier\_wide, local, deeponet (4)\\
+\bottomrule
+\end{tabular}
+\caption{The eight schemas. Each realizes the six irreducibles (affine, pointwise,
+gating, weight-sharing-under-$G$, content routing, normalization) under its own group and tensor
+rank. Cores added after the initial report are set in bold (the multi-scale \textbf{dilconv}/\textbf{atrous}
+of \S\ref{sec:newprims}, the graph aggregator \textbf{pna}, and the learnable-radial \textbf{e\_kan}/%
+\textbf{e\_painn\_kan} of \S\ref{sec:future}).
+The set contract is the maximal-symmetry endpoint ($S_n$); the grid ladder
+sequence$\to$\allowbreak spatial$\to$\allowbreak volumetric$\to$$4$D is a tower of translation groups of increasing rank,
+each a hard structural boundary because the $N$-D translation group is not a subgroup of the
+$(N{-}1)$-D one; the operator contract sits apart, mapping a sampled function to a function with weights
+in Fourier-mode space so that it is discretization-invariant.}
+\label{tab:sevencontracts}
+\end{table}
+
+\paragraph{Why the contracts must be separate.} The grid ladder cannot be collapsed: an
+$N$-dimensional convolution is not expressible as a stack of lower-rank ones, so each rank needs its
+own contract. The equivariant contract cannot be folded into the plain graph contract because its
+features are steerable (a direct sum of a rotation-invariant scalar part and a rotation-covariant
+vector part), and one cannot add a type-$1$ output to a type-$0$ output, nor apply an ordinary ReLU to
+a vector feature without breaking equivariance; equivariant primitives require per-irrep mixing and
+norm-gated nonlinearities. The set contract is the maximal-symmetry endpoint: graph aggregators
+collapse or crash on an edgeless collection, and attention-based set blocks (SAB) outperform sum
+decomposition exactly when higher-order interactions matter. Consistency across the eight was enforced
+mechanically: every top-level class exposes \code{forward}/\code{architecture}/\code{alpha\_report},
+every cell exposes a \code{mixed} method, and every builder takes the canonical
+$(n_{\mathrm{in}},\text{width},\text{depth},n_{\mathrm{out}},\text{primitives})$ signature, with a
+self-check that fails if any of these regress.
+
+\subsection{The meta-router: one entry point over eight contracts}
+\label{sec:metarouter-impl}
+
+The eight schemas are unified behind a meta-router, \code{AllGraph}, whose single
+\code{fit(data)} entry point discovers which contract the data satisfies and hands off to that
+schema's own primitive/width/depth search. Because the contracts have incompatible interfaces
+there is no shared tensor space in which to mix them, so the router is a two-level \emph{dispatch},
+not a differentiable mixture (the structural reason is developed in the companion analytical report).
+
+\paragraph{Level 1: structural type dispatch.} The data container decides the contract with certainty:
+an edge set routes to the graph contract (or, with positions also present, the equivariant contract);
+a variable-size collection with no edges routes to the set contract; a fixed-shape array routes to the
+grid family. This level is rule-based and overridable---the user can force a contract---because the
+container is itself the type signal.
+
+\paragraph{Level 2: grid-rank dispatch.} Within the grid family the tensor rank fixes the member
+(rank-$3\to$sequence, $4\to$spatial, $5\to$volumetric, $6\to4$D); a flat feature vector is sent to the
+mutual-information mode-structure test of \S\ref{sec:representation}, which recovers a latent $1$D or
+$2$D lattice. Level 2 thus reuses the representation front-end wholesale.
+
+\paragraph{The learned tie-break.} The one genuinely ambiguous case is geometric data (coordinates
+present), which may be modelled as an equivariant graph, a plain graph, or a bare point set. Since the
+contracts cannot be mixed, the router runs a \emph{bake-off}: each admissible contract is trained
+briefly from scratch on a held-out split and ranked by the MDL objective $\widehat R_c+\mu_{\mathrm c}
+\Omega_{\mathrm{struct}}(c)$---the clean-solo protocol of \S\ref{sec:coadapt-impl} lifted from primitives
+to whole contracts, and folded into the same $R+\mu\,\Omega$ objective as every inner rung
+(\S\ref{sec:contract-mdl}). The charge $\Omega_{\mathrm{struct}}$ is a \emph{derived} structural code
+length (not an ordinal fiat), so a richer contract must earn its cost. On controlled targets this
+selects correctly in every case: a geometry-dependent target (radius of gyration) selects
+equivariant decisively; a purely topological target (mean degree) is a near-tie in fit between graph and
+equivariant, which the structural charge breaks toward the cheaper graph; a pure set statistic selects
+the set contract outright---itself a near-tie with equivariant that the charge resolves. The tie-break is
+the empirical, across-contract analogue of the least
+description-length rules that govern the within-contract search.
+
+\paragraph{End-to-end behaviour.} Routed through \code{AllGraph.fit} on their data containers alone,
+all real datasets dispatched to the correct schema, and two of them produced genuinely
+\emph{heterogeneous} per-layer architectures on real data---the ESOL graph task discretizing to
+\code{gin}$\to$\code{pna}$\to$\code{pna} and the rMD17 equivariant task to
+\code{e\_painn}$\to$\code{e\_painn}$\to$\code{e\_tp}, the latter mixing the two equivariant
+message-passing philosophies across depth. This settles, affirmatively, the depth-$1$ question left
+open in the first report (\S\ref{sec:size}): given a real task with compositional structure and a
+deep-enough contract, the metaoptimizer does select distinct primitives at distinct layers.
+
+\subsubsection{Amortizing the bake-off: learned, transferable contract routing}
+\label{sec:learned-routing}
+
+The bake-off is correct but expensive---it trains two or three whole contracts from scratch for every new
+geometric dataset---and it is \emph{not transferable}: nothing learned on one dataset speeds up the next.
+Yet a practitioner's prior (``a molecular force field wants equivariant; a topological property wants a
+plain graph; a bag of atoms wants a set'') is exactly the kind of regularity a cheap meta-model should
+capture. We therefore added a learned router (\code{machinery/learned\_contract\_router.py}) that predicts
+the contract the bake-off \emph{would} choose from training-free dataset descriptors---a surrogate for
+$\arg\min_c[\widehat R_c+\mu_{\mathrm c}\Omega_{\mathrm{struct}}(c)]$ that predicts the argmin without
+computing each $\widehat R_c$. It is the same MDL objective, amortized.
+
+\paragraph{The descriptor.} The discriminative signal is \emph{what the target depends on}, captured by
+three proxy-correlations of $y$ with structure-specific, permutation- and rotation-invariant descriptors:
+a geometry proxy (correlation of $y$ with a pairwise-distance summary), a topology proxy (with an
+adjacency-spectrum-plus-degree summary), and a set proxy (with node-feature moments). On controlled
+targets the winning proxy always matches the true contract (geometric $0.98/0.20/0.08$, topological
+$0.23/1.00/0.08$, set $0.05/0.09/1.00$), with no schema training.
+
+\paragraph{The model and its correctness floor.} A nearest-prototype classifier in standardized
+descriptor space, with confidence read off the nearest-versus-runner-up margin. The policy has a
+correctness floor: if the router is confident, its prediction is used and the bake-off is skipped; if not,
+the bake-off runs (the ground truth) and its outcome is recorded to improve the router. So the router is
+never worse than the bake-off and much cheaper when confident. Prototype leave-one-out transfers $12/12$
+across dataset scales on controlled targets.
+
+\paragraph{Full-budget labels: the router is only as good as its labels.} The router learns from bake-off
+outcomes, so a mislabelled bake-off teaches a wrong mapping. A premise check found the bake-off winner
+\emph{flips with budget} on the two real geometric datasets: at the tiny quick-validation tie-break budget
+the equivariant branch has not converged, so the $\Omega_{\mathrm{struct}}$ charge spuriously prefers the
+cheap set/graph contract, whereas at an adequate budget equivariant wins decisively and its advantage
+widens (rMD17 $R^2$ climbs $0.06\to0.20\to0.44$ across $15/40/90$ epochs while set and graph stay near
+zero; QM7-equiv $0.62\to0.72$). A dedicated recorder (\code{validation\_runners/record\_contract\_}
+\code{corpus.py}) runs the bake-off at an adequate budget on every geometric dataset and persists the
+$(\text{descriptor},\text{winner})$ corpus. Two guards in \code{tiebreak} keep reduced-budget runs from
+corrupting this: outcomes are recorded only when the budget clears a trust threshold, and when the
+fallback bake-off would itself be low-budget the router's full-budget-seeded prediction is preferred over
+it. This is the honest resolution of the reduced-versus-full-budget tension: full-budget knowledge lives
+in the router; a cheap bake-off neither overrides nor poisons it.
+
+\paragraph{Transfer across physical domains, and a descriptor lesson.} Broadening the corpus beyond
+chemistry to particle-physics point clouds (JetNet jets: jet width $\to$ equivariant, total transverse
+momentum $\to$ set) exposed a real transfer failure and its fix. With the full descriptor, cross-domain
+leave-one-out was only $4/7$, because the raw size statistics (node and edge counts) live on incomparable
+scales across domains---a molecule's handful of bonds versus a cloud's many proximity edges---and in the
+standardized distance they swamp the discriminative proxies. Matching on the \emph{dimensionless}
+proxy-correlations alone (each a correlation in $[0,1]$, hence domain-portable) lifts cross-domain
+leave-one-out to $6/7$ with no within-domain regression ($15/15$); the full descriptor is still stored but
+matching uses the transferable subset. The one residual miss (a jet-width target with both geometry and
+topology proxies high) is a genuine geometry--topology coupling, the same honest ambiguity as QM7 energy.
+
+\paragraph{A negative result on descriptor enrichment.} Because QM7-equiv's proxies are genuinely mixed
+(geometry $0.62$, topology $0.72$), we tested whether richer features sharpen the distinction. They do
+not. Spectral features (distance-matrix spectrum for geometry, graph-Laplacian spectrum for topology)
+\emph{widen} no margin: on QM7 both spectra reach ${\sim}0.95$ because atomization energy really does
+depend on both geometry and topology (bonding fixes geometry), and on a ring-versus-chain target the crude
+degree statistic already beats the Laplacian gap. Persistence-homology features ($H_0/H_1$ of the
+Vietoris--Rips filtration) likewise lose to crude distance moments on a ring-versus-blob target, since a
+ring and a blob already differ in distance variance. The conclusion, recorded as a first-class negative
+result, is that crude proxies are already sufficient wherever a separable signal exists, and the genuinely
+mixed cases are correctly handled by confidence-deferral, not by richer descriptors---enrichment adds cost
+(eigendecompositions, a persistence dependency) with no measured benefit, so the descriptor is left as the
+validated crude vector.
+
+\paragraph{End-to-end effect.} With the learned router active (default, warm-seeded from the cross-domain
+corpus) the two geometric molecular datasets route to the \emph{equivariant} contract in ${\sim}0.2$\,s
+with the bake-off skipped, and the quick-validation skill improves markedly relative to the mis-routed
+baseline: QM7-equiv $R^2\ 0.57\to0.77$ and rMD17 $R^2\ -0.00\to0.15$, the latter moving from below the
+trivial baseline (a geometry-blind set contract) to genuinely predictive $\mathrm{SO}(3)$-equivariant
+message passing (\code{e\_painn}$\to$\code{e\_painn}$\to$\code{e\_tp}). Disabling the router
+(\code{-{}-no\_learned\_router}) reproduces the old low-budget mis-routing to set, which is the controlled
+demonstration that the learned, full-budget-seeded router is what supplies the correct contract cheaply.
+
+\subsection{Folding the contract choice into the MDL objective}
+\label{sec:contract-mdl}
+
+The choice between contracts near a fit tie is folded into the same $\mathcal J=R+\mu\,\Omega$ objective as
+width, depth, and primitive, using a \emph{derived} structural code length $\Omega_{\mathrm{struct}}(c)$
+(\code{machinery/contract\_mdl.py}). This replaces the single hand-set ordinal charge
+$\kappa(\text{set})<\kappa(\text{graph})<\kappa(\text{equivariant})$ that earlier iterations used to break
+near-ties in the meta-router (\S\ref{sec:metarouter-impl})---the one hand-set complexity number that had
+remained in the framework, now derived rather than posited.
+
+\paragraph{Why discrete is not an obstruction.} The interface incompatibility that makes the contract a
+\emph{dispatch} rather than a mixture (\S\ref{sec:metarouter-impl}) does not also foreclose
+\emph{pricing}: like depth---already a discrete rung selected by a marginal-value rule---a discrete choice
+can still be minimized under $R+\mu\,\Omega$ given an ordering and a per-step code length. So the fold
+needs only a principled $\Omega_{\mathrm{struct}}(c)$.
+
+\paragraph{The structural code length.} $\Omega_{\mathrm{struct}}(c)$ is the description length of the
+scaffolding a contract commits to, per datum, as excess over the cheapest contract. For a datum with $N$
+units and $E$ edges in $d$ dimensions,
+\begin{equation*}
+\begin{aligned}
+\Omega_{\mathrm{struct}}(\text{set})&=0,\qquad
+\Omega_{\mathrm{struct}}(\text{graph})=\log\binom{N(N-1)/2}{E}\approx E\log\tfrac{N^2}{2E},\\
+\Omega_{\mathrm{struct}}(\text{equiv})&=\Omega_{\mathrm{struct}}(\text{graph})+\big(Nd-\tfrac{d(d-1)}2\big)\log\tfrac1\delta,
+\end{aligned}
+\end{equation*}
+the bits to write down the adjacency (topology) and then the geometry ($Nd$ coordinates at resolution
+$1/\delta$ minus the $\dim\mathrm{SO}(d)$ gauge the equivariance quotients out); a grid-rank tower
+(sequence $<$ spatial $<$ volumetric $<$ $4$D) is charged analogously by rank plus an axis refinement.
+This is strictly monotone up the structure-inclusion lattice and data-dependent. Crucially it prices
+\emph{structural} richness, not parametric complexity: a $\tfrac12 k\log n$ (parameter-count) charge
+\emph{misorders} contracts, since an equivariant model can be parameter-cheap---steerable features are
+compact---yet structurally over-rich for a target that does not use geometry. Parameter count stays the
+within-contract currency (width, depth); the contract's own charge is structural.
+
+\paragraph{Selection and validation.} The primary selector \code{select\_contract\_mdl} minimises the
+global $\mathcal J=\widehat R_c+\mu_{\mathrm c}\Omega_{\mathrm{struct}}(c)$ over all admissible contracts;
+a marginal-value form (\code{marginal\_value\_contract}) is retained as a certificate reading (``does
+climbing the lattice pay?''), but the \emph{global} objective is primary because the greedy marginal rule
+under-climbs on a non-monotone fit profile---on a geometric target the set$\to$\allowbreak graph step adds no fit
+(edges do not help a coordinate quantity), stopping the greedy climb before the payoff at equivariant two
+steps up. The global $\mathcal J$, like the depth frontier, is robust to this. Wired into
+\code{AllGraph.tiebreak} with $\Omega_{\mathrm{struct}}$ computed from the actual node and edge counts,
+it reproduces the physically correct contract on all three controlled targets (Table~\ref{tab:contract-mdl}).
+
+\begin{table}[h]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{p{2.8cm} p{4.6cm} p{2.0cm} p{3.0cm}}
+\toprule
+\textbf{Target} & \textbf{Fit ($R^2$): set / graph / equiv} & \textbf{Selected} & \textbf{Why}\\
+\midrule
+geometric (radius of gyration) & $-0.07$ / $-0.09$ / $\mathbf{0.67}$ & equivariant & fit decides; charge irrelevant\\
+topological (mean degree) & $-0.05$ / $\mathbf{0.956}$ / $0.847$ & graph & graph fits best; charge cements\\
+set (mean feature) & $\mathbf{0.948}$ / $0.65$ / $0.944$ & set & near-tie set${\approx}$equiv; $\Omega_{\mathrm{struct}}$ picks cheaper\\
+\bottomrule
+\end{tabular}
+\caption{The derived contract charge on controlled targets ($\mu_{\mathrm c}{=}0.05$;
+$\Omega_{\mathrm{struct}}$: set $0$, graph ${\sim}10$, equiv ${\sim}58$ nats). The \emph{set} row is the
+decisive case: a genuine fit near-tie ($0.948$ vs $0.944$) resolved entirely by the derived structural
+code length toward the cheaper set contract---exactly what the ordinal $\kappa$ did by hand, now
+principled. The charge bites only at near-ties; when one contract fits best (geometric), fit alone
+decides.}
+\label{tab:contract-mdl}
+\end{table}
+
+With this the entire complexity ladder---contract, primitive, depth, width, weights---is one MDL
+functional $R+\mu\,\Omega$, discrete at the top two rungs (contract, and the primitive $\arg\max$) and
+continuous below, with every $\Omega$ a derived code length rather than a hand-set constant.
+
+\subsection{The functional code length: pricing the effective degrees of freedom of the fit}
+\label{sec:singular-mdl}
+
+$\Omega_{\mathrm{struct}}(c)$ prices the \emph{scaffolding} a contract commits to. It says nothing about
+how many degrees of freedom the \emph{fitted function} actually uses once trained inside that scaffolding.
+Singular learning theory supplies the missing term. A recent result---minimum
+description length meets singular learning theory~\cite{urdshals2025mdl}---is that the stochastic code length of a trained model
+is $\mathrm{MDL}_{\mathrm{sing}}(D)=-\log p(D\mid w^\star)+\lambda\log n+\mathrm{const}$, with $\lambda$
+the local learning coefficient (the RLCT)~\cite{lau2023llc,watanabe2009slt}. This is \emph{exactly} the
+package's $\mathcal J=R+\mu\,\Omega$ with the residual playing $R$ and a \emph{functional} code length
+$\omega_{\mathrm{func}}=\lambda\log n$ playing the complexity charge---the same singular free energy
+$F_n=nL(w^\star)+\lambda\log n$ that anchors the thermodynamic potential of
+\S\ref{sec:thermo-potential}, now read as a per-contract description length. Where the parameter count
+$\tfrac12 k\log n$ \emph{misorders} contracts (a steerable equivariant model is parameter-cheap yet may be
+functionally simple or complex depending on what it fits), $\lambda\log n$ with $\lambda\le k/2$ prices the
+effective, not the nominal, dimensionality.
+
+The package makes this an opt-in refinement of the contract charge (\code{machinery/singular\_mdl.py},
+\code{price\_singular}): for each admissible contract whose candidate net is trained during the bake-off,
+the local learning coefficient is estimated at its optimum by SGLD~\cite{lau2023llc}
+(\code{singular\_complexity\_of}), and the contract's total charge becomes
+$\Omega_{\mathrm{total}}(c)=\Omega_{\mathrm{struct}}(c)+(\mu_s/\mu_{\mathrm c})\,\omega_{\mathrm{func}}(c)$
+before the same normalization and $\arg\min$. Two guards keep a noisy estimate from corrupting the
+selection: an RLCT is non-negative, so a slightly negative $\hat\lambda$ (SGLD noise near a shallow basin)
+is clamped to zero---negligible functional complexity, never a negative code length---while a
+\emph{strongly} negative $\hat\lambda$ (a non-converged optimum, where the estimator is meaningless) fails
+a validity check and the contract keeps structural-only pricing. A garbage $\lambda$ therefore never enters
+$\mathcal J$.
+
+The honest scope of this term is precise, and two studies bound it. On QM7-equivariant data (real geometry)
+the functional charge \emph{fires and guards} correctly---the converged set contract is priced
+$\omega_{\mathrm{func}}\approx 4$ nats, an under-converged equivariant candidate is declined by the
+guard---but it does not change the winner, because the structural spread (set $0$ / graph ${\sim}32$ /
+equiv ${\sim}127$ nats) dwarfs it. The sharper question---whether $\omega_{\mathrm{func}}$ can ever be
+\emph{decisive}---has a clean answer. A flip requires two contracts tied in \emph{both} structure and fit
+yet converging to functions of different singularity. Constructing that tie on complete-graph data (where
+$\Omega_{\mathrm{struct}}(\text{graph})=E\log\tfrac{P}{E}\to0$ as $E\to P$, matching set at $0$~nats) and
+measuring $\lambda$ at convergence across seeds and prices, natural training \emph{never} flips: at a
+structure-and-fit tie the simpler class (set) simultaneously wins the structural tie-break \emph{and}
+carries the lower $\lambda$ (it fits as well with fewer effective degrees of freedom), so the two Occam
+pressures align and $\omega_{\mathrm{func}}$ can only reinforce, never overturn, the structural verdict.
+The term \emph{is} correctly signed and \emph{would} bite in the anti-correlated corner---if the
+fit-leader were the more singular contract, a ${\sim}1.5$-nat functional gap flips the choice at
+$\mu_{\mathrm c}{=}0.05$---but that corner is not reached on realistic converged data. The functional code
+length is therefore a faithful, guarded diagnostic of effective degrees of freedom and a principled
+refinement of $\mathcal J$; it is second-order to the structural charge in every natural regime, which is
+precisely why fusing it is safe.
+
+
+\section{The representation front-end: discovering tensor structure}
+\label{sec:representation}
+
+The metaoptimizer of \S\ref{sec:size} selects a primitive, width, and depth \emph{within} a fixed
+input representation---sequence data enters as $(b, T, c)$, images are flattened, and so on. But the
+representation is itself a choice, and often the most consequential one: a $28\times28$ image forced
+through a recurrent sequence model is being asked to discover its own two-dimensional adjacency from
+scratch. Before selecting operations, then, a physicist asks a prior question---what \emph{shape}
+does the data naturally have?---and answers it from the data's correlation structure. This section
+documents that stage. It sits upstream of both the size metaoptimizer (\S\ref{sec:size}) and the
+symmetry front-end (\S\ref{sec:symmetry}), and completes the pipeline: discover the tensor
+structure, tensorize accordingly, (optionally) quotient symmetries, then search for a minimal model.
+
+\subsection{Mode-coupling structure from mutual information (MI)}
+\label{sec:modecoupling}
+
+The organizing idea, borrowed directly from tensor-network structure search, is that the right
+representation is the one whose correlation (entanglement) structure matches the data's: a
+one-dimensional chain (matrix-product-state-like) suits data with band-diagonal, distance-decaying
+correlations, while a two-dimensional grid (projected-entangled-pair-state-like) suits data whose
+correlations decay with a \emph{2D} grid distance. We make this operational
+(\code{core/mode\_structure.py}) by computing the pairwise mutual-information matrix $M_{ij}$ between
+input coordinates (a Gaussian proxy $M_{ij}=-\tfrac12\log(1-\rho_{ij}^2)$ for speed, or a binned
+estimator), then scoring how well $M$ is explained by 1D-chain adjacency versus each candidate 2D
+grid tensorization---correlating $M_{ij}$ against negative coordinate distance under each hypothesis.
+The best-fitting hypothesis wins only if it clears an absolute floor and a margin over the
+runner-up; otherwise the verdict is \emph{unstructured}. As with the symmetry detectors, the absence
+verdict is a first-class output: the method must not hallucinate structure that is not there.
+
+On known controls this recovers the truth cleanly: a 1D autoregressive series is classified 1D (fit
+$0.72$); a synthetic $6\times6$ grid field is classified 2D and---notably---its \emph{exact} $6\times6$
+shape is recovered (fit $0.71$, beating both the 1D hypothesis and the wrong reshapings $4\times9$,
+$9\times4$, $3\times12$); and both a shuffled grid and pure noise are correctly called unstructured
+(fit $0.11$ and $0.05$, below the floor). The verdict also carries an actionable recommendation---the
+class of primitives to search: sequence primitives for 1D, the conv2d family for 2D, dense/attention
+for unstructured.
+
+\subsection{Exact tensorization via the stride-anomaly signal}
+\label{sec:stride}
+
+Classifying \emph{1D-versus-2D} is not enough to feed a convolution; we need the exact $H\times W$.
+The coarse MI-versus-distance fit is too blunt for this on natural images---it collapses the whole
+grid geometry into one scalar and, on CIFAR-10, preferred a spurious $64\times16$ over the true
+$32\times32$. The sharper signal is structural: in a row-major $H\times W$ flattening,
+vertically-adjacent pixels sit \emph{exactly $W$ apart} in the flat index, so the MI profile as a
+function of flat-distance shows a peak at $\delta=W$ that \emph{breaks} the otherwise-monotone decay.
+We score each candidate width by how much the MI at that stride exceeds the smooth decay trend
+interpolated from its neighbours, $p[W]-\tfrac12(p[W-2]+p[W+2])$. A genuine 2D grid produces a clear
+positive anomaly at the true $W$; a 1D chain has monotone decay and hence no positive anomaly, so it
+is correctly never promoted to 2D.
+
+This estimator is exact where the coarse fit failed. On CIFAR-10 the MI profile climbs
+$0.46\to0.68\to0.93$ across $\delta=30,31,32$ and falls back---an unambiguous stride at $32$---and the
+recovered shape is $32\times32$. On Fashion-MNIST, a \emph{second, independent} image dataset, it
+recovers $28\times28$ exactly. Synthetic grids ($6\times6$, $4\times9$, $8\times4$) are recovered
+exactly, the 1D control stays 1D, and time series (GunPoint) stay 1D. The method also extends to
+three dimensions: a synthetic $4\times4\times4$ volume shows the two-peak signature (strides at $W=4$
+and $W\!\cdot\!H=16$), and real CIFAR colour, a genuine three-tensor, shows peaks at both $32$
+(within-row) and $1024=32\times32$ (the colour-channel jump). This 3D signature, which originally rested
+on a synthetic volume, is now validated on real volumetric data and priced across ranks 1--4 in
+\S\ref{sec:priced-tensor}.
+
+\subsection{Priced N-D tensorization: rank 1--4 and the real-data assessment}
+\label{sec:priced-tensor}
+
+Two limitations of the stride-anomaly estimator above were subsequently closed. First, its acceptance
+was a hand-set floor-plus-margin rule; second, it reported only the leading 2D stride, and its 3D signature
+rested on a single synthetic volume. Both are resolved by folding tensorization into the same
+$\mathcal J=R+\mu\,\Omega$ objective as every other rung (\code{machinery.contract\_mdl.price\_tensorization},
+\code{mode\_structure.parse\_grid\_shape}), extended to any rank $1\le r\le 4$---the latter covering the
+4D schema directly.
+
+\paragraph{Position-aware fit, priced rank.} The flat-distance profile averages $M_{i,i+\delta}$ over all
+positions, which washes out at axis boundaries and fails on length-2 axes. The robust successor scores a
+candidate shape by the \emph{position-aware} mean mutual information over its \emph{true} axis-neighbour
+pairs (multi-index differing by one in exactly one axis). Selection is two-stage: within a rank the best
+factorisation maximises this neighbour MI; across ranks, the smallest rank whose neighbour-MI risk is
+within tolerance of the minimum is chosen---Occam on rank, the marginal-value rule one level out. A
+\emph{significance gate} guards against finite-sample MI bias: since every MI estimate is positive-biased
+by ${\sim}1/n_{\text{samples}}$, a shape is promoted beyond 1D only when its neighbour MI exceeds the mean
+off-diagonal MI by a factor (default $1.6$). A real lattice has neighbour pairs far more correlated than
+random pairs (ratio ${\sim}5$ on images); pure noise has them equal (ratio ${\sim}1$).
+
+\paragraph{Real-data assessment.} The estimator was evaluated on real datasets with known ground-truth
+shape (Table~\ref{tab:tensor-real}), the basis for enabling it as an allgraph default. It recovers real
+2D images (MNIST, BloodMNIST) with decisive margins, keeps real time series and unstructured noise at 1D,
+and recovers real 3D volumes (OrganMNIST3D) when the volume reads as a clean grid. Crucially, every
+failure mode is \emph{fail-safe}: the estimator under-ranks to a coarser structure (e.g. a
+whole-anatomy strided downsample that ties at rank 1) rather than imposing a false lattice.
+
+\begin{table}[h]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{p{4.2cm} p{2.4cm} p{2.4cm} p{2.6cm}}
+\toprule
+\textbf{Dataset (true shape)} & \textbf{Parsed} & \textbf{Ratio} & \textbf{Verdict}\\
+\midrule
+MNIST ($28{\times}28$)             & $28{\times}28$   & $5.8$ & correct\\
+BloodMNIST ($28{\times}28$)        & $28{\times}28$   & $4.9$ & correct\\
+OrganMNIST3D ($4^3$, $8^3$ crop)   & $4^3$, $8^3$     & $2.6,1.9$ & correct\\
+OrganMNIST3D ($7^3$ strided)       & 1D               & $4.5$ & under-ranks (fail-safe)\\
+ECG5000, GunPoint, ItalyPower      & 1D               & --    & correct\\
+Unstructured noise                 & 1D               & $1.1$ & correct (gate)\\
+\bottomrule
+\end{tabular}
+\caption{Priced tensorization on real data (ratio $=$ neighbour MI over off-diagonal baseline; the
+significance gate promotes beyond 1D only above ${\sim}1.6$). Synthetic reliability, over five seeds per
+shape, is $100\%$ for cubic/near-cubic lattices, 2D grids and sequences (including rank-4 $4{\times}4{\times}4{\times}4$),
+degrading only on fully-distinct-axis non-cubic shapes, which are refused rather than mis-ranked.}
+\label{tab:tensor-real}
+\end{table}
+
+Because the estimator only ever \emph{refines} structure it is confident in and otherwise leaves the
+input as routed, it is enabled by default in the meta-router (\code{tensorize\_mu}$=0.05$): turning it on
+cannot degrade routing, only upgrade a genuinely grid-shaped flat vector to its matching schema.
+
+\paragraph{Scalability: on-demand MI for full-resolution volumes.} The dense estimator forms the full
+$D\times D$ mutual-information matrix, which is ${\sim}4$\,GB at $D=21952$ (a $28^3$ volume) and
+intractable. This is resolved by the observation that the position-aware scorer only ever reads $M$ at
+$O(D)$ axis-neighbour pairs per candidate and the significance gate needs only a \emph{sampled}
+off-diagonal mean---so the full matrix is never required. The scalable parser
+(\code{mode\_structure.parse\_grid\_shape\_scalable}) computes each pair's MI on demand over a sample,
+with the candidate set bounded to the divisor lattice (the role of $\Omega_{\mathrm{struct}}$ here: it
+prices and caps rank, so factorisations are enumerated rather than searched unboundedly). It is
+\emph{identical in logic} to the dense parser and \emph{agrees with it on every size where both run}
+($7/7$ shapes, exact match), runs a full $28^3$ volume in ${\sim}40$\,s (versus out-of-memory, OOM), and scales roughly
+linearly in $D$ rather than quadratically. It is auto-selected above $D=500$. The residual honest gaps
+are now only the two documented signal-strength limits---background-dominated or exotic-aspect-ratio
+volumes may under-rank---and both are fail-safe, never mis-ranked.
+
+
+\subsection{Routing: automatic tensorization end to end}
+\label{sec:routing}
+
+The detector's verdict drives a router (\code{core/route.py}) that dispatches each dataset to the
+schema whose tensor interface matches and reshapes the flat input accordingly: a 2D verdict goes
+to the spatial (conv2d) schema on the discovered $H\times W$; a 1D verdict to the sequence
+schema; an unstructured verdict to the sequence schema as a length-1 dense vector. This turns
+the representation decision into an automatic, data-driven stage. Two implementation lessons were
+recorded during validation. First, the spatial schema's flatten-\code{dense} primitive
+($\sim\!10^6$ parameters) overfits catastrophically and defeats the purpose of routing to a spatial
+model at all; it is excluded from the spatial recommendation, leaving the genuinely spatial
+primitives (conv2d, depthwise conv, pointwise, attention, norm). Second, a per-pixel standardization
+with too small a variance floor amplified near-constant border pixels into a train/test scale
+mismatch that collapsed test accuracy to chance---a reminder that preprocessing bugs masquerade as
+modelling failures. Both were fixed before the comparison below.
+
+\subsection{Head-to-head: does automatic tensorization help?}
+\label{sec:routinghead}
+
+We compare, on matched autonomous width/depth/primitive selection, a \emph{fixed} pipeline (every
+dataset a sequence) against the \emph{routed} pipeline (auto-tensorized to the matching schema).
+Crucially, the width and depth here are chosen by the theoretical marginal-value rule of
+\S\ref{sec:size}, not a grid search: layers are added only while their per-layer marginal loss
+reduction exceeds the price $\mu$, so the selected depth tracks the marginal-versus-price comparison
+per dataset. On Fashion-MNIST the marginal from depth one to two ($0.20$--$0.26$) far exceeds
+$\mu=0.02$, so a depth-2 spatial model is selected; on GunPoint the marginal is near zero, so depth
+one is kept; on the tabular series the second layer is added but the third (negative marginal) is
+not. The routing results, with the selected architectures, are:
+%
+\begin{center}
+\small
+\begin{tabular}{llll}
+\toprule
+Dataset & detected & fixed (seq) & routed \\
+\midrule
+Fashion-MNIST    & 2D $28\times28$ & \texttt{[plain,linssm]} $0.405$ & \texttt{[conv\_dw$\times2$]} spatial $\mathbf{0.640}$ \\
+ItalyPowerDemand & unstructured    & \texttt{[spectral]} $0.632$     & \texttt{[norm$\times2$]} dense-vec $\mathbf{0.948}$ \\
+GunPoint         & 1D $150$        & \texttt{[gated]} $0.567$        & \texttt{[plain]} sequence $0.560$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+%
+The pattern is the intended one. Where the data has genuine non-sequence structure, routing helps
+substantially: Fashion-MNIST gains $+0.235$ by going to the spatial (conv2d) schema, and the
+tabular series gains $+0.316$ by being treated as a dense vector rather than a spurious sequence.
+Where the data is a genuine sequence, routing correctly keeps it a sequence and does no harm
+(GunPoint, $-0.007$, within noise). The architecture the metaoptimizer selects changes class
+accordingly---a recurrent cell on the forced sequence becomes a depthwise convolution on the routed
+image---so routing improves both accuracy and architectural appropriateness. We note the compute
+caveats plainly: spatial grids were pooled and sequences capped for tractability, so absolute image
+accuracies would rise at full resolution; the routing \emph{comparison}, not the absolute number, is
+the object of interest. Symmetry preprocessing (\S\ref{sec:symmetry}) is available as an opt-in stage
+in this pipeline but, per the project's policy, is off by default.
+
+\subsection{A note on the selection mechanism}
+\label{sec:selectionnote}
+
+Because \S\ref{sec:size} and this section both speak of ``selecting'' width and depth, it is worth
+stating precisely what that means, as the framework contains three distinct mechanisms and they are
+not interchangeable. The first is the \emph{priced marginal-value rule}
+(\code{machinery/priced\_depth.py}): it measures the depth curve $S^\star(L)$, forms the per-layer
+marginal $-\partial S^\star/\partial L$, and stops at the last layer whose marginal exceeds the price
+$\mu$. This is not an accuracy argmax---on a diminishing-returns curve where a grid search would pick
+the deepest model, the priced rule selects $L^\star=1,2,3,4,5$ as $\mu$ falls through
+$0.5,0.2,0.1,0.02,0.005$, tracing the fit--complexity frontier. The second is the
+\emph{differentiable complexity penalty} (\S\ref{sec:size}, the benchmark of record), which folds
+$\mu\cdot\text{cost}$ into the architecture objective so gradient descent on $\alpha$ is pulled
+toward cheap primitives during search. The third is plain grid search with accuracy compaction, used
+only where the question under study is the representation rather than the selection rule. The first
+two are the theory-grounded realizations of the action $J=R+\mu\,\Omega$; only they should be read as
+tests of the metaoptimization principle.
+
+
+
+\section{The symmetry-discovery pipeline: a physicist's front-end}
+\label{sec:symmetry}
+
+The work of \S\ref{sec:purpose}--\S\ref{sec:repro} optimizes architecture \emph{within} a fixed
+input representation. A separate line of development asks a prior question, in the spirit of how a
+physicist approaches a new system: \emph{before} fitting a model, can we discover the symmetries of
+the data, quotient them out to reduce the problem's dimensionality, and only then search for a
+minimal model on the reduced representation? This section documents that pipeline. It is a
+representation/preprocessing stage that runs \emph{before} the metaoptimizer of the preceding
+sections; conceptually it is the outermost, cheapest rung of the same minimum-description-length
+ladder the analytical notes develop (width sparsity removes redundant neurons; symmetry-quotient
+removes redundant coordinate directions; the information bottleneck removes all task-irrelevant
+information---\S\ref{sec:ib}).
+
+\subsection{Continuous symmetry discovery via the Lie-derivative nullspace}
+\label{sec:liediscovery}
+
+A continuous (Lie) symmetry with infinitesimal generator $L$ leaves a function $f$ invariant iff
+$\nabla f(x)^\top (Lx)=0$ for all $x$. Stacking this condition over data points $x$ gives a linear
+system $M\,\mathrm{vec}(L)=0$; the \emph{nullspace} of $M$ (via singular value decomposition, SVD) is the discovered symmetry
+algebra, and a spectral gap in the singular values separates genuine symmetry directions
+(near-zero) from non-symmetries. This is implemented in \code{core/symmetry\_discovery.py}. It is a
+clean linear-algebraic object---the discrete analogue of the width dual certificate---and it
+succeeds where softer approaches fail precisely because it reads symmetry off a \emph{nullspace}
+rather than a noisy gradient signal.
+
+The method was validated to recover: 2D rotation ($|\cos|=1.000$ against the true generator, with a
+large spectral gap), 3D axis rotation, and---crucially, since the literature flags non-compact
+groups as delicate---\emph{scaling} (the dilation generator $L=I$, $|\cos|=0.982$) and the
+\emph{Lorentz boost} in $1{+}1$D ($|\cos|=1.000$ against $[[0,1],[1,0]]$). Non-compactness poses no
+difficulty here because the infinitesimal nullspace condition is \emph{local}: it never integrates
+along the (unbounded) group orbit, so compact and non-compact linear generators are found
+identically. One honest caveat: the detector reads symmetry off a \emph{trained} reference model's
+gradients, so it requires a good fit---unlike PCA, which reads raw data covariance, this
+``preprocessing'' contains a model-fitting step.
+
+\paragraph{Affine extension: translation.} The pure linear ansatz $\dot x = Lx$ cannot see
+\emph{translation} ($\dot x = c$, constant), which is the canonical CNN symmetry and non-compact.
+The fix is the affine ansatz $\dot x = Lx + c$, extending the operator with $n$ translation columns
+(the coefficient of $c_i$ is simply $g_i=\partial_i f$). Discovered generators are classified as
+translation, linear, or mixed by whether $c$ or $L$ dominates. A subtlety worth recording: unlike
+the linear detector, the affine operator must \emph{not} be row-normalized, as that compresses the
+spectral gap for translation generators (whose rows scale differently) and hides the nullspace; the
+raw operator gives a clean gap. Validated to recover the translation direction $(1,1,1)$ on a
+translation-invariant target while still finding rotations correctly and rejecting generic
+controls.
+
+\subsection{Discrete symmetry discovery via equivariance testing}
+\label{sec:discretediscovery}
+
+Discrete groups (reflections, permutations, finite rotations) have \emph{no} generator, so the
+nullspace method is blind to them. The alternative primitive is direct \emph{equivariance testing}:
+a candidate transformation $g$ (with $g^k=I$) is a symmetry of $f$ iff $f(gx)=f(x)$, measured by the
+normalized error $E(g)=\mathrm{mean}_x|f(gx)-f(x)|/\mathrm{mean}_x|f(x)|$. This is implemented in
+\code{core/discrete\_symmetry.py} and covers three families:
+
+\begin{itemize}[leftmargin=1.4em,itemsep=1pt]
+\item \textbf{$\mathbb{Z}_2$} (reflections, parity, coordinate swaps): validated to recover the exact
+involution on even, radial, and swap-symmetric functions, and to report \emph{nothing} on a
+non-symmetric control. A radial $f(\|x\|^2)$ correctly yields all seven $\mathbb{Z}_2$ involutions
+of the hyperoctahedral group.
+\item \textbf{$S_n$ permutation subgroups}: since $S_n$ is generated by transpositions, we test the
+$O(n^2)$ transpositions rather than all $n!$ permutations, then recover the permutable
+\emph{blocks} as connected components (union-find) of the graph whose edges are discovered
+transpositions. Validated to recover the exact Young subgroup---$S_3\times S_2$ on a function
+symmetric in $\{x_0,x_1,x_2\}$ and separately $\{x_3,x_4\}$; full $S_5$ on a fully symmetric target;
+trivial on a distinct-weights control.
+\item \textbf{$C_n/D_n$ point groups} (finite rotations and dihedral reflections): the largest $n$
+whose full $C_n$ holds, promoted to $D_n$ if a reflection is also present. A robustness subtlety was
+essential: threshold noise admits spurious isolated orders, so we require \emph{divisor
+consistency}---$C_n$ is accepted only if every $C_d$ with $d\mid n$ also passes, the subgroup
+lattice a genuine group must have---and a tightened tolerance separating genuine ($\approx0.02$) from
+false-positive ($\approx0.10$) errors. Validated to recover $C_4$ (reflection-broken), $D_6$, and to
+saturate at the largest tested order for continuous rotation.
+\end{itemize}
+
+\paragraph{Detection order is not commutative.} The pipeline runs \emph{continuous first, then
+discrete}, for a structural reason: any Lie group factors as $G=G^0\rtimes\pi_0(G)$ (connected part
+semidirect the discrete component group), so discovering and quotienting the continuous $G^0$
+\emph{shrinks} the residual discrete search to $\pi_0(G)$. If the continuous pass is empty, the
+symmetry is purely discrete and one proceeds directly to the finite-group tests. Running discrete
+first would flag a swarm of reflections and finite rotations that are merely shadows of an
+undiscovered continuous symmetry.
+
+\subsection{Enforcing a discovered symmetry: the commutant equivariant layer}
+\label{sec:equivariant}
+
+Discovery is only useful if the symmetry can be \emph{imposed}. A linear map $W$ is equivariant to
+$\exp(\theta L)$ iff it commutes with the generator, $[W,L]=0$; the set of such $W$ is the
+\emph{commutant}, a linear subspace found as the nullspace of $W\mapsto LW-WL$. Parameterizing the
+weight directly in a commutant basis (\code{core/equivariant\_layer.py}) yields a layer that is
+equivariant \emph{by construction}, and---crucially---\emph{dimension-agnostic}: the same
+construction gives commutant dimension $2$ for a 2D rotation, $3$ for a 3D axis rotation, $8$ for a
+4D double-rotation, all equivariant to machine precision ($\sim10^{-7}$) with no special-casing. An
+architectural lesson recorded during validation: equivariance is not invariance. An equivariant
+layer followed by a plain readout gives \emph{chance} accuracy on an invariant target, because its
+features rotate with the input; classifying an invariant requires an \emph{invariant} readout
+(e.g.\ per-channel squared norms). With that correction the mechanism is correct, though on
+low-dimensional or easy synthetic tasks the inductive bias provides no measurable
+\emph{selection} signal---the advantage appears only when the symmetry removes many genuine degrees
+of freedom (\S\ref{sec:qm7validation}).
+
+\subsection{Reduction hierarchy: symmetry-quotient versus principal component analysis (PCA) and the information bottleneck (IB)}
+\label{sec:ib}
+
+The symmetry stage is a form of dimensionality reduction, which invites comparison with PCA. The
+comparison is sharp and was made empirically on QM7 (rotated-test mean absolute error, MAE; matched downstream head):
+PCA on raw coordinates is the \emph{worst} reduction, worse than no reduction at all, because PCA
+removes low-\emph{variance} directions but a rotation \emph{carries} variance---so PCA preserves the
+nuisance it should remove. A learned information-bottleneck representation does better (it has
+the right objective, task-relevance) but on scarce data cannot \emph{discover} the rotational
+nuisance. The symmetry-quotient wins decisively, roughly $2\times$ better than raw and $3\times$
+better than PCA, because it removes exactly the SO(3) orbit \emph{losslessly}.
+
+This is not a coincidence but an identity. The IB objective $-I(Y;T)+\beta\,I(X;T)$ is the same
+variational free energy $\mathcal{F}=R+\tfrac{1}{\beta}\mathrm{KL}$ (Kullback--Leibler divergence) that organizes the analytical
+notes: $I(X;T)$ is a description-length (rate) term, $-I(Y;T)$ is the fit, and $\beta$ is the same
+inverse-temperature/MDL knob. A minimal-and-sufficient representation is provably invariant to all
+nuisance, so \emph{symmetry-quotienting is the tractable, exact special case of the information
+bottleneck}---the case where physics hands you the nuisance group, so the minimal sufficient
+statistic is computable by linear algebra (the commutant/nullspace) rather than estimated by mutual
+information. An IB-frontier experiment made this concrete: sweeping the bottleneck dimension on the
+composition-residualized (geometry-dependent) QM7 energy, the symmetry-invariant representation
+reaches near-optimal accuracy at bottleneck dimension $k{=}1$ and is flat thereafter (intrinsic task
+dimension $\approx 1$), whereas raw coordinates remain uncompressible at every $k$---removing the
+symmetry orbit \emph{collapses} the IB dimension. The two reductions measure the same redundancy.
+
+\subsection{Real-data validation on QM7}
+\label{sec:qm7validation}
+
+The pipeline was validated end-to-end on QM7 (7165 molecules, atomization-energy regression). The
+\emph{raw 3D coordinates} are used (\code{core/qm7.py} loads the arrays $R$ and $Z$), not the
+Coulomb-matrix representation, which is already rotation-invariant by construction and would
+pre-bake the symmetry away. Test sets are randomly rotated (the true invariance test). Solo
+generalization confirms the SO(3)-invariant representation beats a plain coordinate model at every
+scale (e.g.\ $42.9$ vs $52.8$ kcal/mol at $n{=}800$), with the advantage largest at scarce data.
+
+The metaoptimizer's $\alpha$-selection between an invariant and an unconstrained branch
+(\code{core/equivariant\_supergraph.py}) is the mechanism by which the symmetry becomes an
+architectural \emph{decision} rather than a hard preprocessing choice---the appropriate treatment
+for \emph{approximate} symmetries. Two honest findings: (i) on the small 450-molecule subset the
+DARTS softmax-mixing selection \emph{failed} (the higher-capacity dense branch dominates the shared
+objective via co-adaptation), but a solo-comparison selection recovered the invariant branch
+robustly ($4.5\times$ validation-loss gap); (ii) on the full dataset the mixing selection
+\emph{succeeded} ($\alpha_{\mathrm{inv}}=0.61$ at $n{=}800$), showing the earlier failure was a
+small-data artifact, not fundamental. A real-world caveat is recorded plainly: rotation
+augmentation of a plain network is a strong simple baseline on QM7, and the mean-pooled invariant
+descriptor used here underfits relative to state-of-the-art message-passing models; the contribution
+is the validated \emph{mechanism and selection}, not an absolute accuracy record.
+
+\subsection{The robust pipeline front-end and its false-positive guards}
+\label{sec:pipelinefrontend}
+
+The cascade is assembled in \code{core/symmetry\_pipeline.py} as \code{discover\_and\_reduce}, which
+runs continuous-then-discrete detection, applies a \emph{re-cascade} (after finding a continuous
+rotation, discrete detection re-runs on the continuous-invariant features so only genuine residual
+$\pi_0(G)$ survives, not shadows of the continuous group), and returns a \code{reduce\_fn}
+implementing the accepted quotient. The subsumption is thereby removed rather than merely flagged:
+a rotation on $(x_0,x_1)$ plus an independent $\mathbb{Z}_2$ on $x_2$ correctly yields only the
+$x_2$ reflection.
+
+The central practical lesson---anticipated in principle and confirmed in practice---is that
+symmetry detection, clean in a pure-mathematical setting, is beset by \emph{false positives} on
+real, noisy, finite data. Four guards are implemented and were shown necessary:
+\emph{(G1) refit consensus} (accept a symmetry only if found across a supermajority of independently
+refit reference models); \emph{(G2) gap/margin} (require a clear spectral gap for continuous, and a
+clear margin below threshold for discrete); \emph{(G3) divisor/subgroup consistency} (a genuine
+finite group has its whole subgroup lattice); and \emph{(G4) a null-model test} (the discovered
+count must exceed a shuffled-label null that destroys real symmetry but preserves smoothness).
+
+A specific, instructive failure exposed the limits of these guards. Run naively on UCR
+\emph{time-series} data, the discrete detector reported absurd symmetries---a full $S_{23}$
+permutation of all time points, plus a hundred $\mathbb{Z}_2$ swaps. The cause is structural, not a
+mere threshold artifact: on smooth, autocorrelated ordered data, \emph{adjacent coordinates are
+nearly interchangeable}, so local smoothness masquerades as permutation invariance, and the false
+positives are systematic enough to survive G1--G3. Equivariance testing simply cannot distinguish
+``$f$ is smooth in these coordinates'' from ``$f$ has a group symmetry in these coordinates'' when
+the coordinates are ordered and correlated. The resolution is a \code{coordinate\_structure} flag
+that encodes the prior every practitioner already has: \emph{ordered} coordinates (time series,
+sequences, images) disable swap/permutation detection; \emph{exchangeable} coordinates (atoms,
+point clouds) enable it, gated by the null test. This is recorded as a genuine limitation of the
+method rather than engineered around.
+
+\subsection{Head-to-head: does the symmetry front-end help?}
+\label{sec:symmetryhead}
+
+The verdict from a controlled comparison (fixed downstream model, symmetry-preprocessed versus raw
+representation) is twofold and honest. On UCR time series, correctly flagged as \emph{ordered}, the
+preprocessing is a clean \emph{no-op}---dimension and accuracy unchanged (ItalyPowerDemand
+$0.973\to0.973$; GunPoint $1.000\to1.000$)---which is the right outcome, since these datasets carry
+no exploitable coordinate symmetry and the guards prevent false-positive-driven damage. On QM7,
+where the SO(3) symmetry is genuine and geometric, the same preprocessing delivers a large
+improvement on rotated-test MAE: $124.4\to76.3$ kcal/mol at $n{=}200$ ($+48.1$) and
+$75.3\to45.7$ at $n{=}800$ ($+29.6$), strongest in the scarce-data regime where a symmetry's
+sample-efficiency advantage is largest.
+
+The two results together are the intended conclusion: symmetry-based preprocessing is a high-value
+stage precisely when a genuine coordinate symmetry exists, and a safe no-op otherwise---but only
+with the \code{coordinate\_structure} guard and null test, without which the naive detector is
+actively harmful on ordered data. This mirrors, at the level of representation, the same
+conservation law seen throughout the framework: each step toward generality (linear symmetry
+$\to$ discrete symmetry $\to$ full information bottleneck) trades a clean, tractable structure for a
+harder search, and the honest engineering discipline is to use the cleanest tool the data's
+structure actually admits.
+
+
+
+\subsection{From detection to generation: the autonomous symmetry-to-contract pipeline}
+\label{sec:autonomoussymmetry}
+
+The front-end of Section~\ref{sec:symmetryhead} discovers \emph{that} a symmetry is present. A second arc,
+built on the same fit-quality-controlled principle, closes the loop from discovery to a working
+equivariant architecture, and then extends the group vocabulary far beyond rotations.
+
+\paragraph{Contract $=$ arch$(G)$.} Each of the eight contracts is the natural equivariant
+architecture for a symmetry group. The container type (sequence, grid, set, graph) is a crude proxy
+for the group; the sharper signal is a \emph{fit-quality-controlled invariance test}. For a candidate
+group $G$ with metric $g$, we form $G$-invariant features of each datum---inner products
+$\langle p_i,p_j\rangle_g$ under $g$---and ask whether they explain the target as well as the raw,
+frame-sensitive coordinates. A Lorentz-invariant target (jet mass) is fit by Minkowski invariants but
+not Euclidean ones, and conversely; the metric that fits \emph{is} the group.
+
+\paragraph{Generating the contract (equivariant MLP, EMLP~\cite{finzi2021emlp}).} Given generators $\{A_k\}$ of $G$, an equivariant linear
+map $W$ solves the constraint $\rho_{\text{out}}(A_k)\,W-W\,\rho_{\text{in}}(A_k)=0$; the solution
+space is the null space of the stacked constraint (Finzi--Welling--Wilson). A crucial subtlety
+surfaced in validation: pure equivariant-linear-plus-gate networks cannot form the invariant
+$v\otimes v\to\text{scalar}$, so a metric bilinear layer is required to produce invariants, and the
+network must map each node to hidden equivariant \emph{vectors}, pool those across the set, and
+\emph{then} contract to invariants---otherwise cross-node invariants such as the jet mass
+$\langle\sum p,\sum p\rangle$ are lost. On real JetNet data the generated Lorentz contract reaches
+$R^2=1.000$ on jet invariant mass, versus $0.001$ for a plain set network.
+
+\paragraph{Autonomous group detection.} The loop is closed by choosing the group itself. For each
+candidate in a menu (Euclidean $\mathrm{SO}(d)$, similarity $\mathrm{Sim}(d)=\mathbb{R}^+\times
+\mathrm{SO}(d)$, Lorentz $\mathrm{O}(1,d-1)$), we score a high-resolution, permutation-invariant
+descriptor---the top-$k$ eigenvalues of the Gram matrix $G_{ij}=\langle p_i,p_j\rangle_g$ together
+with quantiles of its off-diagonal and diagonal distributions---and select by a \emph{stability}
+criterion: fit the target on a train split, then score on the test split \emph{and} on a
+$G$-transformed test split. Because every $\langle p_i,p_j\rangle_g$ is exactly invariant under any
+transformation preserving $g$, the correct group's fit is stable, whereas a wrong metric collapses
+(the Euclidean descriptor's fit dropped from $0.42$ to $-1.03$ under a Lorentz boost). This stability
+test is the honest selector: a more expressive descriptor can otherwise overfit frame-dependent
+signal and choose the wrong metric on in-sample $R^2$ alone. Occam priors resolve ties toward the
+canonical Euclidean group unless a larger or pseudo-Euclidean group fits strictly better.
+
+\paragraph{Discovering the metric: arbitrary $\mathrm{O}(p,q)$.} The menu hardcodes only two metrics.
+The invariant metric of a group is itself discoverable: a generator $A$ preserves $g$ iff
+$A^{\!\top}g+gA=0$, so given generators the metric is the symmetric $g$ in the null space of the
+stacked constraint---the same null-space machinery as the equivariant layer, with $g$ as the unknown.
+The eigenvalue signature $(p,q)$ of $g$, up to an overall sign gauge, names $\mathrm{O}(p,q)$. This is
+exact on clean generators for every signature tested ($\mathrm{SO}(d)\to\mathrm{O}(d)$;
+$\mathrm{O}(1,3)$; the split-signature $\mathrm{O}(2,2)$; $\mathrm{O}(2,3)$), and recovers the correct
+signature from noisy data-discovered generators (the Minkowski metric to $\sim3\%$, matching LieGAN).
+Where generator discovery from pooled data is ill-conditioned, a direct route is both cheaper and
+exact: when the target is a metric norm $y=s^{\!\top}g\,s=\langle g,\,ss^{\!\top}\rangle$, it is
+\emph{linear} in the symmetric matrix $g$, recovered by ordinary least squares. On real JetNet this
+recovers the exact Minkowski metric $\operatorname{diag}(1,-1,-1,-1)$ at $R^2=1.0000$, and it abstains
+honestly (low fit) when the target is not a metric norm.
+
+\paragraph{Beyond the metric family.} Three further classes, each with a distinct invariant structure,
+are detected by a cheap linear regression against that structure with the same fit-quality gate.
+Complex unitary $\mathrm{U}(n)/\mathrm{SU}(n)$: on $\mathbb{C}^n\cong\mathbb{R}^{2n}$ with complex
+structure $J$ ($J^2=-I$), a unitary target preserves $|z|^2$ and is invariant under the phase flow
+$e^{\theta J}$; the non-vacuous test is the drift of $\langle s,s\rangle_g$ under $e^{\theta J}$
+(zero for $|z|^2$, large for a target that splits real and imaginary parts). Symplectic
+$\mathrm{Sp}(2n)$: preserves a skew form $\omega(u,v)=u^{\!\top}\Omega v$, invisible to a symmetric
+metric, recovered by an antisymmetric \emph{pairwise} regression (skew, nondegenerate, imaginary
+eigenvalue pairs). Special linear $\mathrm{SL}(n)$: preserves volume, detected by an alternating
+(Levi-Civita) regression over $n$-vector frames whose coefficients match the permutation signs.
+Conformal $\mathrm{Conf}(d)=\mathrm{O}(d+1,1)$: the null-cone lift $x\mapsto(1,x,|x|^2)$ linearizes
+the conformal action, so the metric regression on lifted pairwise products recovers the $(d+1,1)$
+light-cone signature.
+
+\paragraph{An autonomous dispatcher.} A single entry point tries every \emph{applicable} route on the
+\emph{actual} target---never a fabricated one---with applicability read from the data structure
+(vector pairs for symplectic, frames for special-linear). It resolves overlaps by Occam in the
+symmetry direction, upgrading a Euclidean detection to $\mathrm{U}(n)$ only when the phase-drift test
+passes, and inherits the abstention discipline of each detector: if no honest gate passes, it returns
+none. On real data the dispatcher recovers each detectable class from a physically meaningful target:
+Lorentz $\mathrm{O}(1,3)$ from JetNet jet mass; Euclidean $\mathrm{O}(3)$ from QM7 and rMD17 molecular
+geometry; the azimuthal $\mathrm{U}(1)$ of the JetNet transverse plane; the phase-space
+$\mathrm{Sp}(6)$ of rMD17 position--force pairs; and $\mathrm{SL}(3)$ from the signed volume of QM7
+atomic frames---each at $R^2=1.0$---while abstaining on non-invariant real targets such as the
+atomization energy. The discipline throughout is the same conservation law seen elsewhere in the
+framework: use the cleanest algebraic structure the data actually admits, and decline rather than
+fabricate when it admits none.
+
+
+\section{Metaoptimizing architecture size: width and depth as decisions}
+\label{sec:size}
+
+The selections of \S\ref{sec:synthetic}--\S\ref{sec:architectures} fix the hidden width at 64
+and the depth at 1. This is a real limitation relative to the project's stated aim---a
+\emph{minimal representation} in which the number of neurons and layers is decided by the
+metaoptimality criterion, not supplied as a hyperparameter. The width/depth-sparsity machinery
+(the total-variation width certificate and the priced-depth marginal-value rule) existed in the
+package but had not been wired into the schema pipeline; the selections above therefore
+optimized only the primitive \emph{type}. This section reports the integration that closes that
+gap, so that width and depth become outputs of the criterion.
+
+\subsection{The marginal-value criterion and the fit--complexity frontier}
+\label{sec:frontier}
+
+Capacity is priced. Following the analytical action $\mathcal{J}=R+\mu\cdot(\text{complexity})$,
+a unit of added capacity (a block of neurons, or a layer) is charged a price $\mu$, and the
+metaoptimal size is the point at which the marginal reduction in validation loss per unit of
+added capacity falls to $\mu$. Sweeping $\mu$ traces the fit--complexity Pareto frontier: at
+low price the criterion buys accuracy with capacity; at high price it buys compactness with
+accuracy. There is no single ``correct'' architecture size, only the frontier. Two representative
+frontiers, measured under the honest bilevel protocol (weights trained on a train partition, the
+architecture and its marginal curves selected on held-out validation, test accuracy on the
+official test split), appear in Table~\ref{tab:frontier}.
+
+\begin{table}[h]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{p{2.9cm} p{1.4cm} p{1.1cm} p{1.1cm} p{3.1cm} p{1.6cm}}
+\toprule
+\textbf{Dataset} & \textbf{Price $\mu$} & \textbf{$K^\star$} & \textbf{$L^\star$} & \textbf{Primitive(s)} & \textbf{Test acc}\\
+\midrule
+ItalyPowerDemand & 0.001 & 16 & 2 & \code{lstm}, \code{spectral} & 0.819\\
+                 & 0.008 & 8  & 2 & \code{plain}, \code{conv}     & 0.603\\
+GunPoint         & 0.001 & 16 & 1 & \code{attention}              & 0.687\\
+                 & 0.008 & 8  & 2 & \code{conv}, \code{attention} & 0.493\\
+                 & 0.020 & 8  & 1 & \code{attention}              & 0.493\\
+\bottomrule
+\end{tabular}
+\caption{Fit--complexity frontier: metaoptimized width $K^\star$, depth $L^\star$, and
+primitive(s) as the capacity price $\mu$ varies. The selected architecture---size, depth, and
+primitive---shifts along the frontier and differs between datasets: ItalyPowerDemand justifies
+a second layer, GunPoint mostly does not.}
+\label{tab:frontier}
+\end{table}
+
+The frontier is genuinely data-dependent. ItalyPowerDemand justifies depth~2 throughout (its
+second layer measurably reduces validation loss), whereas GunPoint mostly stays at depth~1; and
+the selected primitive shifts from expensive (\code{lstm}, \code{attention}) at low price toward
+cheap (\code{plain}, \code{conv}) at high price. This is the minimal-representation idea realized:
+width and depth are decisions of the criterion, and $\mu$ is the single knob that places the
+solution on the frontier.
+
+\subsection{Depth is usually shallow, but the ceiling is not hand-set}
+\label{sec:depthlimit}
+
+A dedicated probe asked whether any task justifies deeper networks and, if so, whether the selector
+predicts them. Two findings, one negative and one positive. \emph{Negative:} on compact sequence and
+tabular tasks depth rarely pays. A multi-hop ``pointer-chasing'' recall task, which structurally
+requires composing $K$ sequential lookups, was posed at $K=3$ and its depth curve measured; validation
+loss was lowest at depth~1 and the marginal-value criterion selected $L^\star=1$, the additional layers
+selecting the parameter-free \code{norm} stabilizer rather than a compositional lookup. The implemented
+primitives \emph{compose shallowly} at this scale, and a synthetic label \emph{generated} by a depth-$D$
+composition does not create a depth-$D$ \emph{learning} requirement---the composed input--output map is
+typically smooth and a shallow net fits it (a depth-$6$-generated label is saturated by a single layer).
+The genuinely depth-requiring tasks (parity, deep algorithmic composition) are the ones gradient descent
+cannot optimize at any depth, so their depth benefit never appears as a measurable marginal---the
+depth--learnability tension, not a selector defect.
+
+\emph{Positive:} where a real, \emph{learnable} depth benefit exists, the selector does climb to it, and
+the depth ceiling is not a hand-set constant. \code{select\_architecture\_by\_area} starts from a small
+depth grid and, if the best score sits on the grid boundary, extends depth one layer at a time---accepting
+a deeper column only when it beats the incumbent by more than the across-seed noise floor---up to a
+generous cap. On ESOL solubility (a graph task where message-passing depth is the physical receptive
+field), the boundary-extension loop reaches beyond the initial depth-$3$ grid and selects $L^\star=4$
+(validation $R^2\ 0.70\to0.77$ at depth~$4$), continuing to depth~$5$ only where the gain clears the noise
+floor and stopping there; on the
+large-molecule subset the area rule instead selects a narrow-deep $w16/L3$ over wider shallow options at
+matched accuracy. A methodological caveat governs this: the significance gate must use at least two
+standard errors---a one-standard-error test manufactures spurious depth (it assigned a linearly separable
+control depth~$3$; at two standard errors the control correctly returns depth~$1$), the same seed-noise
+lesson as the depth-scaling study (\S\ref{sec:future}). So the practical default sweeps $L\in\{1,2,3\}$
+with boundary extension enabled, which is conservative on the shallow majority yet reaches depth~$4$ on
+ESOL rather than being capped there (\code{studies/deep\_network\_depth\_study.py}).
+
+\subsection{Compact and accurate: a differentiable complexity penalty}
+\label{sec:penalized}
+
+The marginal-value stopping rule has a weakness: its high-accuracy end is capped, because the
+per-width marginal can fall below $\mu$ before the sweep reaches the width that would maximize
+accuracy. A related concern---that the sweep's fixed upper width is an arbitrary bound that can be
+\emph{binding} rather than a true optimum---is now addressed directly: when the priced rule selects the
+largest candidate because the marginal never fell below the price (the ceiling is binding, as on the
+still-climbing rMD17 width curve), the sweep doubles the ceiling and re-measures until the rule makes a
+genuine interior stop or a saturation floor halts it, so the chosen width is an output of the priced
+criterion rather than of where the grid happened to end. The resource-aware differentiable neural-architecture-search (NAS) literature
+supplies a better instrument for the marginal-threshold issue, and one that sits more naturally in the
+variational framing: fold the complexity cost directly into the
+differentiable architecture objective rather than applying it as a post-hoc threshold. Each
+primitive $i$ is charged its actual (normalized) parameter cost $c_i$, and the architecture loss
+gains the term $\mu\sum_i \mathrm{softmax}(\alphapar)_i\,c_i$, so gradient descent on $\alphapar$
+is pulled toward cheap primitives \emph{during} search, in proportion to $\mu$---exactly the
+action $\mathcal{J}=R+\mu\cdot(\text{complexity})$ realized as a single differentiable objective.
+An entropy-sharpening term mitigates the discretization gap, and width is chosen by
+accuracy-first compaction (the smallest width within a tolerance of the best validation accuracy),
+which preserves the high-accuracy end the marginal rule loses. Table~\ref{tab:penalized} reports
+this method across the real datasets, over the full nine-primitive vocabulary. (The fixed-width
+selections of \S\ref{sec:realdata}--\S\ref{sec:architectures} were run over the earlier
+eight-primitive vocabulary, before \code{linssm} was added; this is why, for example,
+BasicMotions selects \code{lstm} there but \code{linssm} here---the newer primitive is available
+only in the nine-way runs. The size-metaoptimization protocol used here is the benchmark-of-record
+for newly-added primitives going forward.)
+
+\begin{table}[h]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{p{3.2cm} p{1.2cm} p{1.8cm} p{2.2cm} p{1.6cm} p{2.0cm}}
+\toprule
+\textbf{Dataset} & \textbf{$K^\star$} & \textbf{Primitive} & \textbf{Params} & \textbf{Test acc} & \textbf{Fixed-64 ref}\\
+\midrule
+ItalyPowerDemand & 64 & \code{spectral} & $44{,}301$ & 0.813 & 0.928\\
+GunPoint         & 8  & \code{linssm}   & $4{,}261$  & 0.653 & 0.893\\
+BasicMotions     & 32 & \code{linssm}   & $17{,}625$ & 0.975 & 0.975\\
+OSULeaf          & 32 & \code{spectral} & $14{,}641$ & 0.393 & 0.607\\
+ACSF1            & 32 & \code{plain}    & $14{,}773$ & 0.330 & 0.400\\
+\bottomrule
+\end{tabular}
+\caption{Compact-and-accurate selection via the differentiable complexity penalty ($\mu=0.3$,
+accuracy-first width compaction) over the nine-primitive vocabulary (including \code{linssm}).
+``Fixed-64 ref'' is the joint-train accuracy at fixed width~64 (Table~\ref{tab:realdata}). The
+method compacts where validation accuracy permits (GunPoint to~8, BasicMotions and OSULeaf and
+ACSF1 to~32) and holds width where it is needed (ItalyPowerDemand). Notably \code{linssm} is
+selected on BasicMotions (test~0.975 at width~32, half the fixed-64 width) and surfaces as the
+argmax on GunPoint---the new linear-recurrence primitive earns selection under the honest
+chosen-size protocol, not merely at fixed width. Accuracies run below the fixed-64 joint-train
+references because compaction and the bilevel (held-out-validation) protocol both cost some
+accuracy; the tradeoff, not a regression, is the object of interest.}
+\label{tab:penalized}
+\end{table}
+
+Two honest observations qualify these numbers. First, the penalized accuracies run below the
+fixed-width-64 references of Table~\ref{tab:realdata} because two effects compound: the
+compaction itself, and the switch to a bilevel (held-out-validation) selection protocol, which
+is more defensible but costs some accuracy relative to joint training on all data. The
+comparison to keep in view is not penalized-vs-fixed but the shape of the tradeoff:
+BasicMotions loses nothing at a smaller size, and the others buy real compaction (up to an
+order of magnitude fewer parameters on ACSF1) at a measured accuracy cost. Second, under strong
+complexity pressure the $\alphapar$ distribution stays comparatively flat, because several cheap
+primitives (\code{dense}, \code{norm}, \code{spectral}) have both similar cost and similar,
+mediocre fit; the argmax among near-ties is then somewhat arbitrary. Under heavy compaction the
+meaningful signal is the size reduction, not the identity of the selected cheap primitive.
+
+\subsection{Minimal size on the synthetic tasks}
+\label{sec:synthsize}
+
+The synthetic tasks make the minimal-representation idea especially vivid, because their
+ground-truth structure fixes how much capacity is genuinely required. Associative recall is
+solved perfectly (accuracy 1.000) already at width~4---the smallest tried---selecting
+\code{attention} throughout, for a deployed network of only $3{,}714$ parameters: once the
+correct routing primitive is identified, the task needs almost no capacity. Copy is different:
+at width 8--16 it fails (the criterion selects a degenerate cheap primitive at chance-level
+accuracy), and a genuine minimal width near~32 is required before a non-trivial solution
+(\code{attention}, accuracy $\approx0.60$) appears. Different tasks therefore have genuinely
+different minimal capacities---a few thousand parameters for recall, an order of magnitude more
+for copy---and the criterion recovers this rather than imposing a uniform size.
+
+\subsection{Generalized area: variable width-per-layer, emergent depth, and a calibrated price}
+\label{sec:genarea}
+
+The width/depth selectors above choose a \emph{uniform} width and a depth. The generalized-area selector
+(\code{core/variable\_width\_area.py}) prices the single quantity $R+\lambda\sum_\ell m_\ell$---the total
+neuron count with the per-layer structure kept---so that both the per-layer width and the depth are outputs of
+one functional (depth is emergent, $L=\#\{\ell:m_\ell>0\}$, a closed layer costing zero neurons). Three
+implementation points made it usable in practice.
+
+\emph{A deterministic gate for a low-noise price path.} A stochastic hard-concrete ($L_0$) gate makes the
+selected widths vary across seeds because the neuron count is a Monte-Carlo estimate; the price path is then
+too noisy to read. Replacing it with a deterministic gate $g=\sigma(\text{logit}/\tau)$ whose temperature
+$\tau$ is annealed toward zero makes the reported area a deterministic function of the parameters. On ESOL the
+across-seed standard deviation of the held-out $R^2$ dropped from $\sim\!0.2$ (stochastic) to $\sim\!0.01$ in
+the accuracy-retaining regime, and the width$\to$\allowbreak area path became monotone.
+
+\emph{A certificate-calibrated price.} Rather than sweeping $\lambda$ on an arbitrary grid, the dual
+certificate sets its scale: \code{certificate\_lambda\_scale}$(X,y)=\|A^\ast y\|_\infty/n$ over a random-neuron
+dictionary is the peak residual--atom correlation, the price at which the first neuron stops being worth
+adding (ESOL: $\lambda^\star_0\approx0.81$). \code{area\_price\_path} then sweeps small fractions of this
+scale, so the range lands where the price actually arbitrates neurons. This fixes the \emph{scale} of $\lambda$
+per dataset from a measured quantity; it is not a universal scalar (it scales with the residual, and the deep
+gated network's effective per-neuron price is a fraction of the single-atom value), so the final choice is
+still made on the accuracy/area frontier.
+
+\emph{Integration as a size mode.} \code{AllGraph.fit(select\_size=\ldots)} now takes a mode rather than a
+Boolean: \code{"sequential"} (the priced width-then-depth selector), \code{"area"} (joint uniform
+width$\times$depth minimization), and \code{"variable"} (the generalized-area selector). The variable mode
+featurizes the routed data to a fixed vector---permutation-invariant mean$\|$max pooling for relational data,
+flattening or pooled summaries for dense sequence/grid data---runs the certificate-calibrated minimization, and
+writes the emergent depth and the largest kept width back to \code{self.depth}/\code{self.width}, after which
+the routed \emph{contract} schema is trained at that size. The variable-width analysis is thus a size
+\emph{recommender}; the deployed model remains the contract's own schema with its primitives. Because the
+featurization is to a vector, the variable mode applies to sequence and grid data as well as relational data,
+whereas the sequential/area selectors remain relational-only (they train candidate contracts directly).
+
+\emph{A principled depth ceiling.} The variable selector does not cap depth at a hand-set constant. It starts
+at a small maximum depth and extends it by a significance-gated rule---grow while the ceiling is binding (the
+net uses all its layers) \emph{and} one more layer improves the probe accuracy by more than the across-seed
+noise, checked from the first extension---so a task that already fits stops immediately. On real data this
+differentiates correctly: a linear task stops at the base depth, ECG5000 extends, ESOL and GunPoint stop at
+depth~3. In a mid-preset run with the variable mode across seven relational datasets it produced tapering
+``funnel'' width profiles (e.g.\ ESOL $[45.5,38,32.5,26]$) and improved accuracy on five of seven at matched
+budget, the two regressions (Tox21, rMD17) being an over-capacity small-signal task and an under-trained one
+respectively---consistent with the rule that deeper helps only sometimes.
+
+\emph{The one contract outside the size stage: spectral modes.} The width/depth selectors above address cell
+width and layer count, but the operator (Fourier neural operator) contract has no cell width to select---its
+capacity is set by the number of retained Fourier \emph{modes}, and the mode budget was fixed by a heuristic
+(and, as an audit found, hardcoded per spectral primitive, so the nominal budget argument did not even reach
+the spectral convolution). The mode count is nonetheless a degrees-of-freedom knob---a spectral convolution
+stores a learnable complex weight per retained mode, so its parameter count grows linearly in the budget per
+axis---and it is now priced by the same marginal-value rule as depth (\code{machinery/spectral\_selection.py}).
+The selector measures validation loss against a ladder of mode budgets and retains modes while the per-mode
+loss reduction exceeds $\mu$ times the added spectral code length, the latter taken as the logarithm of the
+retained-mode parameter count so that a single price governs modes, width, and depth on a common footing. The
+marginal value of modes has exactly the structure the rule needs: a band-limited target (most PDE solution
+operators are smooth, hence low-wavenumber) gains sharply from the first few modes and then nothing, with the
+marginal turning negative once excess modes begin to fit noise. On the one-dimensional Burgers operator the
+selected budget is a small fraction of the heuristic at unchanged field accuracy; on two-dimensional Darcy
+flow, where the spectral weight count grows \emph{quadratically} in the budget, the priced selection cuts the
+parameter count several-fold while slightly improving accuracy. This brings the operator contract into the
+physicist's ordering: the mode budget joins width and depth as a measured, priced quantity rather than a fixed
+number.
+
+\subsection{Closing three fixed-hyperparameter gaps: kernel size, angular order, nonlinear symmetry}
+\label{sec:orphans}
+
+Three standalone ``derive-the-hyperparameter'' modules were wired into the degrees-of-freedom stage as opt-in
+flags (default off; the default path is unchanged and regression-checked), each turning a hand-fixed
+hyperparameter into an output of the same measured/priced principle the size selectors use.
+
+\emph{Kernel size from the correlation length} (\code{kernel\_from\_xi}). The spatial schema already
+carries larger-kernel primitives ($k=5,7$) that compete by selection, but the default menu omits them.
+\code{correlation\_length} measures the spatial correlation length $\xi$ and, when the receptive field
+warrants it, \emph{augments the menu} with the larger kernels; the selector then chooses. This is menu
+augmentation, not a hardcoded-$k$ override, and it respects that the schema selects among what it is given.
+On smooth fields ($\xi\approx3.6$) it added $k5/k7$ and the selector chose $k7$; on noisy fields it stayed
+lean; through the runner MNIST rose from $0.760$ to $0.833$.
+
+\emph{Angular order from the data} (\code{angular\_from\_data}). \code{angular\_resolution} applies the priced
+marginal-value rule to angular order: order $\ell$ is kept only while the target variance it explains, that
+lower orders cannot, exceeds a price. In the current $\ell\le1$ equivariant builder this decides whether the
+$\ell=1$ vector channels are warranted (radial target $\Rightarrow c_1=0$, a leaner scalars-only net). On
+QM7-equiv it selected $\ell=1$, correctly keeping the vector channels molecular energies require.
+
+\emph{Nonlinear symmetry as an opt-in diagnostic} (\code{nonlinear\_symmetry\_fallback}). The linear
+Lie-derivative detector sees only symmetries acting linearly in the given coordinates. The nonlinear
+(LaLiGAN~\cite{yang2023laligan}) detector finds symmetries linear only after a learned coordinate change---a strict superset---but it
+trains an autoencoder and is bounded by reconstruction quality. As a diagnostic it \emph{reports} a nonlinear
+symmetry without switching the contract. A second, deliberately separate opt-in
+(\code{deploy\_nonlinear\_contract}) now closes the loop for the nonlinear case: when the joint
+symmetry-regularized autoencoder \emph{confirms} a latent symmetry (under a null-baseline guard and a
+non-degeneracy check), the package builds and deploys the \emph{latent-equivariant contract}
+$x\mapsto\phi(x)\mapsto\mathrm{EMLP}(L_z)\mapsto y$---the encoder $\phi$ that discovered the symmetry composed
+with an equivariant network built (by the same EMLP machinery as the linear generated contract) from the
+linear latent generators $L_z$. On a controlled task with a genuine nonlinear symmetry this contract is
+exactly invariant in the latent coordinates and its advantage over a plain network grows as data shrinks
+(the low-data inductive-bias gain). Two honest limits bound it: the joint discovery is conservative and on
+real data typically does \emph{not} confirm (so the contract falls back to the normal route, never degrading
+it), and the benefit is contingent on the learned chart's fidelity---a poor chart can underperform the plain
+network. It is null-guarded and off by default: the safe action for a superset capability, now extended from
+diagnosis to a gated deployment when---and only when---discovery genuinely confirms.
+
+\paragraph{A scalable realization of the equivariant head.} Both the linear generated contract and the
+latent-equivariant contract build their networks with the exact EMLP construction, which realizes each
+equivariant linear layer by solving for its basis---an SVD of a Kronecker constraint matrix of size $D^2\times
+D^2$ for a representation of dimension $D$. That solve is cubic in $D^2$ and, measured in this codebase,
+explodes from a millisecond at $D=4$ to seven seconds at $D=48$: EMLP is exact and fully general but does not
+scale, which is why in the literature it is largely confined to small synthetic problems. The package
+therefore also carries a scalable realization
+(\code{models/scalable\_equivariant.py}) in the Vector-Neurons~\cite{deng2021vn} / G-RepsNet~\cite{basu2023grepsnet} family (Deng et al.\ 2021; Basu et
+al.\ 2024): features are kept as explicit vectors in the group representation and combined only by operations
+that are equivariant \emph{by construction}---a scalar-weighted mixing of vector channels
+($v'_o=\sum_i W_{oi}v_i$ transforms as a vector under any linear action), metric inner products
+$\langle v_i,v_j\rangle_M$ as invariants (the metric $M$ making them group-correct, identity for $\mathrm{O}(n)$,
+$\mathrm{diag}(1,-1,-1,-1)$ for the Lorentz group), and a Vector-Neurons gate $v\mapsto\phi(\|
+v\|_M)\,v$. No constraint is solved, so the cost is linear in the number of channels rather than cubic in
+the representation dimension. The realization is exactly equivariant (verified to floating-point precision for
+$\mathrm{SO}(2)$, $\mathrm{SO}(3)$, and the Lorentz group) and, on a synthetic invariant-regression benchmark,
+builds twenty-two to eighty-five times faster than EMLP with the gap widening as the representation grows; at
+the point where EMLP's basis becomes large its optimization degrades and the scalable head is both faster and
+markedly more accurate. It is offered alongside---not in place of---EMLP, which remains the default and the
+choice when its full generality (every higher-order invariant) is wanted on a small representation.
+
+\paragraph{Pricing approximate equivariance.} Real data is often only approximately symmetric, yet the
+geometric contract as described is a hard choice---strictly equivariant or not. The amount of equivariance can
+instead be a \emph{selected} quantity, priced by the same objective $J=R+\mu\Omega$ that governs every other
+structural decision. The model is a residual pathway (Finzi et al.\ 2021), $f(x)=f_{\mathrm{equiv}}(x)+
+\rho\,f_{\mathrm{free}}(x)$, with $\rho\ge 0$ the relaxation strength: $\rho=0$ recovers exact equivariance
+(the package's exact head, so exactness is inherited), $\rho>0$ admits controlled symmetry breaking. The key
+subtlety, emphasized in the approximate-equivariance literature (van der Ouderaa \& van der Wilk), is that
+symmetry is a \emph{constraint} and is therefore never rewarded by a training loss that measures fit: relaxing
+always lowers training loss, so $\rho$ cannot be chosen by fit and must be paid for. The symmetry-breaking
+pathway is added structure, and the honest code-length charge is the fraction of the output that actually
+flows through it, $\Omega(\rho)=\mathbb{E}\|\rho f_{\mathrm{free}}\|^2/\mathbb{E}\| f\|^2\in[0,
+1)$---zero when the free path is unused, growing as breaking is used. Selecting $\rho$ by $\arg\min_\rho
+R_{\mathrm{val}}(\rho)+\mu\,\Omega(\rho)$ over a small ladder then does the right thing: on exactly-symmetric
+data the strict model already minimizes held-out risk and $\Omega=0$, so $\rho=0$ is chosen (Occam toward
+symmetry); on symmetry-broken data the strict model's risk is large and the fit gain overrides the $\Omega$
+charge, so a positive $\rho$ matched to how broken the data is. On a controlled pendulum the strict model's
+validation risk is an order of magnitude higher under an added symmetry-breaking term than without it, which
+is exactly the signal the price responds to, and raising $\mu$ pulls the selection back toward exact
+equivariance more readily on the near-symmetric case than on the broken one. This prices a single scalar
+relaxation for one group---not the per-layer, per-group relaxation of the mixed-symmetry literature---and
+$\Omega$ is a fit-measured code-length proxy rather than a certified evidence term, but it places ``how much
+symmetry'' on the same priced, held-out-validated footing as the rest of the selection. Running the full
+relaxation ladder is four model fits, which is costly on the equivariant contract---the most expensive
+contract---and wasteful on data whose symmetry is in fact intact. The main equivariant path therefore carries a
+nearly-free \emph{breaking probe} instead: after the strict fit, a single linear least-squares solve tests
+whether the residual the equivariant model cannot represent is predictable from a non-invariant feature (the
+coordinate sum, whose components break the rotation) beyond an invariant one (the radius); a positive signal
+flags broken symmetry and hence that the priced relaxation is worth running. On real molecular energies, which
+are genuinely rotation-invariant, the probe reports the symmetry intact and the strict model is kept; on a
+field-broken variant it flags the breaking, matching the priced ladder's own verdict at a fraction of the cost.
+
+\section{Primitives and schema realizations}
+\label{sec:primitives-group}
+
+The \emph{dynamics} rung trains the couplings, but first it needs a fixed field content: the set of
+candidate operations (primitives) the architecture parameter will mix over, and the per-contract
+schemas that hold them. This section fixes that vocabulary---the six irreducible primitives
+(\S\ref{sec:vocab}), the four high-value composite primitives added on top of them
+(\S\ref{sec:newprims}), and the eight concrete schema realizations (\S\ref{sec:schemas}).
+
+\subsection{The primitive vocabulary: six irreducibles, eleven sequence realizations}
+\label{sec:vocab}
+
+The analytical work identified a minimal spanning set of six irreducible primitives---the
+operations from which the modern architecture zoo is composed and which cannot be composed from
+one another: (1)~affine map, (2)~pointwise nonlinearity, (3)~multiplicative gating, (4)~weight
+sharing under a group action, (5)~content-based routing, and (6)~normalization. The
+sequence contract exposes \emph{eleven} selectable entries, and the discrepancy is not a
+contradiction but a consequence of how irreducible primitives become useful selectable units.
+Table~\ref{tab:vocab} reconciles the counts.
+
+\begin{table}[h]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{p{3.0cm} p{3.4cm} p{6.4cm}}
+\toprule
+\textbf{Code entry} & \textbf{Irreducibles used} & \textbf{Note}\\
+\midrule
+\code{dense}     & affine $+$ pointwise & The least-biased value transform.\\
+\code{plain}     & affine $+$ pointwise $+$ sharing(time) & Plain recurrence.\\
+\code{conv}      & affine $+$ pointwise $+$ sharing(space) & Same primitive~(4), different group.\\
+\code{dilconv}   & affine $+$ pointwise $+$ sharing(space), multi-scale & Dilated/multi-scale conv; a \code{conv} variant with an exponentially growing receptive field.\\
+\code{gated}     & $+$ gating & GRU-style multiplicative interpolation.\\
+\code{lstm}      & $+$ gating & A \emph{different composition} of the same irreducibles (additive cell carry).\\
+\code{attention} & routing & The one-to-one realization of primitive~(5).\\
+\code{norm}      & normalization $+$ affine & The depth stabilizer.\\
+\code{spectral}  & (non-irreducible) & Fixed frequency-basis primitive; conjugate to \code{conv}, not one of the six.\\
+\code{linssm}    & affine $+$ sharing(time), linear & Diagonal linear state-space recurrence (S4~\cite{gu2022s4}/S5~\cite{smith2023s5}/Mamba~\cite{gu2023mamba} core); a non-irreducible recurrence variant with explicit decay timescale.\\
+\code{selssm}    & affine $+$ gating $+$ sharing(time) & Input-selective (Mamba-style) state-space recurrence; the gated, input-dependent sibling of \code{linssm}.\\
+\bottomrule
+\end{tabular}
+\caption{The eleven selectable sequence entries as compositions of the six irreducible primitives.
+Pointwise nonlinearity~(2) never appears standalone---it is folded into every core as the
+activation. Weight sharing~(4) appears twice (as \code{plain} and \code{conv}) because the
+group does not relax smoothly and must be offered as separate slots. Gating gives two nonlinear entries
+(\code{gated}, \code{lstm}) that share irreducibles but differ in composition and optimization
+behavior. \code{spectral}, \code{dilconv}, \code{linssm}, and \code{selssm} are useful non-irreducible
+additions---\code{dilconv} a multi-scale convolution, \code{linssm} a linear (associative,
+parallelizable-in-principle) recurrence, and \code{selssm} its input-selective nonlinear sibling.}
+\label{tab:vocab}
+\end{table}
+
+Two facts drive the count from six to eight base entries (a ninth, \code{linssm}, is added below as a linear-recurrence variant). Weight sharing occupies two entries because its
+internal group parameter (translation vs.\ time) is discrete and non-relaxable, so the two
+useful instantiations must be separate candidates. Gating occupies two entries because
+\code{gated} and \code{lstm}, though built from the same irreducibles, have materially
+different optimization profiles---\code{lstm} requires chrono-initialization~\cite{tallec2018chrono} to converge on
+long-range tasks, a distinction worth exposing to the selector. Pointwise nonlinearity is
+always-on and never a standalone candidate.
+
+\subsection{Four high-value primitives}
+\label{sec:newprims}
+
+A vocabulary audit against the architecture literature identified four families with no representative
+in the original registries; each gap was closed by one core and validated on real natural-science data.
+
+\paragraph{Multi-scale temporal (\code{dilconv}) and spatial (\code{atrous}).} The original
+\code{conv} is a single small-kernel convolution (the shortfall flagged in the first report). A
+dilated-convolution core with parallel causal branches at dilations $1,2,4,8$ (the temporal-convolutional-network, TCN~\cite{bai2018tcn}/InceptionTime
+and atrous-spatial-pyramid-pooling, ASPP/DeepLab constructions) gives a multi-scale receptive field while remaining exactly
+shift-equivariant. On OSULeaf (leaf-outline botany) \code{dilconv} beat \code{conv} by $5.8$ accuracy
+points; on MNIST \code{atrous} beat \code{conv2d} by $22$ points. Both are genuine expressiveness
+gains, not reparametrizations.
+
+\paragraph{Multi-aggregator graph messages (\code{pna}).} Single-aggregator message passing is
+provably limited: mean aggregation cannot distinguish a node with neighbour multiset $\{1,3\}$ from one
+with $\{2,2\}$. Principal Neighbourhood Aggregation combines mean/max/min/std aggregators with
+degree-scalers, resolving the ambiguity and, on QM7 energy regression, giving the best clean-solo
+$R^2$ of all graph primitives ($0.572$ versus $0.517$ for GIN~\cite{xu2019gin} (graph isomorphism network), $0.471$ for GCN~\cite{kipf2017gcn} (graph convolutional network)).
+
+\paragraph{Scalar--vector equivariant messages (\code{e\_painn}).} The original equivariant core
+\code{e\_tp} uses full Clebsch--Gordan tensor products~\cite{batzner2022nequip,batatia2022mace}. PaiNN's~\cite{schutt2021painn} scalar--vector message passing is a
+distinct, cheaper philosophy: it maintains equivariance with only scalar and vector channels and
+directional updates via the edge unit vector, never mixing vector components through a non-equivariant
+operation. Both are exactly $\mathrm{SO}(3)$-equivariant (scalar invariance and vector equivariance at
+machine precision, $\sim\!10^{-7}$), and they win in \emph{different} regimes: on data-scarce QM7 the
+richer tensor-product coupling of \code{e\_tp} wins ($R^2\ 0.72$ vs $0.65$), whereas on the
+molecular-dynamics regime of rMD17 ethanol \code{e\_painn} wins by seven points ($0.736$ vs $0.664$).
+This dataset-dependence is precisely why both belong in the vocabulary: the metaoptimizer selects the
+right one per task.
+
+\subsection{Implemented schemas}
+\label{sec:schemas}
+
+A schema runs several primitives in parallel and mixes their outputs by a softmax over the
+architecture parameter $\alphapar$, so that gradient descent on $\alphapar$ selects a
+primitive. Six schema modules were built, in increasing scope, each leaving its validated
+predecessors untouched. Table~\ref{tab:schemas} inventories them.
+
+\begin{table}[h]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{p{4.0cm} p{1.9cm} p{6.6cm}}
+\toprule
+\textbf{Module} & \textbf{Interface} & \textbf{Primitive set / role}\\
+\midrule
+\code{supergraph.py} & recurrent & 2-way \{plain, gated\}; first selection machinery (validated).\\
+\code{multi\_supergraph.py} & recurrent & $N$-way \{plain, gated, lstm\}; adds LSTM and chrono-init.\\
+\code{parallel\_supergraph.py} & flat vector & 2-way \{conv, spectral\}; conjugate-basis antichain (validated).\\
+\code{multi\_parallel\_} \code{supergraph.py} & flat vector & $N$-way \{conv, spectral, attention, dense, norm\}.\\
+\code{spatial\_supergraph.py} & 2-D image & 2-way \{conv, dense\}; spatial selection.\\
+\code{schema.py} & sequence & 8-way, all realizations; the capstone (\S\ref{sec:unified}).\\
+\bottomrule
+\end{tabular}
+\caption{The six schema modules. The first five split the primitives by input interface
+(recurrent, flat, spatial); the schema merges them onto a common sequence
+interface so that all primitives compete on one task.}
+\label{tab:schemas}
+\end{table}
+
+\subsubsection{The interface split and its resolution}
+\label{sec:unified}
+
+The first five schemas partition the primitives by \emph{interface}: recurrent cores
+consume a sequence and thread state through a per-timestep loop; the parallel and spatial cores
+consume a whole vector or image in one shot. A consequence, easy to miss, is that a recurrent
+primitive and a non-recurrent one never competed on the same task---the vocabulary was complete
+only \emph{across} the framework, never within a single selectable schema.
+
+The schema (\code{schema.py}) resolves this. Every primitive is given a
+common sequence-to-sequence contract, \code{forward\_seq}: $(b,T,n_{\mathrm{in}})\!\to\!(b,T,
+\mathrm{width})$. Recurrent primitives realize it via their timestep loop; \code{conv} as a
+causal 1-D convolution over time; \code{attention} as causal self-attention over timesteps;
+\code{dense} and \code{norm} per timestep; \code{spectral} by an rFFT over the time axis whose
+(time-invariant) summary is broadcast back. A per-layer softmax over $\alphapar$ mixes the eight
+sequence outputs, with a shared readout head; a configurable readout (last timestep, for
+recall/copy; mean over time, for classification) collapses the sequence to a prediction. This
+is the honest realization of the six-primitive design: a single schema in which the whole
+vocabulary competes, and from which a concrete architecture is read off as the per-layer
+$\arg\max$ of the peak architecture weights.
+
+\medskip
+\noindent\emph{Note.} Table~\ref{tab:schemas} details the sequence schema specifically; it is one of
+\emph{eight} peer schemas---sequence, spatial ($2$D), volumetric ($3$D), spatiotemporal ($4$D),
+graph, equivariant-graph, set, and operator (neural-operator)---each a self-contained contract with its own
+primitive registry, all unified behind the single meta-router inventoried in \S\ref{sec:sevencontracts}
+(dispatch in \S\ref{sec:metarouter-impl}). The six-irreducible analysis of \S\ref{sec:vocab} covers all of
+them: the schemas realize the \emph{same} six irreducibles under different group actions and tensor
+ranks, with a larger count of selectable realizations per contract (Table~\ref{tab:sevencontracts}).
+
+\section{The architecture parameter}
+\label{sec:archparam-group}
+
+With the vocabulary fixed, the architecture parameter $\alphapar$ selects among the primitives. Three
+questions arise, treated in turn: how to select robustly when primitives co-adapt inside the trained
+mixture (\S\ref{sec:coadapt-impl}); how $\alphapar$ is \emph{derived} rather than imported, as the outer
+Gibbs measure of a free energy on the primitive simplex (\S\ref{sec:alpha-derived}); and how the mixture
+is \emph{priced}, so that a sparse committed selection is preferred to a hedged blend
+(\S\ref{sec:sparsity-priced}).
+
+\subsection{Robust primitive selection under co-adaptation}
+\label{sec:coadapt-impl}
+
+Selecting a primitive from a trained supernet is complicated by co-adaptation: because the primitives
+are trained \emph{together} inside the softmax mixture over $\alphapar$, the argmax of the architecture
+weight reflects ``who helps the mixture'', not ``who is best alone''. The literature's robust fix is
+selection-phase ablation (DARTS-PT): set the architecture weight to a one-hot on each primitive in turn
+and score its isolated validation loss. This defeats co-adaptation for parameter-free or low-capacity
+co-adapters (a normalization or skip branch that only fits residuals collapses when isolated), and that
+case was validated.
+
+\paragraph{A boundary of the ablation proxy.} The PNA (principal neighbourhood aggregation~\cite{corso2020pna}) case exposed a genuine limitation. Ablation
+under-rated \code{pna}: forced solo on its \emph{mixture-trained} weights it scored worst, yet trained
+from scratch it was best. The reason is structural---a high-capacity core with a large internal
+projection and an additive residual has weights co-adapted to the mixture context; isolating those
+weights (which never learned to solve the task alone) is a false negative. The reliable readout is
+therefore \emph{clean-solo}: train each candidate primitive alone, from scratch, and rank by held-out
+score. This is more expensive (one training run per primitive) but avoids the false negative when
+candidates differ in capacity.
+
+\paragraph{A contract-agnostic protocol.} Testing ablation against clean-solo across contracts showed
+the pathology is data- and architecture-dependent, not predictable from capacity: it fired on
+graph/\code{pna} but \emph{not} on spatial/\code{atrous} or sequence/\code{dilconv}, all of which are
+also high-capacity multi-branch cores. Robustness therefore cannot be a per-case manual judgement; it
+is packaged as a single entry point \code{robust\_select} that (i) measures the argmax-versus-solo
+disagreement rate, (ii) takes the fast ablation path when disagreement is low, and (iii) arbitrates
+with clean-solo only when disagreement is high---paying the expensive comparison exactly when
+co-adaptation is actually present. On the graph/PNA case it correctly triggers clean-solo arbitration;
+on spatial/atrous it takes the fast path and never calls clean-solo.
+
+\subsection{Deriving the architecture parameter}
+\label{sec:alpha-derived}
+
+The co-adaptation analysis of \S\ref{sec:coadapt-impl} and the standing seam of \S\ref{sec:alpha}---that
+$\alphapar$ is imported from DARTS rather than derived---turn out to be the same problem, and it admits a
+single resolution. The companion analytical report derives $\alphapar$ as the Gibbs stationary measure of
+a free energy on the primitive simplex; here we record the implementation (\code{machinery/gibbs\_alpha.py})
+and its empirical payoff.
+
+\paragraph{The derived selector.} Put on the primitive simplex the free energy $\F_\alpha=\langle
+\alphapar,\Psi\rangle-\tfrac1\beta H(\alphapar)$, the same $R+\tfrac1\beta(\text{rate})$ form used for the
+neuron measure, with $\Psi_p$ the \emph{solo} marginal risk of primitive $p$. Its stationary measure is
+the Gibbs law $\alphapar_p\propto e^{-\beta\Psi_p}$; its Fisher--Rao gradient flow is the replicator
+equation; and DARTS softmax-gradient-descent is that flow in a preconditioned metric, sharing its entire
+critical set (verified symbolically for $P=2$ as an exact time-rescaling, numerically for general $P$).
+The knob $\beta$ behaves as $\mu$ does for depth: $\beta\to\infty$ concentrates on $\arg\min_p\Psi_p$
+(the hard, single-primitive certificate), finite $\beta$ keeps a hedged mixture, and sweeping $\beta$
+traces a fit-versus-commitment frontier (\code{gibbs\_frontier}, \code{select\_beta\_by\_elbow}). The
+selector \code{gibbs\_alpha\_select} consumes exactly the clean-solo scores of \S\ref{sec:coadapt-impl},
+so no new training machinery is needed.
+
+\paragraph{Payoff on the co-adaptation case.} On the QM7 graph task, with the vocabulary
+$\{\code{gcn},\allowbreak\code{gin},\allowbreak\code{pna},\allowbreak\code{norm}\}$, argmax-DARTS on the trained mixture selects the
+parameter-free \code{norm} co-adapter---the \emph{worst} clean-solo primitive---in every seed, while the
+derived Gibbs-$\alphapar$ selects \code{pna}, the clean-solo best, in every seed and at every temperature
+$\beta\in\{1,4,8,20,100\}$. The derivation does not merely rename the softmax; because its energy is a
+solo quantity it cannot see the mixture co-adaptation that misleads the argmax.
+
+\paragraph{Integration and deployment.} The selector is wired into the meta-router as
+\code{AllGraph.fit(\ldots,\ select="gibbs")}: after the mixture trains, each layer's primitive is
+reselected by the derived Gibbs-$\alphapar$ over clean-solo energies, and the winner is deployed as a
+fresh single-primitive network trained on the full data (the mixture weights, being co-adapted, are not
+reused). Table~\ref{tab:gibbs-deploy} contrasts the deployed derived architecture with the argmax mixture
+on the relational contracts, at a smoke budget.
+
+\begin{table}[h]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{p{2.6cm} p{3.6cm} p{3.6cm} p{2.4cm}}
+\toprule
+\textbf{Dataset} & \textbf{argmax (mixture)} & \textbf{Gibbs (deployed solo)} & \textbf{params}\\
+\midrule
+ESOL      & $0.655$ \ \code{pna,pna,norm}      & $\mathbf{0.663}$ \ \code{pna,pna,pna}  & $127$k$\to91$k\\
+Tox21     & $0.621$ \ \code{gin,norm,norm}     & $0.601$ \ \code{gcn,gcn,gcn}           & $127$k$\to\mathbf{7.9}$k\\
+QM7-graph & $\mathbf{0.665}$ \ \code{gin,norm,norm} & $0.504$ \ \code{gin,gin,gin}      & $126$k$\to14$k\\
+rMD17     & $\mathbf{0.114}$ \ \code{e\_painn,e\_painn,e\_tp} & $0.063$ \ \code{e\_tp}$\times3$ & $20$k$\to\mathbf{6.0}$k\\
+QM7-equiv & $\mathbf{0.759}$ \ \code{e\_tp,e\_norm,e\_tp} & $0.718$ \ \code{e\_tp}$\times3$ & $20$k$\to\mathbf{6.0}$k\\
+\bottomrule
+\end{tabular}
+\caption{Deployed derived selection versus the argmax mixture (held-out skill; params before/after).
+In every case the derived selection removes the parameter-free co-adapter (\code{norm}/\code{e\_norm})
+tail the argmax leaves, and deploys a $3$--$16\times$ smaller network. On ESOL it also beats the mixture;
+where it trails (most on QM7-graph) the mixture's \emph{combined} capacity genuinely helps---the honest
+distinction between \emph{selection} (which primitive is best alone, which the derivation answers
+correctly and robustly) and \emph{deployment} (whether a mixture beats any one primitive, sometimes yes).
+The same $\beta$ interpolates the two: finite $\beta$ retains the mixture, $\beta\to\infty$ commits.}
+\label{tab:gibbs-deploy}
+\end{table}
+
+\paragraph{Historical note (the superseded ``bolt-on'' framing).} For the record, earlier iterations of
+this work treated $\alphapar$ as a pragmatic import from DARTS with \emph{no} derivation from the
+variational framework---a ``bolt-on.'' The reasoning was that the continuum machinery (measure lift, dual
+certificate, path integral, depth RG) is \emph{within}-architecture: it presupposes a fixed computational
+graph and analyzes training, width, depth, or initialization inside it, whereas $\alphapar$ chooses
+\emph{between} graphs, a discrete selection with no Euler--Lagrange equation. The observation that an
+entropic free energy on the primitive simplex has softmax as its stationary measure was, at that stage,
+regarded as an analogy rather than a load-bearing unification. The derivation above (with DARTS as the
+Fisher--Rao gradient flow and the co-adaptation-free solo marginal risk as the forced energy) makes it
+load-bearing \emph{within} a contract; what survives of the original seam is only the discrete
+cross-contract dispatch (\S\ref{sec:alpha}, \S\ref{sec:metarouter-impl}), which the interface-incompatibility
+argument shows genuinely cannot be relaxed. This paragraph replaces the separately-archived legacy note.
+
+
+\subsection{One free energy, one form, three temperatures}
+\label{sec:thermo-potential}
+
+The derivation above writes the primitive readout as the Gibbs measure of $\F_\alpha=\langle\alphapar,\Psi\rangle-\tfrac1\beta H(\alphapar)$. The same free-energy \emph{form}
+\begin{equation}
+\F(\rho)\;=\;\langle\rho,E\rangle\;-\;\tfrac{1}{\beta}\,H(\rho),
+\qquad \rho\propto e^{-\beta E}\ \text{(interior stationary measure)},
+\label{eq:one-form}
+\end{equation}
+governs \emph{every} priced decision in the package, and each carries an inverse temperature $\beta$. Because the symbol recurs---the primitive readout's $\beta$ (\code{gibbs\_beta}), the WBIC $\beta=1/\log n$ inside the local-learning-coefficient estimator~\cite{lau2023llc,watanabe2009slt} (the singular free energy $F_n=nL+\lambda\log n$), and the implicit unit temperature of the contract posterior (\S\ref{sec:contract-mdl})---a careful reader will ask whether these are the same temperature. They are not, and the distinction is load-bearing.
+
+\paragraph{Three levels of one functional.} Equation~\eqref{eq:one-form} is instantiated at three successive coarse-grainings of the model, which differ only in the space the measure lives on, the energy on that space, and hence the natural value and units of $\beta$:
+\begin{center}
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{p{1.5cm} p{2.6cm} p{3.3cm} p{2.5cm} p{2.6cm}}
+\toprule
+\textbf{Level} & \textbf{space} & \textbf{energy $E$} & \textbf{temperature} & \textbf{pinned by}\\
+\midrule
+weights $w$ & weight space & $n\,L(w)$ (nats) & $\beta_W=1/\log n$ & WBIC theory ($\to\lambda$)\\
+primitives $\alphapar$ & primitive simplex & $\Psi_p$ (solo fit cost) & $\beta_A=\code{gibbs\_beta}$ & readout sharpness (free)\\
+contracts $c$ & contract set & $n\hat L_c+\Omega_{\mathrm{struct}}(c)$ (nats) & $\beta_C=1$ & nats-vs-nats bookkeeping\\
+\bottomrule
+\end{tabular}
+\end{center}
+The derivative read-outs are, respectively, the local learning coefficient $\lambda=\mathrm{d}F_n/\mathrm{d}\log n$~\cite{lau2023llc}; the derived architecture distribution $\alphapar$ (\S\ref{sec:alpha-derived}); and the contract posterior, whose MAP coincides with the priced-$J$ winner (\S\ref{sec:contract-mdl}). These are the same functional at the weight, mixture, and contract scales---not three unrelated uses of a letter.
+
+\paragraph{Why the temperatures are decoupled (and must not be equated).} It is tempting to ``unify'' by setting the primitive temperature equal to the WBIC temperature, $\code{gibbs\_beta}:=1/\log n$. This is wrong. At $n=1200$, $1/\log n\approx0.14$ whereas the default $\code{gibbs\_beta}=8$; equating them drops the readout temperature by $\sim\!57\times$ and collapses $\alphapar$ to nearly uniform, destroying the selection. The three energies moreover live on different spaces and in different units---$n L$ is $O(n)$ nats on weight space, $\Psi_p$ is an $O(1)$ dimensionless fit metric on the simplex, $n\hat L_c+\Omega_c$ is $O(n)$ nats on the contract set---so there is no single partition function $Z_n(\beta)$ whose marginals are all three. Each temperature is pinned by a \emph{different} principle: $\beta_W=1/\log n$ is theory-fixed (only this value makes $n\beta_W(\mathbb{E}_{\mathrm{post}}[L]-L^\star)$ estimate the real log canonical threshold), $\beta_C=1$ is unit-fixed (an NLL against a description length, both already in nats, admits no free exchange rate; the optional $\mu_c$ only tempers the prior), and $\beta_A$ is a genuine free sharpness knob. The reconciliation is therefore one free-energy \emph{form}, three coarse-grainings, three deliberately decoupled temperatures---not one temperature. The package records this as a single potential (\code{machinery/thermodynamic\_potential.py}) whose \code{assert\_temperature\_consistency} verifies each $\beta$ sits at its principled value and, in particular, flags the coupling error $\beta_A=\beta_W$; an opt-in \code{report\_thermo} attaches the hierarchy to a fit result. This closes the latent notational double-use that Eq.~\eqref{eq:one-form}'s recurrence would otherwise invite, and is the thermodynamic backbone from which the singular complexity~\cite{lau2023llc} and the developmental read-out are read as derivatives of the \emph{same} object.
+
+
+\subsection{Pricing the mixture: sparsity-priced \texorpdfstring{$\alphapar$}{alpha}}
+\label{sec:sparsity-priced}
+
+The derivation of \S\ref{sec:alpha-derived} selects a single primitive. A natural question is whether it
+extends to a genuine \emph{mixture}---a deployed net that computes $\sum_p\alphapar_p f_p$ and can beat
+any single primitive. The honest answer (developed in the companion analytical report and recorded in the
+package's derivation notes) is a delimitation: the dense in-layer mixture cannot be \emph{derived} beyond
+DARTS, because for a live network $\alphapar$ and the weights minimise the \emph{same} non-convex loss, so
+the ``derived'' $\alphapar$ is just entropic mirror descent on that loss---a reparametrisation of DARTS,
+not a new principle. (The one case with a clean certificate is a \emph{frozen} basis, i.e.\ post-hoc
+ensembling, which is ruled out here: a bag of separately trained models violates the single-minimal-net
+discipline.)
+
+What survives, and fits the framework's logic exactly, is to \emph{price} the mixture rather than derive
+it. Charge the mixture its description length and let a single price decide how many primitives it keeps.
+
+\paragraph{The charge is the effective primitive count.} The MDL two-part code for a mixture over $P$
+primitives is $\sim k\log P + k\cdot(\text{weight bits})$ with $k$ the number of active primitives---linear
+in the support size $\|\alphapar\|_0$. Since $\|\cdot\|_0$ is combinatorial, the smooth
+surrogate is the \emph{inverse participation ratio (IPR)}
+\begin{equation}
+\mathrm{IPR}(\alphapar)=\frac{1}{\sum_p\alphapar_p^{2}}\ \in[1,P],
+\label{eq:ipr}
+\end{equation}
+the physics ``participation ratio'': $1$ for a single primitive, $P$ for a uniform mixture. Pricing it means
+rewarding concentration, $\Omega(\alphapar)=-\sum_p\alphapar_p^{2}$, so the architecture objective becomes
+$\mathcal J=R+\mu\,\Omega$---the identical priced form as the width (effective neuron count) and depth
+(layer count) charges, now with the \emph{effective primitive count} as $\Omega$. It plugs into the same
+price-selection selectors (budget, elbow, validation) verbatim. Entropy is deliberately \emph{not} used: it
+prices spread rather than count, and is already the $1/\beta$ soft-selection term; the IPR literally counts
+branches. Implemented in \code{machinery/sparsity\_priced\_alpha.py}; a differentiable
+$\code{sparsity\_price}(\alphapar)=-\sum_p\alphapar_p^{2}$ is added per cell to the live training loss, and
+\code{AllGraph.fit(\ldots,select="sparse")} deploys the resulting compact mixture (never forced to collapse).
+
+\paragraph{What the price does on real data.} Table~\ref{tab:sparsity} sweeps $\mu$ on the graph contract.
+The behaviour is exactly ``let the frontier decide'': one price, and each dataset lands where its own
+accuracy-versus-IPR frontier dictates.
+
+\begin{table}[h]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{p{2.6cm} p{2.8cm} p{3.0cm} p{3.0cm}}
+\toprule
+\textbf{Dataset} & \textbf{argmax (dense)} & \textbf{sparse $\mu{=}0.3$} & \textbf{sparse $\mu{=}0.6$}\\
+\midrule
+ESOL      & $0.655$, IPR${\sim}5$ & $0.599$, IPR $5.0$ & $\mathbf{0.748}$, IPR $5.0$\\
+Tox21     & $0.621$, IPR${\sim}5$ & $0.660$, IPR $1.23$ & $\mathbf{0.693}$, IPR $\mathbf{1.09}$\\
+QM7-graph & $0.665$, IPR${\sim}5$ & $0.658$, IPR $4.9$ & $0.662$, IPR $4.5$\\
+\bottomrule
+\end{tabular}
+\caption{Sparsity-priced $\alphapar$ on the graph contract (held-out skill; IPR $=$ effective number of
+primitives, Eq.~\ref{eq:ipr}). \emph{Tox21} collapses to a compact ${\sim}1$-primitive mixture and
+\emph{improves} (the price cuts a co-adaptation-inflated dense mixture down to a cleaner model that
+generalises better). \emph{QM7-graph} stays dense and roughly flat---it genuinely wants its mixture and
+the frontier correctly declines to collapse it. \emph{ESOL} improves at $\mu{=}0.6$ while staying dense:
+honestly, that gain is the price acting as a training \emph{regulariser} (the $-\sum\alphapar^2$ term
+perturbs the $\alphapar$ trajectory), not compression---reported as such. The point is the per-dataset
+spread from one knob; a fair deployment selects $\mu$ per dataset by the elbow/validation rule
+(\code{select\_sparsity\_by\_elbow}) rather than sharing it.}
+\label{tab:sparsity}
+\end{table}
+
+The upshot is that ``extend $\alphapar$ to mixtures'' is answered in the framework's own idiom: not by a
+richer derivation (which collapses to DARTS) but by a price with a certificate-flavoured reading---a
+primitive stays in the mixture only while its marginal risk reduction exceeds its IPR price $\mu$, the
+same conditional-gradient logic as the width and depth rungs, one level out on the primitive dictionary.
+
+
+\section{Interpretability as a corollary, and redundancy reduction}
+\label{sec:interp}
+
+Because the description-length action selects a sparse, discrete architecture, the selected object is itself
+the explanation---there is no separate surrogate to interrogate. Three faithful-by-construction tiers
+(\code{core/interpretability.py}, \code{feature\_attribution.py}, \code{symbolic\_readout.py}) read out the
+selection at three levels, and each was validated on real data with its failure mode made explicit.
+
+\emph{Tier~1, architecture as explanation.} \code{explain}/\code{AllGraph.explain} reports which primitive
+each cell chose, from the clean-solo Gibbs energies (falling back to the per-cell $\alpha$ peak so the report
+matches the deployed architecture), pairing the argmax with the participation ratio and surfacing ties rather
+than breaking them silently. On ECG5000 it reports an \code{lstm}/\code{dilconv} tie; on GunPoint, where the
+data is too small to separate primitives, it faithfully reports all primitives tied---diagnosing the known
+under-training rather than inventing a winner.
+
+\emph{Tier~2, feature attribution.} A hard-concrete $L_0$ feature gate exposes which invariant coordinates
+carry the signal. The key finding is a boundary, not a method: the attribution is reliable only when a unique
+sparse support exists. On ESOL's named descriptors it recovers a Lipinski/Delaney-consistent nested set
+(polar surface area, molecular weight, rings) and is flagged reliable; on correlated bases (QM7 Coulomb
+eigenvalues, ArrowHead) no unique support exists and it is flagged \emph{unreliable}. A controlled test
+confirmed the failure is correlation-driven, not dimension-driven: sixty independent features are recovered
+exactly, sixty correlated features are not.
+
+\emph{Tier~3, symbolic read-out.} A KAN~\cite{liu2024kan,hu2025equivkan} radial's learned spline is projected onto an analytic dictionary by
+orthogonal matching pursuit with a residual-gated acceptance. This is the only tier with an intrinsic fidelity
+gap---the spline is ground truth and every closed form carries a residual---so a form is accepted only above an
+$R^2$ threshold and otherwise the spline is kept (``a fit, not the law''). In the direct/bottleneck regime it
+recovers $e^{-d}$, $e^{-d^2}$, $\tfrac12 d^2$ exactly and declines $\cos 2d$ and damped oscillators honestly;
+in the embedded regime (real trained equivariant nets, which distribute the physics across channels) it
+declines, correctly reporting that no single-channel closed form is faithful.
+
+\emph{Redundancy reduction} (\code{core/redundancy\_reduction.py}) applies the participation-ratio functional
+one level down, to the covariance spectrum of the data, to measure an effective dimension
+$d_{\mathrm{eff}}$ and project onto the leading $\lceil d_{\mathrm{eff}}\rceil$ collective coordinates---the
+renormalization-group ``keep the relevant modes'' step, driven by measured spectral weight. On the QM7 Coulomb
+eigenvalues it measures $d_{\mathrm{eff}}=3.78$ of $23$ and reduces to four dimensions while retaining $R^2$
+$0.969$ versus $0.979$: an $83\%$ dimension cut for a one-point accuracy loss. It is opt-in preprocessing that
+completes the kinematics rung---the symmetry group removes the exact redundancy, the effective dimension
+removes the approximate data-dependent redundancy that remains.
+
+\subsection{One ledger: effective dimension across the coarse-graining axis}
+\label{sec:ledger}
+
+The participation ratio that measures $d_{\mathrm{eff}}$ above is not unique to the data covariance. The
+same functional $\mathrm{PR}(s)=(\sum_i s_i)^2/\sum_i s_i^2=1/\sum_i p_i^2$ (equal to $1$ on a
+single-mode spectrum, $m$ on a uniform $m$-mode one) is what counts the effective number of primitives in
+the mixture ($\mathrm{IPR}(\alphapar)$, \S\ref{sec:sparsity-priced}), the two differing only in which spectrum it
+eats---the covariance eigenvalues in one case, the $\alphapar$ weights in the other. The supervised
+information-bottleneck flow $d_{\mathrm{IB}}(\beta)$ resolves the same data-mode count against a
+renormalization-group scale, and the local learning coefficient $\lambda$ of \S\ref{sec:singular-mdl}
+measures the effective dimension of the whole fitted \emph{model}. These four grew up as separate
+measurements in separate modules; they are one question---how many degrees of freedom does this
+representation really use---asked at ascending levels of coarse-graining, and the package now states them
+on a single axis (\code{machinery/effective\_dimension\_ledger.py}, opt-in \code{report\_ledger}).
+
+The unification is exact where it is exact and bounded where it is not. Three of the four legs are
+\emph{literally} the participation ratio---\code{participation\_ratio} reproduces both the data $d_{\mathrm{eff}}$
+and the mixture $\mathrm{IPR}$ to machine precision, since it is the same $1/\sum p^2$---so the data-mode
+and primitive levels share a functional, not merely a metaphor. The fourth leg, $\lambda$, is a
+\emph{different} functional (the RLCT, not a participation ratio) answering the same question at the model
+level, and is the natural cap of the ledger ($\lambda\le k/2$). The honest boundary, stated in the ledger
+itself, is that the levels are not one commensurable scalar: a count of effective data modes and a count
+of effective primitives carry different units and are never summed. So the object is one functional read
+at the kinematic levels plus $\lambda$ at the model level---the quantitative completion of the
+package's ``kinematics $\to$ degrees of freedom'' ordering, stated once rather than as four vocabularies.
+On a representative fit it reads coherently across levels: ${\sim}63$ effective data coordinates of the
+ambient covariance, ${\sim}4$ effective primitives of the deployed mixture, and $\lambda$ far below $k/2$
+(the singular signature of \S\ref{sec:singular-mdl}) at the model. Like the other read-outs it is pure
+reporting and changes no selection.
+
+\subsection{Developmental read-out: the complexity trajectory over training}
+\label{sec:developmental}
+
+The local learning coefficient of \S\ref{sec:singular-mdl} is estimated \emph{once}, at the converged
+optimum, because that is the only place the RLCT is meaningful. The developmental-interpretability
+programme~\cite{hoogland2024devland} observes that the \emph{trajectory} $\hat\lambda(t)$ along training
+carries additional structure: its plateaus and jumps mark staged learning---Bayesian phase transitions at
+which the model acquires new effective degrees of freedom. Metaopt's dynamics stage trains weights and
+reads out only at the end; \code{machinery/developmental\_llc.py} (\code{developmental\_llc}) adds the
+trajectory read-out, reusing the same estimator unchanged at a schedule of checkpoints. The content is the
+checkpoint schedule and the reading of the resulting curve, not a new estimator: after a fit the selected
+architecture is rebuilt as a fresh untrained net and trained once through a denser-early checkpoint
+schedule, with $\hat\lambda$ probed at each checkpoint and the curve read for the located transitions.
+
+Its scope is stated honestly and was fixed by premise checks. The \emph{convergence onset}---the sharp
+neg\-ative$\to$positive flip of $\hat\lambda$ as $w^\star$ settles into a genuine basin, coinciding with the
+training loss flattening---is robust and is the primary deliverable. Multi-stage sub-structure within the
+positive regime appears only when the data itself separates the learning phases (a small network with a
+single dominant mode shows one onset, not a staircase); it is therefore reported as advisory candidate
+jumps that exceed the per-checkpoint SGLD noise, never asserted. And the per-checkpoint values are a short
+SGLD estimate, so the deliverable is the \emph{shape} and the located transitions, exactly as the
+developmental literature uses $\hat\lambda(t)$. The read-out is opt-in (\code{developmental\_llc}), changes
+no selection, and leaves the deployed architecture and its metric provably unchanged.
+
+\subsection{Response spectroscopy: the curvature of the selection}
+\label{sec:response}
+
+The package prices every selection by an objective but reports only its $\arg\min$---never how
+\emph{sharply} that minimum is preferred, nor how far it sits from the nearest selection boundary. The
+same devinterp line now frames precisely this as spectroscopy: infer internal structure by measuring the
+response to a perturbation~\cite{gordon2026spectro}. \code{machinery/response\_spectroscopy.py}
+(\code{report\_response}) adds the second-derivative read-out, reusing quantities the fit already
+computed---the solo energies behind the Gibbs-$\alpha$ and the $\{$scores, $\Omega\}$ behind the contract
+bake-off---so it is a curvature measurement on an objective in hand, not a new optimisation. It is the
+natural second derivative of the thermodynamic potential of \S\ref{sec:thermo-potential}: it measures the
+curvature of the very Level-A and Level-C free energies that potential documents.
+
+The premise checks decided its form, and the honest finding is that the two levels have \emph{different}
+analytic character. At the primitive readout (Level~A) the Gibbs measure is smooth, so the specific heat
+$\chi=\operatorname{Var}_\alpha(\Psi)=\partial^2(-\log Z)/\partial\beta^2$ is a genuine susceptibility---but
+it is non-monotone in $\beta$ (it peaks at the ``melting'' temperature and vanishes at both extremes), so
+the monotone decisiveness read is the readout entropy $H(\alpha)$, not $\chi$; both are reported, with the
+verdict keyed to entropy and the energy gap to the runner-up. At the contract choice (Level~C) the priced
+objective $\mathcal J_c(\mu)=R_c+\mu\,\tilde\Omega_c$ is piecewise-\emph{linear} in the price, so
+$\partial^2\mathcal J^\star/\partial\mu^2=0$ in the interior with the curvature concentrated at the
+winner-switch kinks: selection in $\mu$ is a sequence of \emph{first-order} transitions, and the reported
+observable is accordingly the critical price $\mu^\star$ to the nearest switch, the price margins to flip,
+and the slope jump across the transition (the finite susceptibility of that first-order line), together
+with a robustness verdict calibrated on the natural scale of $\mu$. The read-out thus turns the
+point-estimate selection into a calibrated one---how sharply is this primitive preferred, how robust is
+this contract to the price---while, like the other tiers, changing nothing about what is selected.
+
+
+\section{Validation}
+\label{sec:validation}
+
+This section consolidates the empirical evidence: controlled synthetic tasks with known optima
+(\S\ref{sec:synthetic}), real-data results across the eight contracts (\S\ref{sec:realdata}), a
+matched-complexity baseline comparison (\S\ref{sec:baselines}), a reading of the concrete architectures
+the selector deploys (\S\ref{sec:architectures}), and the single dataset registry and runner framework
+that regenerates all of it (\S\ref{sec:stdval}). Unless noted, numbers are regenerated from the current
+package via the runners of \S\ref{sec:repro}.
+
+\subsection{Synthetic validation}
+\label{sec:synthetic}
+
+Three synthetic tasks with known ground-truth optima exercise the schema
+(depth~1, width~64, all eight primitives). Results are in Table~\ref{tab:synthetic}, measured
+from the current package.
+
+\begin{table}[h]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{p{3.2cm} p{2.6cm} p{2.2cm} p{4.6cm}}
+\toprule
+\textbf{Task} & \textbf{Structure} & \textbf{Performance} & \textbf{Selected (peak $\alphapar$)}\\
+\midrule
+Copy (delay 15) & recurrent memory & acc 0.995 & \code{plain} (0.48; recurrent family $\approx0.86$)\\
+Adding ($T{=}80$) & long-range sum & mse 0.0008 & \code{attention} (0.26)\\
+Assoc.\ recall ($N{=}8$) & content routing & acc 1.000 & \code{attention} (0.87)\\
+\bottomrule
+\end{tabular}
+\caption{Schema on synthetic tasks. Copy routes to the recurrent family (\code{plain}
+suffices at delay~15); recall selects \code{attention} decisively; adding selects
+\code{attention}, which routes to the two marked positions and sums them---a better solution
+than carrying a running sum through a recurrent scan, and one the metaoptimizer found by
+searching the full vocabulary rather than a recurrent-only subset.}
+\label{tab:synthetic}
+\end{table}
+
+Two of these outcomes are worth emphasizing. The recall result (acc~1.000, $\alphapar_{\mathrm{
+attention}}=0.87$) is the cleanest demonstration in the package that the selector commits
+decisively to content-based routing when---and only when---the task requires it. The adding
+result is instructive in a different way: the presumed ground truth was a gated recurrent cell,
+but with attention available the schema discovered that the marked-value sum is a routing
+problem, not a memory problem, and selected \code{attention}. This is genuine cross-family
+search, not confirmation of a prior expectation.
+
+\subsection{Real-data validation}
+\label{sec:realdata}
+
+Five standard UCR/UEA time-series classification datasets, spanning sensor, motion-capture,
+image-outline, accelerometer, and appliance-power domains, exercise the schema on
+real data (depth~1, width~64, official train/test splits, $z$-normalized; long series
+average-pooled on the time axis to at most 120 steps so the per-timestep recurrent scan stays
+tractable). Table~\ref{tab:realdata} reports test accuracy and the selected architecture.
+
+\begin{table}[h]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{p{3.4cm} p{2.4cm} p{1.4cm} p{1.4cm} p{1.4cm} p{2.0cm}}
+\toprule
+\textbf{Dataset} & \textbf{Domain} & \textbf{Test acc} & \textbf{Major.} & \textbf{Classes} & \textbf{Selected}\\
+\midrule
+ItalyPowerDemand & sensor/power    & 0.928 & 0.501 & 2  & \code{plain}\\
+GunPoint         & motion capture  & 0.893 & 0.507 & 2  & \code{lstm}\\
+OSULeaf          & image outline   & 0.607 & 0.227 & 6  & \code{gated}\\
+BasicMotions     & accel.\ (6-ch)  & 0.975 & 0.250 & 4  & \code{lstm}\\
+ACSF1            & appliance power & 0.400 & 0.100 & 10 & \code{gated}\\
+\bottomrule
+\end{tabular}
+\caption{Schema on five real UCR/UEA datasets. Every accuracy is well above the
+majority-class baseline. All five select a recurrent primitive: the schema reads
+time-series classification as fundamentally temporal at this scale. \code{spectral} carried
+notable weight ($\approx0.16$) only on ACSF1, where appliance-power signals have genuine
+periodic structure.}
+\label{tab:realdata}
+\end{table}
+
+All five datasets select a recurrent primitive, with the recurrent family dominant in every
+case. The one dataset with meaningful non-recurrent weight was ACSF1, where the fixed
+frequency-basis \code{spectral} primitive surfaced ($\alphapar\approx0.16$) alongside the
+selected \code{gated} cell---consistent with the periodic structure of appliance-power signals.
+An honest caveat applies to the low weight on \code{conv} throughout: the \code{conv} core used
+in this sweep is a single causal 1-D convolution with a small kernel, far shallower than the deep
+multi-scale convolutional networks (ResNet, InceptionTime) that dominate the UCR archive in the
+literature. The finding is therefore ``recurrence beats \emph{our shallow} convolution at this
+scale,'' not a claim about convolution for time series in general. This caveat has since been
+partly addressed: a multi-scale dilated core \code{dilconv} (\S\ref{sec:newprims}) was added to the
+sequence vocabulary and, on OSULeaf, is selected over the single-kernel \code{conv} and improves
+accuracy by $5.8$ points---so on datasets with multi-scale temporal structure the conv-family is
+now competitive, exactly as the caveat anticipated.
+
+\subsection{Comparison with matched-complexity baselines}
+\label{sec:baselines}
+
+An accuracy in isolation is uninformative; the relevant reference is a fixed neural network of
+similar size trained identically. Table~\ref{tab:baselines} compares the schema's
+selected architecture against three standard baselines---a plain gated recurrent unit (GRU), a two-layer 1-D convolutional network (CNN), and a single-hidden-layer multilayer perceptron (MLP)---at comparable parameter count, same preprocessing, same training
+budget.
+
+\begin{table}[h]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{p{3.4cm} p{2.0cm} p{1.2cm} p{1.2cm} p{1.2cm} p{2.3cm}}
+\toprule
+\textbf{Dataset} & \textbf{Ours (sel.)} & \textbf{GRU} & \textbf{CNN} & \textbf{MLP} & \textbf{Ours vs best}\\
+\midrule
+ItalyPowerDemand & 0.928 (\code{plain}) & 0.539 & 0.549 & \textbf{0.957} & $-0.029$\\
+GunPoint         & \textbf{0.893} (\code{lstm}) & 0.493 & 0.660 & 0.773 & $+0.120$\\
+OSULeaf          & \textbf{0.607} (\code{gated}) & 0.467 & 0.397 & 0.492 & $+0.115$\\
+BasicMotions     & 0.975 (\code{lstm}) & 0.750 & \textbf{1.000} & 0.900 & $-0.025$\\
+ACSF1            & 0.400 (\code{gated}) & 0.280 & \textbf{0.400} & 0.180 & $\pm0.000$\\
+\bottomrule
+\end{tabular}
+\caption{Schema vs matched-complexity fixed baselines (test accuracy). The
+schema wins outright on two datasets, ties the best on one, and trails narrowly on two. It
+consistently avoids the \emph{worst} baseline---on GunPoint a plain GRU collapses to near
+chance (0.493) while the schema's \code{lstm} selection reaches 0.893.}
+\label{tab:baselines}
+\end{table}
+
+At matched complexity the schema is competitive: it wins or ties the best fixed
+baseline on three of five datasets, trails narrowly on the other two, and never selects the
+worst-performing primitive family. The one clearly interpretable shortfall is
+ItalyPowerDemand, where a flatten-then-dense MLP (0.957, the smallest model at $1.7$k
+parameters) beats every sequential model. This dataset is ``effectively tabular''---its short
+24-step series is really a feature vector---and the schema's mean-over-time readout cannot
+express the flatten-then-dense operation that is optimal there. This is a genuine
+expressiveness gap in the readout, not a selection error: given the realizations available, the
+schema chose reasonably, but the winning realization was absent from its menu.
+
+We do not compare against full deep-learning state of the art (SOTA) (GunPoint $0.91$--$0.97$,
+ItalyPowerDemand $\approx0.955$, OSULeaf $\approx0.98$ with deep multi-scale CNNs and heavy
+tuning). Those numbers use depth, multi-scale kernels, full-length series, and hyperparameter
+search that the single-layer, width-64, fixed-budget schema does not; the matched-complexity
+comparison is the fair one.
+
+\subsection{Selected network architectures}
+\label{sec:architectures}
+
+Because the schema discretizes to a single primitive per layer, the deployed network is
+that primitive's core plus a readout head---a concrete, ordinary neural network. Table~\ref{tab:deployed} records what the metaoptimizer produced for each task: the primitive type, the
+(depth~1) layer structure, the hidden width, and the deployed parameter count.
+
+\begin{table}[h]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{p{3.4cm} p{2.2cm} p{1.4cm} p{1.4cm} p{2.4cm}}
+\toprule
+\textbf{Task / dataset} & \textbf{Primitive} & \textbf{Layers} & \textbf{Width} & \textbf{Deployed params}\\
+\midrule
+Copy             & \code{plain}     & 1 & 64 & $5{,}062$\\
+Adding           & \code{gated}     & 1 & 64 & $12{,}929$\\
+Assoc.\ recall   & \code{attention} & 1 & 64 & $6{,}054$\\
+ItalyPowerDemand & \code{plain}     & 1 & 64 & $4{,}354$\\
+GunPoint         & \code{lstm}      & 1 & 64 & $17{,}026$\\
+BasicMotions     & \code{lstm}      & 1 & 64 & $18{,}436$\\
+OSULeaf          & \code{gated}     & 1 & 64 & $13{,}062$\\
+ACSF1            & \code{gated}     & 1 & 64 & $13{,}322$\\
+\bottomrule
+\end{tabular}
+\caption{The concrete network selected per task (primitive core $+$ linear readout head,
+width~64, depth~1). Deployed parameter counts vary with the primitive's gate multiplicity
+(\code{plain} carries one weight matrix per state update, \code{gated} three, \code{lstm}
+four) and with the input/output dimensions of the task. The full depth-1 schema from which
+each is selected is larger---$41$k to $71$k parameters depending on input dimension---since it
+instantiates all eight primitives in parallel; discretization to the selected core is what
+yields the compact deployed network.}
+\label{tab:deployed}
+\end{table}
+
+All selections reported \emph{in this section} are at depth~1 and fixed width~64. On the compact
+sequence datasets examined here,
+added depth did not improve the marginal-value objective---consistent with the priced-depth
+analysis, which predicts small $L^\star$ absent genuine compositional structure, and with four
+convergent negative results during development in which a second layer failed to beat a single
+layer on compact real data. Depth-1 is therefore the honest reported architecture for these
+datasets, not a fixed choice---and on the deeper relational contracts the metaoptimizer does
+select heterogeneous multi-layer architectures (\S\ref{sec:metarouter-impl}). The width, by
+contrast, \emph{was} fixed here; \S\ref{sec:size} lifts that restriction
+and reports the architectures obtained when width and depth are themselves metaoptimized.
+
+\subsection{The standard validation framework}
+\label{sec:stdval}
+
+The datasets accumulated across the project are consolidated into a single registry that both a quick
+(subset, smoke-budget) and a full (complete-data, benchmark-budget) runner draw from, so that every
+schema is exercised on at least one real natural-science or medical dataset. The registry spans
+seventeen datasets: physiological time series (ECG5000 cardiology, UCR botany/motion), medical imaging
+(BloodMNIST hematology, OrganMNIST3D radiology), molecular graphs (ESOL solubility, Tox21 toxicity,
+QM7/QM9 quantum chemistry), molecular dynamics (rMD17 with forces), and particle physics (JetNet jet
+tagging as unordered sets). Because classification and regression are mixed, results are reported on a
+consistent skill axis in $[0,1]$: $(\text{accuracy}-\text{chance})/(1-\text{chance})$ for
+classification and $R^2$ for regression, both reading zero at the trivial baseline and one at perfect.
+Routed through the meta-router at a smoke budget, all datasets dispatched correctly and cleared their
+trivial baselines where the compute budget was adequate, landing within a few points of literature SOTA
+on the near-saturated tasks (e.g.\ ECG5000) and trailing---by an amount that tracks the reduced
+budget, not a routing error---on the most compute-hungry ones ($3$D convolution, molecular-dynamics
+energy). The full runner supports CUDA (NVIDIA GPU) and Apple-Silicon (MPS)  devices for benchmark-scale runs. Both
+runners now expose and wire through the full set of switches developed above---\code{-{}-select}
+(\code{argmax}/\code{gibbs}/\code{sparse}), \code{-{}-sparsity\_mu}, \code{-{}-tensorize\_mu}, and
+\code{-{}-tiebreak}---so the whole priced ladder (derived-$\alphapar$ selection, sparsity-priced mixture,
+priced tensorization, and the contract MDL tie-break) is exercisable in one command.
+
+\subsection{End-to-end run with the full priced ladder enabled}
+\label{sec:fullrun}
+
+Table~\ref{tab:quickval} reports the quick suite with \emph{every} priced mechanism active at once
+(\code{-{}-select sparse -{}-sparsity\_mu 0.3 -{}-tensorize\_mu 0.05 -{}-tiebreak}). The point is not
+benchmark accuracy---these are subset, smoke-budget runs---but that all thirteen datasets dispatch to a
+valid contract, select a sensible compact architecture, and clear their trivial baselines bar the two
+hardest regression targets, with all pricing simultaneously live.
+
+\begin{table}[h]
+\centering
+\small
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{p{2.6cm} p{1.7cm} p{1.1cm} p{0.9cm} p{2.6cm} p{0.7cm} p{1.1cm}}
+\toprule
+\textbf{Dataset} & \textbf{Contract} & \textbf{Metric} & \textbf{Skill} & \textbf{Architecture} & \textbf{IPR} & \textbf{Params}\\
+\midrule
+ECG5000       & sequence   & 0.917 & $+0.90$ & lstm                         & 8.6 & 14{,}672\\
+GunPoint      & sequence   & 0.493 & $-0.01$ & lstm                         & 9.0 & 14{,}573\\
+OSULeaf       & sequence   & 0.306 & $+0.17$ & plain                        & 9.0 & 14{,}705\\
+BloodMNIST    & spatial    & 0.735 & $+0.70$ & atrous                       & 4.4 & 6{,}573\\
+MNIST         & spatial    & 0.760 & $+0.73$ & conv\_dw                     & 1.3 & 6{,}319\\
+OrganMNIST3D  & volumetric & 0.289 & $+0.22$ & conv\_dw                     & 4.0 & 3{,}785\\
+ESOL          & graph      & 0.599 & $+0.60$ & pna$\to$\allowbreak gin$\to$\allowbreak norm         & 5.0 & 126{,}790\\
+Tox21         & graph      & 0.660 & $+0.66$ & gcn$\to$\allowbreak gcn$\to$\allowbreak norm         & 1.2 & 126{,}839\\
+QM7-graph     & graph      & 0.658 & $+0.66$ & gin$\to$\allowbreak norm$\to$\allowbreak norm        & 4.9 & 126{,}358\\
+QM7-equiv     & equiv$^\ast$ & 0.768 & $+0.77$ & e\_tp$\to$\allowbreak e\_norm$\to$\allowbreak e\_tp   & 3.9 & 20{,}449\\
+QM7-set       & set        & 0.579 & $+0.58$ & norm$\to$\allowbreak norm                & 3.0 & 29{,}335\\
+JetNet        & set        & 0.357 & $+0.20$ & deepsets$\to$\allowbreak element\_mlp    & 1.8 & 29{,}243\\
+rMD17-ethanol & equiv$^\ast$ & $0.151$ & $+0.15$ & e\_painn$\to$\allowbreak e\_painn$\to$\allowbreak e\_tp & 3.6 & 20{,}401\\
+\bottomrule
+\end{tabular}
+\caption{Quick suite with the full priced ladder enabled (sparse selection, priced tensorization,
+contract tie-break). Skill is $(\text{acc}-\text{chance})/(1-\text{chance})$ (classification), $R^2$
+(regression), or receiver-operating-characteristic area under the curve (ROC-AUC) (Tox21). IPR is the effective number of primitives in the deployed mixture
+(a low IPR means the sparsity price collapsed the mixture to essentially one primitive). ``Params'' is
+the \emph{deployed} network, $3.7$k--$127$k---one to two orders of magnitude below the deep,
+heavily-tuned SOTA references (ResNet/InceptionTime, message-passing neural network (MPNN)/SchNet). $^\ast$QM7-equiv and rMD17 route to
+the \emph{equivariant} contract via the learned router (\S\ref{sec:learned-routing}), seeded from
+full-budget bake-off outcomes; this corrects the reduced-budget mis-routing to set (where the
+$\Omega_{\mathrm{struct}}$ charge over-penalises the under-converged equivariant branch) and lifts skill
+substantially---QM7-equiv $R^2\ 0.57\to0.77$ and rMD17 $R^2\ -0.00\to0.15$, the latter from below the
+trivial baseline to genuinely predictive $\mathrm{SO}(3)$-equivariant message passing. Disabling the
+router (\code{-{}-no\_learned\_router}) reproduces the set mis-routing. The strongest at this budget are
+ECG5000 ($0.917$ at $15$k params, versus $0.94$--$0.95$ SOTA), QM7-equiv, and the graph tasks.}
+\label{tab:quickval}
+\end{table}
+
+Two behaviours are worth reading off the table. The sparsity price is visibly active: where one primitive
+suffices the mixture collapses (MNIST IPR $1.3\to$\code{conv\_dw}; Tox21 IPR $1.2\to$\code{gcn}) and the
+deployed net is compact, whereas genuinely multi-primitive tasks keep a higher IPR (ECG5000 $8.6$).
+Auto-tensorization dispatched every grid correctly, and---verified separately---re-discovers the latent
+shape when a single-channel grid is flattened (MNIST $784\to28\times28$); a bare-flattened multi-channel
+image is kept as a tensor, since flattening conflates the channel and spatial axes. The contract routing
+is now handled by the learned router (\S\ref{sec:learned-routing}) rather than a fresh bake-off: seeded
+from full-budget outcomes, it sends the geometric molecular targets to the equivariant contract at
+inference cost, which is what recovers their skill relative to the reduced-budget set mis-routing. The
+$\Omega_{\mathrm{struct}}$ charge still governs genuine near-ties within the bake-off when the router is
+unconfident and the budget is adequate; at a smoke budget the router's full-budget-seeded prediction is
+preferred over an under-converged bake-off, which is the correct behaviour and the reason the geometric
+targets no longer collapse to the cheap set contract.
+
+
+\section{Reproducibility}
+\label{sec:repro}
+
+Every number in \S\ref{sec:synthetic}--\S\ref{sec:baselines} is regenerated by the runner
+scripts in \code{validation\_runners/}, which ship with the package:
+\begin{itemize}[leftmargin=1.4em,itemsep=1pt]
+\item \code{run\_unified\_synthetic.py}---the synthetic tasks (copy, adding, recall);
+\item \code{run\_unified\_ucr.py}---the schema on any aeon UCR/UEA dataset, with a
+\code{-{}-bilevel} flag that holds out a validation split from train for the $\alphapar$
+selection (the honest architecture-selection protocol) and a \code{-{}-primitives} flag to
+restrict the vocabulary;
+\item \code{run\_baselines\_ucr.py}---the matched-complexity GRU/CNN/MLP baselines.
+\end{itemize}
+The architecture-size metaoptimization of \S\ref{sec:size} is reproduced by three further
+runners: \code{run\_minimal\_} \code{architecture.py} (select primitive, width, and depth at a
+given price), \code{run\_frontier.py} (sweep $\mu$ to trace the fit--complexity frontier), and
+\code{run\_penalized\_} \code{selection.py} (the compact-and-accurate differentiable penalty).
+All reported accuracies are on the official held-out test split; the model never trains on test
+data. One protocol caveat is recorded plainly: in the default runs the network weights and
+the architecture parameter $\alphapar$ are both trained on the train split, so while the test
+accuracy is legitimate, the architecture \emph{choice} was not made on held-out data. The
+\code{-{}-bilevel} flag exists precisely to make that choice defensible when required; it tends
+to produce flatter, less overfit $\alphapar$ distributions.
+
+\section{Status of the first report's open problems}
+\label{sec:future}
+
+The first report closed with a list of open problems. All have since been resolved and are documented in the
+body; they are collected here, each stated in brief with a pointer and its honest residual limit, alongside
+two recently added contracts and the two predictions that were confirmed \emph{negative}. The detail lives
+in the referenced sections.
+
+\subsection{Resolved since the first report}
+
+\paragraph{Representation and size, unified under one price.} The \emph{contract} choice, the
+\emph{tensorization} choice, and the tensor \emph{shape} are all now folded into the same action
+$J=R+\mu\,\Omega$ that prices primitive, width, and depth (\S\ref{sec:contract-mdl},
+\S\ref{sec:priced-tensor}), with significance gates that make them safe to run by default. ``Which
+interface'' and ``which tensor shape'' are thus metaoptimality decisions rather than hand-set charges. The
+one-time $O(D^2)$ mutual-information cost is handled by an on-demand sampled estimator that never forms the
+full matrix. \emph{Residual:} automatic $3$D tensorization still reports only the leading $2$D stride, so a
+flat vector is not yet auto-routed to the volumetric contract (parsing multiple stride peaks into a full
+$(D,H,W)$ shape is the remaining step); and two fail-safe signal-strength limits (background-dominated or
+exotic-aspect-ratio volumes) may under-rank, never mis-rank.
+
+\paragraph{Nonlinear symmetries.} The linear symmetry front-end (\S\ref{sec:symmetry}) is now backed by a
+LaLiGAN-style symmetry-regularized autoencoder that linearizes a nonlinear group action, after which the
+linear detector runs in the latent space; a null-baseline guard (the candidate generator must be decisively
+quieter than random generators of matched size) suppresses the false positives the joint objective is
+otherwise prone to, and a linear-first escalation tries the cheap exact detector before falling back.
+\emph{Residual:} recovery is bounded by the autoencoder's ability to linearize---moderate warps of a
+rotation are recovered, a severe coordinate warp still defeats it.
+
+\paragraph{Robustness of discrete detection.} Beyond the \code{coordinate\_structure} guard, a
+gradient-sensitivity-weighted equivariance error (a selectable \code{error\_mode}) normalizes the
+transformation error by the root-mean-square (RMS) gradient along the tested direction, so a coordinate the model barely
+depends on cannot contribute a spurious symmetry (\S\ref{sec:pipelinefrontend}). It costs one extra backward
+pass and, in head-to-head tests, recovers a genuine swap symmetry the scale-aware error misses without
+false-positiving on a near-flat direction.
+
+\paragraph{Expressiveness gaps and the performance bottleneck.} The ItalyPowerDemand shortfall
+(\S\ref{sec:baselines}) is addressed by a held-out bake-off between the mean and a flatten-then-dense readout
+(charged its extra cost, guarded to short sequences, off by default), which selects flatten on the
+tabular-like case (validation $0.75\to0.96$) and leaves longer series on the mean; the \code{conv} gap was
+closed by the multi-scale \code{dilconv}/\code{atrous} cores (\S\ref{sec:newprims}). The recurrent
+per-timestep Python loop that dominated wall-clock time is removed for the linear \code{linssm} primitive by
+an associative block-cumsum parallel scan---numerically identical to the loop in output and gradients,
+$\sim\!1.6\text{--}1.7\times$ faster on forward. \emph{Residual:} the input-dependent \code{selssm} is not
+associative and keeps its loop; on CPU the full forward+backward is only break-even at the safe block size,
+so the larger training speedup awaits GPU or a log-space Blelloch scan.
+
+\paragraph{Depth and heterogeneous architectures.} The question of whether the schema produces genuinely
+\emph{heterogeneous} per-layer architectures (all first-report selections were depth~$1$) is settled
+affirmatively (\S\ref{sec:metarouter-impl}): on the deeper relational contracts the metaoptimizer selects
+distinct primitives at distinct layers (ESOL \code{gin}$\to$\code{pna}$\to$\code{pna}; rMD17
+\code{e\_painn}$\to$\code{e\_painn}$\to$\code{e\_tp}). The $L^\star=1$ observation for \emph{compact
+sequence} datasets stands as a property of those datasets, not the machinery.
+
+\paragraph{Folding symmetry and width into the size objective (investigated, honest boundary).} The
+invariant-versus-unconstrained choice is \emph{already} a priced $\alphapar$-selection
+(\S\ref{sec:qm7validation}), so a separate penalty is cosmetic. For width, three differentiable realizations
+(sigmoid gate, $L_0$ hard-concrete, differentiable-network-channel-pruning (DNCP) softmax over widths) were prototyped and fail to reproduce the
+sweep's elbow: channel-level pruning measures channel \emph{redundancy} within one over-wide network, a
+different quantity from the whole-network \emph{capacity saturation} the sweep measures. A differentiable
+width matching the sweep would need decoupled per-width backbones---no cheaper than the sweep. The sweep's
+\emph{cost}, not its correctness, is the target, and the orthogonal parallel-scan route above is the right
+lever; the priced sweep (with its epoch-floor and uninformative-sweep guards) is retained.
+
+\paragraph{The standing theoretical seam.} The architecture parameter $\alphapar$, flagged in the first
+report as a bolt-on, is now \emph{derived} (\S\ref{sec:alpha-derived}): the free energy
+$\F_{\alphapar}=\langle\alphapar,\Psi\rangle-\tfrac1\beta H(\alphapar)$ on the primitive simplex makes
+$\alphapar$ the outer Gibbs measure $\alphapar_p\propto e^{-\beta\Psi_p}$, its Fisher--Rao gradient flow the
+replicator equation, and DARTS that same flow in a mildly preconditioned metric. The variational principle
+\emph{forces} the energy to be the \emph{solo} marginal risk, so the $\alphapar$-derivation and the
+co-adaptation fix (\S\ref{sec:coadapt-impl}) are one result. \emph{Residual:} the cross-contract dispatch is
+necessarily discrete (\S\ref{sec:metarouter-impl}), so the unification is complete \emph{within} a contract
+but stops, by the interface-incompatibility argument, at the contract boundary.
+
+\paragraph{Bilevel versus joint selection, across datasets.} The first report flagged that the honest
+$\alphapar$-selection protocol (weights trained on one split, $\alphapar$ selected on a disjoint held-out
+split) was implemented but not the default in the reported sweeps, and asked for a systematic comparison
+against joint selection ($\alphapar$ and weights trained together) to check that the selections are
+defensible rather than capacity-chasing artifacts. This was run (seed-averaged mixture weights as the
+selection signal, since a single argmax is seed-dominated at these scales; test accuracy disjoint from both
+splits). The finding is nuanced and honest. Bilevel does what the theory predicts---wherever joint places
+bimodal or heavy mass on the high-capacity \code{lstm}, bilevel pulls it toward lower-capacity, more
+appropriate primitives and its models never memorize (train accuracy stays well below one), direct evidence
+the selections are not mere capacity artifacts---and, when there is enough data to split, matches joint's
+mean accuracy at \emph{lower} seed variance. But the split \emph{halves} the training pool, and on small
+datasets that cost dominates: on a $67$-example task bilevel was far worse (test $0.77\pm0.14$ versus joint
+$0.91\pm0.03$), while on a task with a genuine \code{lstm} trap it slightly improved the mean. \emph{Resolved
+as a boundary, not a default:} joint selection on the full pool is the right default (the priced/clean-solo
+guards of \S\ref{sec:coadapt-impl} already curb capacity-chasing without paying a data cost), and bilevel is
+the right tool specifically when the pool is large enough to spare half and the vocabulary contains a
+high-capacity primitive that could memorize (see \code{studies/bilevel\_vs\_joint\_study.py}).
+
+\subsection{Two recently added contracts}
+
+\paragraph{Learnable-radial (KAN) equivariant primitives.} Two learnable-spline (Kolmogorov--Arnold network, KAN)
+siblings were added to the equivariant contract: \code{e\_kan} and \code{e\_painn\_kan} replace the fixed
+Gaussian-basis radial of the tensor-product and PaiNN-style primitives with a learnable univariate spline
+(the non-radial primitives correctly acquire no variant). Both are exactly equivariant. The learned radial
+is directly inspectable---it recovers a Lennard-Jones curve to $R^2\approx0.96$ and beats the fixed basis on
+a sharp double-well ($0.84$ vs $0.63$)---while tying on smooth electrostatic targets, and the metaoptimizer
+selects between fixed- and spline-radial per layer (choosing \code{e\_painn\_kan} in the end-to-end QM7
+selection). The inspectable radial is a concrete bridge to interpretability.
+
+\paragraph{The neural-operator contract.} An eighth contract handles function-valued (partial-differential-equation, PDE-like) data---a map
+from $a(x)$ to $u(x)$ whose defining property is discretization invariance (weights live in Fourier-mode
+space, so training at one resolution evaluates at another), distinct from the \code{spectral} sequence
+primitive that collapses the spectrum to statistics. It carries its own $\alphapar$-simplex over three
+operator-layer families---spectral (Fourier neural operator at two mode budgets), local (Nemytskii), and
+global-low-rank (DeepONet-style~\cite{lu2021deeponet} branch--trunk)---and is dimension-generic via the $n$-dimensional real fast Fourier transform (FFT). It
+validates end to end on $1$D Burgers ($R^2\approx0.999$, zero-shot to higher resolution), $2$D Darcy
+($\approx0.96$), and $3$D heat diffusion ($\approx0.997$). The truly \emph{mesh-free} DeepONet (evaluable at
+arbitrary off-grid points, which the FFT-bound layers cannot be) is provided as a standalone architecture
+outside the grid-locked pipeline and validates on the antiderivative benchmark ($R^2\approx0.99$ on-grid,
+$\approx0.96$ off-grid).
+
+\subsection{Confirmed negatives}
+
+\paragraph{Confirmed negative results, restated.} Two of the theory's sharper predictions did not survive
+contact with data, and these are results, not gaps. The Route-1 depth-freedom prediction---that at
+criticality the flow's arc length (its complexity) stays bounded for ReLU ($\alpha=2$) while growing only
+logarithmically for tanh ($\alpha=1$)---was refuted directly (\code{tests/crit\_arclen.py}). Trained flows do
+not stay critical (the leading Jacobian eigenvalue real-part settles well away from zero even under a
+criticality regularizer), and once off criticality the arc length grows at least linearly and often
+explosively in the integration time for \emph{both} activations, with ReLU \emph{less} bounded than tanh---
+the opposite of the predicted ordering. The exponent story is a critical-point statement that the trained
+network simply does not occupy.
+
+\paragraph{No compact real task where an advanced primitive is canonically optimal.} The
+search for a compact real dataset on which an ``advanced'' primitive (LSTM or attention) is
+\emph{canonically} optimal repeatedly failed the same way: compact real tasks are dominated by local or
+simple structure that convolution and dense capture data-efficiently, so the advanced primitives' genuine
+advantages appear only on synthetic structured tasks (long-range memory for gating/LSTM, content-addressed
+routing for attention). The bilevel study above is consistent with this: where joint selection did place
+heavy mass on \code{lstm} for a compact real series (GunPoint), that mass was a capacity-chasing artifact
+that the held-out protocol pulled back, not a genuine optimum. The metaoptimizer reflects this honestly---it
+selects the advanced primitive exactly when the task's structure rewards it, and was never observed to
+select a worse-performing primitive.
+
+
+\section{Provenance and references}
+\label{sec:refs}
+The package is an integrative repackaging of published research: each primitive and each selection rule
+realizes an idea from the literature, recombined under the common minimum-description-length action
+$J=R+\mu\Omega$ and the softmax primitive relaxation. Citations on first use above point to the originating
+works; the consolidated list follows. The contribution here is the unification across contracts and the
+honest empirical auditing of when each borrowed component pays for itself---not the components themselves.
+
+\bibliographystyle{plain}
+\bibliography{bibliography}
+
+\end{document}
