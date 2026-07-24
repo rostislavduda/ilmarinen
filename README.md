@@ -62,6 +62,38 @@ print(result["architecture"], result["value"])
 `functions(a, y, grid)` (operators). `AllGraph.route`/`.fit` dispatch to the right contract
 automatically; `explain`/`AllGraph.explain` reports the selected architecture as its own explanation.
 
+## Streaming large datasets (train on data bigger than RAM/VRAM)
+
+The `dense_tensor`/`graphs`/`functions` constructors hold the whole dataset in memory. To train on data
+that does not fit, wrap it in a **lazy source** and use the streaming constructors — the fit then pulls one
+minibatch at a time instead of materializing the dataset:
+
+```python
+from ilmarinen import AllGraph, AllData, MemmapDenseSource
+
+source = MemmapDenseSource("images.npy")           # memory-mapped; never fully loaded
+data   = AllData.dense_stream(source, y=labels, kind_hint="spatial")
+AllGraph(width=32, depth=2, epochs=30).fit(data, task="classification", n_out=10)
+```
+
+Streaming is **opt-in by constructor** (building the input any other way keeps the exact in-memory path)
+and, for the map-style sources, trains to **bit-for-bit identical weights** as the equivalent in-memory fit:
+
+- `AllData.dense_stream(DenseSource, kind_hint=...)` — dense contracts (sequence/spatial/volumetric/4d).
+- `AllData.graph_stream(GraphSource, kind_hint="graph"|"equivariant"|"set")` — relational contracts.
+- `AllData.functions_stream(OperatorSource)` — the neural-operator contract.
+
+Back a source with anything random-access: `Memmap{Dense,Operator}Source` over `.npy`/`np.memmap`,
+`LazyGraphSource(loader)` over per-graph files / HDF5 / a DB, or your own `DenseSource`/`GraphSource`/
+`OperatorSource` subclass. Selection (`select_size`, `select="gibbs"`, `tiebreak`, `angular_from_data`) runs
+under streaming on a bounded resident subsample (`stream_subsample_cap`, default 20 000) while the winner
+deploy-trains on the full stream. Two opt-in add-ons: `MemmapDenseSource(cache_size=…)` (a bounded LRU that
+avoids re-reads) and `AllGraph(stream_prefetch=True)` (overlaps the next minibatch's fetch with compute) —
+both preserve bit-identity. For a **forward-only** source (no random access, e.g. a network stream), use
+`AllData.dense_iter(IterableDenseSource, kind_hint=…, n_out=…)`; it uses a seeded windowed shuffle buffer and
+a hash-based train/val split — deterministic given the seed, but not identical to the in-memory fit. Runnable
+end-to-end examples: `python -m examples.streaming_dataset` (and `…streaming_graphs` / `…streaming_operator`).
+
 ## Device (CPU / GPU)
 
 `AllGraph(device=...)` accepts `"cpu"` (default), `"cuda"`, `"mps"`, or `"auto"` (picks CUDA >

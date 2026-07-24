@@ -19,6 +19,18 @@ class _ContractFitMixin:
         """Shared spatial/volumetric/4d deploy path: prepare the grid, default the primitive menu (with the
         optional kernel-from-xi augmentation), build via `build_fn(X, n_out, prims)`, train, and score. The
         three grid contracts differ only in builder, menu, grid rank, xi dimensionality, and eval batch size."""
+        if self._is_iterable(data.dense):
+            # forward-only regime: the source presents full-rank samples (no _as_grid fix-up); train via the
+            # windowed-shuffle loop and score with a single-pass streamed metric.
+            X = data.dense
+            if grid_rank is not None and X.dim() != grid_rank:
+                raise NotImplementedError(
+                    f"iterable {self.contract} source must present rank-{grid_rank} samples (channel + grid); got "
+                    f"rank {X.dim()}. The iterable regime applies no _as_grid channel fix-up.")
+            n_out = self._infer_nout(None, task, n_out if n_out is not None else getattr(X, "n_out", None))
+            net = build_fn(X, n_out, primitives or default_prims).to(self.device)
+            net = self._train_dense_iter(net, X, task, n_out, show_progress=True)
+            return self._iter_grid_eval(net, X, task, eval_bs)
         X = self._as_grid(data.dense, rank=grid_rank) if grid_rank is not None else data.dense
         n_out = self._infer_nout(data.y, task, n_out)
         prims = primitives or default_prims
@@ -28,29 +40,77 @@ class _ContractFitMixin:
                 self.route_detail = {**(self.route_detail or {}), "kernel_from_xi": kdetail}
         net = build_fn(X, n_out, prims).to(self.device)
         net = self._train_dense(net, X, data.y, task, show_progress=True)
+        if self._is_streaming(X):                        # accumulate the in-sample score without materializing n
+            return self._stream_grid_eval(net, X, eval_bs, data.y, task)
         out = self._deploy_grid_eval(net, X, eval_bs)
         return self._eval(net, out, data.y, task)
 
     def _fit_sequence(self, data, task, n_out, primitives):
         from ..models import build_schema
         X = data.dense
-        if X.dim() == 2:                                  # flat -> length-T sequence, 1 channel
+        if self._is_iterable(X):
+            # forward-only regime: rank-3 samples required (readout_select is blocked, so readout='mean').
+            if X.dim() != 3:
+                raise NotImplementedError(
+                    "iterable sequence source must present rank-3 samples (T, features) per sample; got rank "
+                    f"{X.dim()}.")
+            n_out = self._infer_nout(None, task, n_out if n_out is not None else getattr(X, "n_out", None))
+            n_in = X.shape[2]
+            prims = primitives or ("plain", "gated", "lstm", "conv", "dilconv", "attention", "dense", "spectral", "norm")
+            net = build_schema(n_in=n_in, width=self.width, depth=self.depth, n_out=n_out,
+                               primitives=prims, readout="mean").to(self.device)
+            fwd = lambda xb: net.forward_seq_readout(xb, 1).squeeze(1)
+            net = self._train_dense_iter(net, X, task, n_out, forward=fwd, show_progress=True)
+            res = self._iter_grid_eval(net, X, task, 256, forward=fwd)
+            res["readout"] = "mean"
+            return res
+        streaming = self._is_streaming(X)
+        if streaming:
+            # Streaming sequence sources must present rank-3 samples (n, T, features); the flat (n, T) ->
+            # (n, T, 1) unsqueeze is a whole-tensor op with no per-batch analogue here, so we require the
+            # feature axis up front rather than silently reshaping.
+            if X.dim() != 3:
+                raise NotImplementedError(
+                    "streaming sequence contract requires rank-3 samples (n, T, features); reshape the source "
+                    "so each sample carries its feature axis (e.g. (T, 1) per sample).")
+        elif X.dim() == 2:                                # flat -> length-T sequence, 1 channel
             X = X.unsqueeze(-1)
         n_out = self._infer_nout(data.y, task, n_out); n_in = X.shape[2]
         # default menu = 9 of the 11-core sequence vocabulary (_SEQ_CORES in schema.py); the two
         # SSM cores (linssm, selssm) are opt-in via an explicit `primitives=` list, not the default.
         prims = primitives or ("plain", "gated", "lstm", "conv", "dilconv", "attention", "dense", "spectral", "norm")
-        readout = self._select_seq_readout(X, data.y, task, n_out, n_in, prims)
+        # readout choice is a hyperparameter: under streaming, bake it off on a bounded resident subsample (drawn
+        # once), then deploy-train the winner on all N via streaming. Off (returns 'mean') unless readout_select.
+        readout = self._select_seq_readout_streaming(data, task, n_out, n_in, prims) if streaming \
+            else self._select_seq_readout(X, data.y, task, n_out, n_in, prims)
         fwd_of = (lambda net: (lambda xb: net.forward(xb))) if readout == "flatten" \
             else (lambda net: (lambda xb: net.forward_seq_readout(xb, 1).squeeze(1)))
         net = build_schema(n_in=n_in, width=self.width, depth=self.depth, n_out=n_out,
                                        primitives=prims, readout=readout).to(self.device)
         net = self._train_dense(net, X, data.y, task, forward=fwd_of(net), show_progress=True)
-        with torch.no_grad():
-            out = fwd_of(net)(X.to(self.device)).cpu()
-        res = self._eval(net, out, data.y, task)
+        if streaming:
+            # Chunked, accumulated eval replacing the resident single-batch forward. Chunking at bs=256 is
+            # OUTPUT-SAFE here (unlike the grid contracts, whose BatchNorm uses batch statistics in train mode):
+            # the sequence vocabulary is entirely per-sample (recurrent / conv / attention / LayerNorm / spectral),
+            # so a per-sequence output does not depend on the batch it is scored in. If a batch-coupling primitive
+            # (BatchNorm / batch-Dropout) is ever added to the sequence menu, this must switch to the resident
+            # eval batch size to preserve parity.
+            res = self._stream_grid_eval(net, X, 256, data.y, task, forward=fwd_of(net))
+        else:
+            with torch.no_grad():
+                out = fwd_of(net)(X.to(self.device)).cpu()
+            res = self._eval(net, out, data.y, task)
         res["readout"] = readout
         return res
+
+    def _select_seq_readout_streaming(self, data, task, n_out, n_in, prims):
+        """Streaming readout bake-off: run the resident `_select_seq_readout` on a bounded in-RAM subsample of
+        the source (drawn once). The bake-off only CHOOSES a hyperparameter; the winner then deploy-trains on
+        all N via streaming. Returns 'mean' immediately (no source read) unless readout_select is enabled."""
+        if not self.readout_select:
+            return "mean"
+        sub = self._streaming_subsample(data)            # memoized (shared with any co-occurring size selection)
+        return self._select_seq_readout(sub.dense, sub.y, task, n_out, n_in, prims)
 
     def _select_seq_readout(self, X, y, task, n_out, n_in, prims):
         """Choose the sequence readout by a priced held-out bake-off between 'mean' (pool over time) and
@@ -411,8 +471,10 @@ class _ContractFitMixin:
     def _fit_set(self, data, task, n_out, primitives):
         from ..models import build_set_schema
         # sets share the graph-style batch but have no edges
+        streaming = self._is_streaming_graph(data)
         X, batch, n_sets, y = self._collate_sets(data)
-        n_out = self._infer_nout(data.y, task, n_out); n_in = data.node_feats[0].shape[1]
+        n_out = self._infer_nout(data.y, task, n_out)
+        n_in = data.node_feats.n_in if streaming else data.node_feats[0].shape[1]
         prims = primitives or ("deepsets", "element_mlp", "norm")   # SAB is O(N^2); opt-in via primitives
         net = build_set_schema(n_in=n_in, width=self.width, depth=self.depth, n_out=n_out,
                                            primitives=prims, readout="mean").to(self.device)
@@ -421,14 +483,28 @@ class _ContractFitMixin:
         lf = nn.CrossEntropyLoss() if task == "classification" else nn.MSELoss()
         yt = torch.as_tensor(y)
         yt_dev = (yt.long() if task == "classification" else yt.float().unsqueeze(1)).to(self.device)
-        cache = self._prepare_batch_cache(data, to_device=True)   # PERF: node feats -> device tensors ONCE
+        # STREAMING: skip the full on-device node cache; _subbatch_sets fetches each set from the GraphSource
+        # per minibatch (cache=None) and _assemble_batch moves it to the device. Bit-identical to resident.
+        cache = None if streaming else self._prepare_batch_cache(data, to_device=True)
         tr_idx, va_idx = self._auto_val_split(n_sets)
         stopper = self._make_stopper()
-        def _sloss(ids):
-            Xb, bb, ng = self._subbatch_sets(data, ids, cache=cache)   # already on device
-            return lf(net(Xb, bb, ng), yt_dev[ids])
+        prefetch = None
+        if streaming:
+            src = data.node_feats
+            node_t = lambda i: src.node(i)
+            _sfetch = lambda ids: self._collate_cpu(ids, node_t)
+            def _scompute(ids, cpu):
+                Xb, _ei, _p, bb, ng = self._batch_to_device(cpu)
+                return lf(net(Xb, bb, ng), yt_dev[ids])
+            _sloss = lambda ids: _scompute(ids, _sfetch(ids))
+            prefetch = (_sfetch, _scompute) if self._prefetch_depth() > 0 else None
+        else:
+            def _sloss(ids):
+                Xb, bb, ng = self._subbatch_sets(data, ids, cache=cache)   # already on device
+                return lf(net(Xb, bb, ng), yt_dev[ids])
         permute = lambda idx: idx[np.random.permutation(len(idx))]
-        self._run_epochs(net, opt, tr_idx, va_idx, stopper, _sloss, self._tb(self._SET_TRAIN_BATCH), permute)
+        self._run_epochs(net, opt, tr_idx, va_idx, stopper, _sloss, self._tb(self._SET_TRAIN_BATCH), permute,
+                         prefetch=prefetch)
         # eval
         outs = []
         for j in range(0, n_sets, 128):
@@ -493,18 +569,31 @@ class _ContractFitMixin:
         discretization-invariant: the learned weights live in Fourier-mode space, so a model trained here at
         one resolution evaluates at any other (verified separately)."""
         from ..models import build_operator_schema
-        a = data.dense if isinstance(data.dense, torch.Tensor) else torch.tensor(np.asarray(data.dense), dtype=torch.float32)
-        x = data.grid if isinstance(data.grid, torch.Tensor) else torch.tensor(np.asarray(data.grid), dtype=torch.float32)
-        u = torch.as_tensor(np.asarray(data.y), dtype=torch.float32)
-        if torch.isnan(u).any() or torch.isnan(a).any():
-            raise ValueError("operator contract received NaN in the input/target fields; check the data "
-                             "generation (e.g. an unstable PDE solver) before fitting.")
-        sdims = getattr(data, "spatial_dims", 1)
-        # input channels: a has shape (n, *grid) [scalar] or (n, *grid, c) [vector]
-        in_ch = a.shape[-1] if a.dim() == 2 + sdims else 1
+        streaming = self._is_streaming_operator(data)
+        if streaming:
+            # STREAMING: read shape metadata from the OperatorSource (no field materialized); a/x/u are fetched
+            # per minibatch below. The upfront NaN scan is skipped (it would read every field); streaming
+            # assumes clean fields, as documented on functions_stream.
+            src = data.dense
+            sdims = src.spatial_dims
+            a_shape = src.a_shape                         # full (n, *grid[, c])
+            n = int(a_shape[0])
+            in_ch = a_shape[-1] if len(a_shape) == 2 + sdims else 1
+            grid_min = min(int(s) for s in a_shape[1:1 + sdims])
+        else:
+            a = data.dense if isinstance(data.dense, torch.Tensor) else torch.tensor(np.asarray(data.dense), dtype=torch.float32)
+            x = data.grid if isinstance(data.grid, torch.Tensor) else torch.tensor(np.asarray(data.grid), dtype=torch.float32)
+            u = torch.as_tensor(np.asarray(data.y), dtype=torch.float32)
+            if torch.isnan(u).any() or torch.isnan(a).any():
+                raise ValueError("operator contract received NaN in the input/target fields; check the data "
+                                 "generation (e.g. an unstable PDE solver) before fitting.")
+            sdims = getattr(data, "spatial_dims", 1)
+            # input channels: a has shape (n, *grid) [scalar] or (n, *grid, c) [vector]
+            in_ch = a.shape[-1] if a.dim() == 2 + sdims else 1
+            n = a.shape[0]
+            grid_min = min(int(s) for s in a.shape[1:1 + sdims])
         prims = primitives or ("fourier", "fourier_wide", "local", "deeponet")
         # keep the mode budget below the smallest grid axis so the truncation is well-posed at train res
-        grid_min = min(int(s) for s in a.shape[1:1 + sdims])
         modes = max(2, min(12, grid_min // 2))
         mode_override = None
         # B7: optionally SELECT the mode budget by the priced marginal-value rule (the operator-contract analogue
@@ -522,18 +611,41 @@ class _ContractFitMixin:
                                                 spatial_dims=sdims, mode_override=mode_override).to(self.device)
         self._break_alpha_symmetry(net)          # sparse: seed the mixture off uniform
         opt = torch.optim.Adam(net.parameters(), lr=self.lr, weight_decay=self._wd())
-        n = a.shape[0]
-        a_d, x_d, u_d = a.to(self.device), x.to(self.device), u.to(self.device)
         tr_idx, va_idx = self._auto_val_split(n)
         stopper = self._make_stopper()
-        def _oloss(ids):
-            return ((net(a_d[ids], x_d[ids]) - u_d[ids]) ** 2).mean()
+        prefetch = None
+        if streaming:
+            # fetch a/grid/u for the minibatch from the source (per batch), then the same field MSE. The
+            # np.random.permutation shuffle and the val split are unchanged, so the fit is bit-for-bit
+            # equivalent to the resident path (which indexes whole-dataset device tensors). fetch (worker-safe
+            # CPU read) is split from compute (device move + forward + loss) for async prefetch.
+            pin = self._resolve_pin()
+            def _ofetch(ids):
+                ids = ids if isinstance(ids, np.ndarray) else np.asarray(ids)
+                ab, xb, ub = src.a(ids), src.grid(ids), src.u(ids)
+                if pin:
+                    ab, xb, ub = ab.pin_memory(), xb.pin_memory(), ub.pin_memory()
+                return ab, xb, ub
+            def _ocompute(ids, payload):
+                ab, xb, ub = (t.to(self.device, non_blocking=pin) for t in payload)
+                return ((net(ab, xb) - ub) ** 2).mean()
+            _oloss = lambda ids: _ocompute(ids, _ofetch(ids))
+            prefetch = (_ofetch, _ocompute) if self._prefetch_depth() > 0 else None
+        else:
+            a_d, x_d, u_d = a.to(self.device), x.to(self.device), u.to(self.device)
+            def _oloss(ids):
+                return ((net(a_d[ids], x_d[ids]) - u_d[ids]) ** 2).mean()
         permute = lambda idx: idx[np.random.permutation(len(idx))]
-        self._run_epochs(net, opt, tr_idx, va_idx, stopper, _oloss, self._tb(), permute)
-        with torch.no_grad():
-            pred = net(a_d, x_d).cpu().numpy()
-        uy = u.numpy()
-        r2 = 1.0 - ((pred - uy) ** 2).sum() / (((uy - uy.mean()) ** 2).sum() + 1e-12)
+        self._run_epochs(net, opt, tr_idx, va_idx, stopper, _oloss, self._tb(), permute, prefetch=prefetch)
+        if streaming:
+            r2 = self._stream_operator_eval(net, src, self._tb())   # streamed two-pass field-R2 (no full pred/u)
+        else:
+            with torch.no_grad():
+                pred = net(a_d, x_d).cpu().numpy()
+            uy = u.numpy()
+            # accumulate the field mean in float64 (matches the streamed two-pass eval; a float32 mean drifts,
+            # spuriously inflating ss_tot on a (near-)constant target and disagreeing with the streamed R2).
+            r2 = 1.0 - ((pred - uy) ** 2).sum() / (((uy - uy.astype(np.float64).mean()) ** 2).sum() + 1e-12)
         self.net = net
         # architecture = the peak (argmax) primitive per cell, from the alpha simplex
         arch = [net.cells[i].primitives[int(net.cells[i].alpha_peak.argmax())] for i in range(len(net.cells))]
@@ -541,8 +653,9 @@ class _ContractFitMixin:
                 "architecture": arch, "task": task}
 
     def _fit_relational(self, data, task, n_out, primitives, builder, with_pos, kind):
+        streaming = self._is_streaming_graph(data)
         n_out = self._infer_nout(data.y, task, n_out)
-        n_in = data.node_feats[0].shape[1]
+        n_in = data.node_feats.n_in if streaming else data.node_feats[0].shape[1]
         if kind == "graph":
             prims = primitives or ("gcn", "gin", "pna", "gat", "norm")
             net = builder(n_in=n_in, width=self.width, depth=self.depth, n_out=n_out, primitives=prims, readout="mean").to(self.device)
@@ -550,7 +663,7 @@ class _ContractFitMixin:
             prims = primitives or ("e_tp", "e_painn", "e_gate", "e_norm")
             c1 = self.width // 2
             if getattr(self, "angular_from_data", False):
-                keep_vec, adetail = self._select_angular_order(data, task)
+                keep_vec, adetail = self._select_angular_order(self._streaming_subsample(data) or data, task)
                 if adetail is not None:
                     self.route_detail = {**(self.route_detail or {}), "angular_from_data": adetail}
                 if not keep_vec:
@@ -560,15 +673,32 @@ class _ContractFitMixin:
         opt = torch.optim.Adam(net.parameters(), lr=self.lr, weight_decay=self._wd())
         lf = nn.CrossEntropyLoss() if task == "classification" else nn.MSELoss()
         y = np.asarray(data.y); yt = torch.as_tensor(y); ng_total = len(data.node_feats)
-        cache = self._prepare_batch_cache(data, with_pos=with_pos, with_edges=True)   # graphs -> tensors ONCE
+        # STREAMING: skip the full per-graph tensor cache; _forward_relational fetches each graph from the
+        # GraphSource per minibatch instead (cache=None). The np.random.permutation shuffle, the val split, and
+        # the forward are otherwise identical, so the fit is bit-for-bit equivalent to the resident path.
+        cache = None if streaming else self._prepare_batch_cache(data, with_pos=with_pos, with_edges=True)
         tr_idx, va_idx = self._auto_val_split(ng_total)
         stopper = self._make_stopper()
-        def _rloss(ids):
-            out = self._forward_relational(net, data, ids, with_pos, cache=cache)
-            tgt = yt[ids].long().to(self.device) if task == "classification" else yt[ids].float().unsqueeze(1).to(self.device)
-            return lf(out, tgt)
+        def _tgt(ids):
+            return yt[ids].long().to(self.device) if task == "classification" else yt[ids].float().unsqueeze(1).to(self.device)
+        prefetch = None
+        if streaming:
+            # split fetch (worker-safe CPU collate from the GraphSource) from compute (device move + forward + loss)
+            src = data.node_feats
+            node_t = lambda i: src.node(i); edge_t = lambda i: src.edge(i)
+            pos_t = (lambda i: src.pos(i)) if with_pos else None
+            _rfetch = lambda ids: self._collate_cpu(ids, node_t, edge_t, pos_t)
+            def _rcompute(ids, cpu):
+                x, ei, p, b, ng = self._batch_to_device(cpu)
+                out = net(x, p, ei, b, ng) if with_pos else net(x, ei, b, ng)
+                return lf(out, _tgt(ids))
+            _rloss = lambda ids: _rcompute(ids, _rfetch(ids))
+            prefetch = (_rfetch, _rcompute) if self._prefetch_depth() > 0 else None
+        else:
+            def _rloss(ids):
+                return lf(self._forward_relational(net, data, ids, with_pos, cache=cache), _tgt(ids))
         permute = lambda idx: idx[np.random.permutation(len(idx))]
-        self._run_epochs(net, opt, tr_idx, va_idx, stopper, _rloss, self._tb(), permute)
+        self._run_epochs(net, opt, tr_idx, va_idx, stopper, _rloss, self._tb(), permute, prefetch=prefetch)
         outs = []
         for j in range(0, ng_total, 64):
             ids = np.arange(j, min(j + 64, ng_total))
@@ -576,11 +706,9 @@ class _ContractFitMixin:
         return self._eval(net, torch.cat(outs), y, task)
 
     # ---------------------------------------------------------------- collate / forward helpers
-    def _assemble_batch(self, ids, node_t, edge_t=None, pos_t=None):
-        """Collate variable-size samples (graphs/sets) selected by `ids` into one batched call's tensors.
-        node_t/edge_t/pos_t are accessors i -> tensor (edge_t/pos_t optional). Returns (x, ei, p, batch, ng),
-        each moved to the compute device; ei/p are None when their accessor is omitted. This is the single
-        collation loop shared by the relational-forward, contract-forward and set-subbatch paths."""
+    def _collate_cpu(self, ids, node_t, edge_t=None, pos_t=None):
+        """The RNG-free CPU half of collation: run the per-sample accessors and stack (NO device move). Returns
+        a payload dict (xs/batch/eis/pos lists + ng). Safe to run on an async-prefetch worker thread."""
         xs, batch, eis, pos = [], [], [], []
         off = 0
         for gi, i in enumerate(ids):
@@ -591,12 +719,23 @@ class _ContractFitMixin:
             if pos_t is not None:
                 pos.append(pos_t(i))
             off += n
+        return {"xs": xs, "batch": batch, "eis": eis if edge_t is not None else None,
+                "pos": pos if pos_t is not None else None, "ng": len(ids)}
+
+    def _batch_to_device(self, cpu):
+        """The main-thread half of collation: cat the CPU payload and move to the compute device."""
         dev = self.device
-        x = torch.cat(xs, 0).to(dev)
-        b = torch.cat(batch, 0).to(dev)
-        ei = torch.cat(eis, 1).to(dev) if edge_t is not None else None
-        p = torch.cat(pos, 0).to(dev) if pos_t is not None else None
-        return x, ei, p, b, len(ids)
+        x = torch.cat(cpu["xs"], 0).to(dev)
+        b = torch.cat(cpu["batch"], 0).to(dev)
+        ei = torch.cat(cpu["eis"], 1).to(dev) if cpu["eis"] is not None else None
+        p = torch.cat(cpu["pos"], 0).to(dev) if cpu["pos"] is not None else None
+        return x, ei, p, b, cpu["ng"]
+
+    def _assemble_batch(self, ids, node_t, edge_t=None, pos_t=None):
+        """Collate variable-size samples (graphs/sets) selected by `ids` into one batched call's tensors, each
+        moved to the compute device; ei/p are None when their accessor is omitted. Defined as the composition of
+        _collate_cpu (worker-safe) and _batch_to_device so every existing caller is byte-identical."""
+        return self._batch_to_device(self._collate_cpu(ids, node_t, edge_t, pos_t))
 
     def _prepare_batch_cache(self, data, with_pos=False, with_edges=False, to_device=False):
         """Pre-convert each sample's static arrays (node features, and optionally edges/positions) to tensors
@@ -617,6 +756,11 @@ class _ContractFitMixin:
             node, edge, pos = cache["node"], cache["edge"], cache["pos"]
             node_t = lambda i: node[i]; edge_t = lambda i: edge[i]
             pos_t = (lambda i: pos[i]) if with_pos else None
+        elif self._is_streaming_graph(data):             # STREAMING: fetch each graph from the GraphSource
+            src = data.node_feats
+            node_t = lambda i: src.node(i)
+            edge_t = lambda i: src.edge(i)
+            pos_t = (lambda i: src.pos(i)) if with_pos else None
         else:                                            # on-the-fly (callers without a cache, e.g. size probes)
             node_t = lambda i: torch.as_tensor(data.node_feats[i], dtype=torch.float32)
             edge_t = lambda i: torch.as_tensor(data.edges[i], dtype=torch.long)
@@ -630,6 +774,8 @@ class _ContractFitMixin:
     def _subbatch_sets(self, data, ids, cache=None):
         if cache is not None:
             node = cache["node"]; node_t = lambda i: node[i]
+        elif self._is_streaming_graph(data):             # STREAMING: fetch each set from the GraphSource
+            src = data.node_feats; node_t = lambda i: src.node(i)
         else:
             node_t = lambda i: torch.as_tensor(data.node_feats[i], dtype=torch.float32)
         x, _ei, _p, b, ng = self._assemble_batch(ids, node_t)
@@ -644,6 +790,13 @@ class _ContractFitMixin:
 
         The result is always made contiguous: a loader may hand us a channels-last / transposed view, and
         MPS conv+BatchNorm backward requires contiguous NCHW input (CPU tolerates non-contiguous)."""
+        if self._is_streaming(X):
+            # STREAMING: return a _GridView that records the (channel-insert) rank fix-up and applies it inside
+            # get() per batch, while exposing the transformed shape/dim so build_fn reads it without
+            # materializing n rows. The flat-vector -> latent-lattice reshape branch below is unreachable here
+            # (a streaming input requires a dense kind_hint, so mode discovery never runs).
+            from .allgraph_streaming import _GridView
+            return _GridView(X, rank)
         if X.dim() == rank:
             return X.contiguous()
         if X.dim() == rank - 1:

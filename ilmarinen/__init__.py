@@ -39,6 +39,12 @@ spectral primitives fall back to CPU transparently on PyTorch/macOS versions lac
 # ---- the primary entry point (the physicist's pipeline) -----------------------------------------------
 from .core.allgraph import AllGraph, AllData
 
+# ---- opt-in dataset streaming (train on data larger than RAM/VRAM) ------------------------------------
+from .core.allgraph_streaming import (DenseSource, InMemoryDenseSource, MemmapDenseSource,
+                                      GraphSource, InMemoryGraphSource, LazyGraphSource,
+                                      OperatorSource, InMemoryOperatorSource, MemmapOperatorSource,
+                                      IterableDenseSource, InMemoryIterableDenseSource)
+
 # ---- device selection ----------------------------------------------------------------------------------
 from .device import best_device, resolve_device, mps_available
 
@@ -103,11 +109,16 @@ def __getattr__(name):          # PEP 562: lazily resolve + deprecation-warn the
 def __dir__():                  # keep the deprecated names discoverable (and visible to test_api_surface)
     return sorted(list(globals()) + list(_LEGACY_EXPORTS))
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 __all__ = [
     # primary API
     "AllGraph", "AllData",
+    # opt-in dataset streaming
+    "DenseSource", "InMemoryDenseSource", "MemmapDenseSource",
+    "GraphSource", "InMemoryGraphSource", "LazyGraphSource",
+    "OperatorSource", "InMemoryOperatorSource", "MemmapOperatorSource",
+    "IterableDenseSource", "InMemoryIterableDenseSource",
     # device
     "best_device", "resolve_device", "mps_available",
     # pipeline stages

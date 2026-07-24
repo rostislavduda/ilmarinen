@@ -76,6 +76,134 @@ class AllData:
         return cls(kind_hint=kind_hint, dense=X, y=y)
 
     @classmethod
+    def dense_stream(cls, source, y=None, kind_hint=None):
+        """A STREAMING dense input: `source` is a :class:`~ilmarinen.core.allgraph_streaming.DenseSource` that
+        yields minibatches on demand, so the full (n, *sample_shape) tensor is NEVER materialized. Use this to
+        train on datasets larger than host RAM / device memory (the dense contracts otherwise move the whole
+        tensor onto the compute device at once).
+
+        Opt-in is by THIS constructor alone: building via dense_tensor / graphs / point_sets / functions keeps
+        the exact in-memory code path, so resident behaviour and performance are unchanged. `kind_hint` is
+        REQUIRED and must name a dense contract ('sequence' | 'spatial' | 'volumetric' | '4d') so routing never
+        falls back to the flat-vector mode-discovery pass (which would materialize the whole matrix). `y`
+        (targets) stays resident -- labels are small even when the features are out-of-core.
+
+        FIRST CUT: streaming covers the deployed dense fit with select in {'argmax','sparse'}, auto_epoch, and
+        readout_select. select_size / select='gibbs' / tiebreak / the priced-* and report_* diagnostics are not
+        yet supported under streaming and raise a clear error in :meth:`AllGraph.fit`. Note readout_select is
+        supported by drawing ONE bounded resident subsample (up to stream_subsample_cap samples) for the readout
+        bake-off, so it relaxes the strict single-minibatch RAM footprint of the pure deploy fit -- lower
+        stream_subsample_cap (or leave readout_select off) if that peak allocation is a concern."""
+        from .allgraph_streaming import DenseSource
+        if not isinstance(source, DenseSource):
+            raise TypeError(
+                f"dense_stream(source=...) expects a DenseSource (e.g. MemmapDenseSource over a .npy file); "
+                f"got {type(source).__name__}. See ilmarinen.core.allgraph_streaming.")
+        if kind_hint is None:
+            raise ValueError(
+                "dense_stream requires an explicit kind_hint in {'sequence','spatial','volumetric','4d'} so "
+                "routing never materializes the source; pass e.g. kind_hint='spatial'.")
+        if kind_hint not in _DENSE_CONTRACTS:
+            raise ValueError(
+                f"dense_stream kind_hint must be a dense contract {sorted(_DENSE_CONTRACTS)}; got {kind_hint!r}. "
+                f"For relational data use AllData.graph_stream(...).")
+        return cls(kind_hint=kind_hint, dense=source, y=y)
+
+    @classmethod
+    def graph_stream(cls, source, y=None, kind_hint=None):
+        """A STREAMING relational input: `source` is a :class:`~ilmarinen.core.allgraph_streaming.GraphSource`
+        that yields one graph's (node features, optional edges, optional 3D positions) on demand, so the whole
+        list of variable-size graphs is NEVER materialized. Use this to train the relational contracts on graph
+        datasets larger than host RAM (the resident path pre-converts every graph to tensors up front).
+
+        Opt-in is by THIS constructor alone (the source is stored as `node_feats`, the field type dispatch reads,
+        so resident lists keep their exact path). `kind_hint` is REQUIRED and must name a relational contract:
+          * 'graph'       -- topology only; the source must carry edges (has_edges).
+          * 'equivariant' -- geometric graph; the source must carry BOTH edges and positions.
+          * 'set'         -- unordered point set; edges are ignored.
+        `y` (targets) stays resident. Per-graph outputs are tiny, so the whole relational streaming path adds no
+        per-node materialization.
+
+        FIRST CUT: streaming covers the deployed relational fit with select in {'argmax','sparse'} and
+        auto_epoch. select_size / select='gibbs' / tiebreak / angular_from_data / the priced-* and report_*
+        diagnostics are not yet supported under streaming and raise a clear error in :meth:`AllGraph.fit`."""
+        from .allgraph_streaming import GraphSource
+        if not isinstance(source, GraphSource):
+            raise TypeError(
+                f"graph_stream(source=...) expects a GraphSource (e.g. InMemoryGraphSource / LazyGraphSource); "
+                f"got {type(source).__name__}. See ilmarinen.core.allgraph_streaming.")
+        if kind_hint is None:
+            raise ValueError(
+                "graph_stream requires an explicit kind_hint in {'graph','equivariant','set'}; pass e.g. "
+                "kind_hint='graph'.")
+        if kind_hint not in _IRREGULAR_CONTRACTS:
+            raise ValueError(
+                f"graph_stream kind_hint must be a relational contract {sorted(_IRREGULAR_CONTRACTS)}; got "
+                f"{kind_hint!r}. For dense data use AllData.dense_stream(...).")
+        if kind_hint in ("graph", "equivariant") and not source.has_edges:
+            raise ValueError(
+                f"kind_hint={kind_hint!r} needs edges, but the GraphSource reports has_edges=False. Provide a "
+                f"source that yields edge_index per graph, or use kind_hint='set'.")
+        if kind_hint == "equivariant" and not source.has_pos:
+            raise ValueError(
+                "kind_hint='equivariant' needs 3D positions, but the GraphSource reports has_pos=False.")
+        return cls(kind_hint=kind_hint, node_feats=source, y=y)
+
+    @classmethod
+    def functions_stream(cls, source, kind_hint="operator"):
+        """A STREAMING neural-operator input: `source` is an
+        :class:`~ilmarinen.core.allgraph_streaming.OperatorSource` that yields per-minibatch input fields a(x),
+        grid coordinates x, and target fields u(x) on demand, so neither the (large, field-valued) inputs NOR
+        the (large, field-valued) targets are ever fully resident. Use this to train the operator contract on
+        function-to-function datasets larger than RAM. Unlike every other contract, the operator TARGET is
+        field-valued, so its streamed field-R2 is computed in a two-pass accumulation (global field mean, then
+        residual/total sums of squares) rather than from a resident target.
+
+        `kind_hint` must be 'operator'. Opt-in is by this constructor alone (the source is stored as `dense`).
+
+        FIRST CUT: streaming covers the deployed operator fit with select in {'argmax','sparse'} and auto_epoch.
+        price_modes (mode-budget selection) and the priced-* / report_* diagnostics re-read the fields and are
+        not yet supported under streaming -- they raise a clear error in :meth:`AllGraph.fit`."""
+        from .allgraph_streaming import OperatorSource
+        if not isinstance(source, OperatorSource):
+            raise TypeError(
+                f"functions_stream(source=...) expects an OperatorSource (e.g. InMemoryOperatorSource / "
+                f"MemmapOperatorSource); got {type(source).__name__}. See ilmarinen.core.allgraph_streaming.")
+        if kind_hint != "operator":
+            raise ValueError(f"functions_stream kind_hint must be 'operator'; got {kind_hint!r}.")
+        obj = cls(kind_hint="operator", dense=source)
+        obj.spatial_dims = source.spatial_dims
+        return obj
+
+    @classmethod
+    def dense_iter(cls, source, kind_hint=None, n_out=None):
+        """A FORWARD-ONLY (non-random-access) dense input: `source` is an
+        :class:`~ilmarinen.core.allgraph_streaming.IterableDenseSource` that only yields ``(id, x, y)`` per
+        sample (no indexing, no length). Use it for data that cannot be indexed/shuffled by position.
+
+        Because the map-style loop needs random access + a known length, an iterable source trains via a
+        SEPARATE regime (a seeded windowed shuffle buffer + a hash-based train/val split). GUARANTEE:
+        deterministic given the seed, but -- unlike AllData.dense_stream -- NOT bit-identical to the resident
+        fit (the shuffle order and the val partition differ by construction). `kind_hint` must be a dense
+        contract; `n_out` (class count) is REQUIRED for classification since the targets stream by and cannot be
+        scanned. Selection (select_size / gibbs / tiebreak / readout_select) is not available here (a forward-only
+        source cannot draw a random-access subsample); select must be 'argmax' or 'sparse'."""
+        from .allgraph_streaming import IterableDenseSource
+        if not isinstance(source, IterableDenseSource):
+            raise TypeError(
+                f"dense_iter(source=...) expects an IterableDenseSource; got {type(source).__name__}. See "
+                f"ilmarinen.core.allgraph_streaming.")
+        if kind_hint is None:
+            raise ValueError("dense_iter requires an explicit kind_hint in "
+                             "{'sequence','spatial','volumetric','4d'}; pass e.g. kind_hint='spatial'.")
+        if kind_hint not in _DENSE_CONTRACTS:
+            raise ValueError(f"dense_iter kind_hint must be a dense contract {sorted(_DENSE_CONTRACTS)}; got "
+                             f"{kind_hint!r}.")
+        if n_out is not None:
+            source.n_out = int(n_out)
+        return cls(kind_hint=kind_hint, dense=source, y=None)
+
+    @classmethod
     def graphs(cls, node_feats, edges, y=None, positions=None):
         """A batch of graphs (nodes + edges). If positions is given, this is an equivariant graph."""
         return cls(kind_hint=None, node_feats=node_feats, edges=edges, positions=positions, y=y)
@@ -242,7 +370,9 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                  developmental_llc=False, developmental_llc_checkpoints=None,
                  developmental_llc_epochs=None, report_thermo=False, report_response=False,
                  report_ledger=False, progress=False,
-                 auto_epoch=None, auto_epoch_patience=4, auto_epoch_min_delta=0.01, auto_epoch_min_epochs=5):
+                 auto_epoch=None, auto_epoch_patience=4, auto_epoch_min_delta=0.01, auto_epoch_min_epochs=5,
+                 stream_subsample_cap=20000, stream_pin_memory=None, stream_prefetch=False,
+                 stream_shuffle_buffer=8192):
         self.width = width; self.depth = depth; self.epochs = epochs; self.lr = lr
         self.weight_decay = weight_decay   # None -> per-contract default (_WEIGHT_DECAY / _DENSE_WEIGHT_DECAY); see _wd
         self.train_batch = train_batch     # None -> per-contract default (_TRAIN_BATCH / _SET_TRAIN_BATCH); see _tb
@@ -408,6 +538,21 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         self.auto_epoch_patience = auto_epoch_patience
         self.auto_epoch_min_delta = auto_epoch_min_delta
         self.auto_epoch_min_epochs = auto_epoch_min_epochs
+        # opt-in dataset streaming (see core/allgraph_streaming.py). Both are INERT unless the data is built
+        # with AllData.dense_stream: stream_subsample_cap bounds the resident subsample drawn once from the
+        # source for any search/selection sub-fit; stream_pin_memory (None -> auto: pin only on CUDA) enables
+        # host-pinned + non_blocking H2D copies of each streamed minibatch.
+        self.stream_subsample_cap = int(stream_subsample_cap)
+        self.stream_pin_memory = stream_pin_memory
+        # stream_prefetch (item 3): overlap the next minibatch's RNG-free fetch with the current batch's compute
+        # on a background thread; bit-identical to prefetch off. False/0 -> off; True -> depth 1; int k -> depth k.
+        if not (stream_prefetch is False or stream_prefetch is None
+                or (isinstance(stream_prefetch, bool))
+                or (isinstance(stream_prefetch, int) and stream_prefetch >= 0)):
+            raise ValueError(f"stream_prefetch must be False/True or a non-negative int; got {stream_prefetch!r}.")
+        self.stream_prefetch = stream_prefetch
+        # stream_shuffle_buffer (item 4): windowed shuffle-buffer size for the forward-only iterable regime.
+        self.stream_shuffle_buffer = int(stream_shuffle_buffer)
         self.net = None; self.contract = None; self.route_detail = None
         self._infer_task = None; self._infer_readout = None   # set by fit(); used by predict()/save()
 
@@ -534,6 +679,16 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         fam, reason = route_type(data, self.equivariant_if_positions)
         if fam != "_dense":
             return fam, {"level1": reason}
+        # A streaming DenseSource reaching Level-2 grid-rank dispatch means it was attached WITHOUT a kind_hint
+        # (dense_stream forbids that; this is only reachable via the raw AllData(dense=source) constructor).
+        # route_grid_rank would then try to materialize a flat source (np.asarray(dense.cpu())); pre-empt that
+        # with the same actionable message dense_stream gives, rather than an opaque AttributeError.
+        if self._is_streaming(data.dense) or self._is_iterable(data.dense):
+            ctor = "dense_iter" if self._is_iterable(data.dense) else "dense_stream"
+            raise ValueError(
+                "a streaming/iterable source on AllData.dense requires an explicit kind_hint in "
+                f"{sorted(_DENSE_CONTRACTS)} so routing never materializes the source; build the input with "
+                f"AllData.{ctor}(source, kind_hint=...).")
         contract, gdetail = route_grid_rank(data.dense, verbose=self.verbose, price_mu=self.tensorize_mu)
         return contract, {"level1": reason, "level2": gdetail}
 
@@ -541,6 +696,15 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
     def _tiebreak_candidates(self, data: AllData):
         """Which contracts are constructible for this data? Only geometric relational data (positions
         present) is ambiguous; everything else has a single valid contract."""
+        if self._is_streaming_graph(data):
+            # under a GraphSource, positions/edges live INSIDE the source (data.positions is None), so read the
+            # source metadata; tiebreak=True is the explicit opt-in, so the kind_hint short-circuit is bypassed.
+            src = data.node_feats
+            if not src.has_pos:
+                return None
+            cands = ["set", "equivariant"] + (["graph"] if src.has_edges else [])
+            cands = [c for c in cands if self._contract_enabled(c)]
+            return cands if len(cands) > 1 else None
         if data.kind_hint is not None:
             return None                                  # explicit override -> no bake-off
         if data.positions is None:
@@ -608,7 +772,12 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         than mu_c times its added structural code length. mu_c is the contract price (0 -> pure best-fit).
         """
         from ..machinery import clean_solo_select, dataset_omega_struct, select_contract_mdl, marginal_value_contract
+        # under streaming, run the whole contract bake-off on the bounded resident subsample (drawn once); the
+        # winning contract then deploy-trains on the FULL stream. _tiebreak_candidates reads the source metadata.
         cands = candidates or self._tiebreak_candidates(data)
+        sub = self._streaming_subsample(data)
+        if sub is not None:
+            data = sub
         if cands is None:
             contract, _ = self.route(data)
             return contract, {contract: float("nan")}, {"note": "not ambiguous; rule-based route used"}
@@ -1338,7 +1507,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         return tqdm(rng, desc=f"  training {label}", leave=False, unit="ep", dynamic_ncols=True)
 
     def fit(self, data: AllData, task="classification", n_out=None, primitives=None, tiebreak=False,
-            select="argmax", select_size=False):
+            select="argmax", select_size=False, stream=None):
         """Route the data to its schema, build it, train, and report. task in {classification,
         regression}. Returns a result dict. The heavy lifting (primitive/width/depth search) is the
         chosen schema's own machinery; AllGraph only dispatches and drives training.
@@ -1372,6 +1541,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         torch.manual_seed(self.seed); np.random.seed(self.seed)
         self.select = select
         self._fc_cache = {"node": {}, "pos": {}, "edge": {}}   # fresh per-fit (static-per-graph tensor cache)
+        self._subsample_cache = None            # the per-fit resident selection subsample (streaming; drawn once)
         # Restore the requested device and clear canonicalization state so a REUSED AllGraph instance starts
         # each fit clean: the relational->CPU fallback below must not persist onto a later dense fit, and a
         # prior fit's canonicalized-positions / applied-flag must not bleed into evaluation of new data.
@@ -1393,6 +1563,9 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # STAGE 1 -- KINEMATICS: resolve the contract (discovery / tiebreak / route / admissibility) and
         # apply any canonicalization quotient to the data.
         data, tb_detail = self._resolve_contract(data, task, n_out, tiebreak)
+        # Opt-in dataset streaming (data.dense is a DenseSource): assert caller intent and guard the first-cut
+        # scope BEFORE any full-dataset materialization. A no-op for resident inputs (the common case).
+        self._check_streaming_supported(data, task, select, select_size, tiebreak, stream, n_out=n_out)
         # Apple-Silicon device policy (dense contracts): the relational override above catches graph/
         # equivariant/set pre-resolution (keyed on node_feats, so the in-resolution bake-off also runs on
         # CPU). The launch/sync-bound DENSE contracts -- sequence (recurrent per-step loops), 4d (the conv4d
@@ -1544,8 +1717,11 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # content its dynamics need. The relational forward pass reads data.edges directly, so it requires
         # EXPLICIT edges (it does not build them from coordinates). If any routing path selected a relational
         # contract on edgeless data, the contract is inadmissible -> fall back to the always-constructible 'set'.
-        # This generalizes the guard the autonomous path already applies ("no group found -> set").
-        if self.contract in ("graph", "equivariant") and getattr(data, "edges", None) is None:
+        # This generalizes the guard the autonomous path already applies ("no group found -> set"). A streaming
+        # GraphSource carries edges INSIDE the source (data.edges is None but source.has_edges is True), so it is
+        # admissible for graph/equivariant -- exclude it from the edgeless fallback.
+        _stream_has_edges = self._is_streaming_graph(data) and getattr(data.node_feats, "has_edges", False)
+        if self.contract in ("graph", "equivariant") and getattr(data, "edges", None) is None and not _stream_has_edges:
             self.route_detail = {**(self.route_detail or {}),
                                  "admissibility": f"'{self.contract}' inadmissible (no edges) -> set"}
             self.contract = "set"
@@ -1605,15 +1781,19 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # (its width/depth remain settable directly). generated/Sp/SL have no cell sweep and are excluded too.
         _RELATIONAL = ("set", "graph", "equivariant")
         _SIZE_OK = _RELATIONAL + ("sequence", "spatial", "volumetric", "4d")
+        # under streaming, the sweep runs on the bounded resident subsample (drawn once, ONLY when a sweep
+        # actually runs); the chosen (K*, L*) then deploy-trains on the full stream. sel == data when resident.
         if size_mode == "variable" and self.contract in _SIZE_OK:
-            szdetail = self._select_size_variable(data, task=task, n_out=n_out)
+            sel = self._streaming_subsample(data) or data
+            szdetail = self._select_size_variable(sel, task=task, n_out=n_out)
             self.route_detail = {**(self.route_detail or {}), "select_size": szdetail}
             self._log(f"[AllGraph] d.o.f. stage (variable) -> width={self.width}, depth={self.depth}")
         elif size_mode in ("sequential", "area") and self.contract in _RELATIONAL:
+            sel = self._streaming_subsample(data) or data
             if size_mode == "sequential":
-                szdetail = self.select_architecture(data, task=task, n_out=n_out, contract=self.contract)
+                szdetail = self.select_architecture(sel, task=task, n_out=n_out, contract=self.contract)
             else:
-                szdetail = self.select_architecture_by_area(data, task=task, n_out=n_out, contract=self.contract)
+                szdetail = self.select_architecture_by_area(sel, task=task, n_out=n_out, contract=self.contract)
             self.route_detail = {**(self.route_detail or {}), "select_size": szdetail}
             self._log(f"[AllGraph] d.o.f. stage ({size_mode}) -> width={self.width}, depth={self.depth}")
         elif size_mode and size_mode not in ("sequential", "area", "variable"):
@@ -1808,8 +1988,10 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         prims = list(net.cells[0].primitives)
         if len(prims) < 2:
             return result
-        # clean-solo energy per primitive: train each ALONE from scratch, score on a held-out split.
-        scores = self._solo_scores(data, task, n_out, prims)
+        # clean-solo energy per primitive: train each ALONE from scratch, score on a held-out split. Under
+        # streaming the SOLO scoring (selection) runs on the bounded resident subsample; the winner then
+        # DEPLOY-trains on the full stream (_train_deploy_solo / _score_full below), which have streaming branches.
+        scores = self._solo_scores(self._streaming_subsample(data) or data, task, n_out, prims)
         gsel = gibbs_alpha_select(lambda p: scores[p], prims, beta=self._resolve_gibbs_beta(scores, prims))
         best = gsel["best"]
         result["architecture_argmax"] = result.get("architecture")
@@ -1868,7 +2050,14 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         torch.manual_seed(self.seed + 3); np.random.seed(self.seed + 3)
         if mod in ("sequence", "spatial", "volumetric", "4d"):
             X = data.dense
-            if mod == "sequence" and X.dim() == 2: X = X.unsqueeze(-1)
+            if self._is_streaming(X):
+                # wrap spatial/volumetric via _as_grid (channel fix-up + shape metadata) exactly as _fit_grid;
+                # sequence and 4d present full-rank samples already. _train_dense's streaming branch handles X.
+                _rank = {"spatial": 4, "volumetric": 5}.get(mod)
+                if _rank is not None:
+                    X = self._as_grid(X, _rank)
+            elif mod == "sequence" and X.dim() == 2:
+                X = X.unsqueeze(-1)
             if mod == "sequence":
                 net = build_schema(n_in=X.shape[-1], width=self.width, depth=self.depth,
                                                n_out=n_out, primitives=(primitive,)).to(self.device)
@@ -1889,17 +2078,30 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             return net
         if mod == "operator":
             # operator contract: deploy the winning single-primitive neural-operator net on ALL data (field MSE).
+            if self._is_streaming_operator(data):
+                src = data.dense
+                net = self._operator_solo_net(src.a_shape, src.spatial_dims, primitive)
+                opt = torch.optim.Adam(net.parameters(), lr=self.lr, weight_decay=self._wd())
+                n = len(src); idx = np.arange(n)
+                for _ in range(self.epochs):
+                    np.random.shuffle(idx)
+                    for j in range(0, n, self._tb()):
+                        ids = idx[j:j + self._tb()]; opt.zero_grad()
+                        ab, xb, ub = src.a(ids).to(self.device), src.grid(ids).to(self.device), src.u(ids).to(self.device)
+                        ((net(ab, xb) - ub) ** 2).mean().backward(); opt.step()
+                return net
             net, a_d, x_d, u_d = self._operator_solo_setup(data, primitive)
             opt = torch.optim.Adam(net.parameters(), lr=self.lr, weight_decay=self._wd())
             n = a_d.shape[0]; idx = np.arange(n)
             for _ in range(self.epochs):
                 np.random.shuffle(idx)
                 for j in range(0, n, self._tb()):
-                    ids = idx[j:j + 32]; opt.zero_grad()
+                    ids = idx[j:j + self._tb()]; opt.zero_grad()
                     ((net(a_d[ids], x_d[ids]) - u_d[ids]) ** 2).mean().backward(); opt.step()
             return net
         # relational
-        n_in = data.node_feats[0].shape[1]
+        streaming_graph = self._is_streaming_graph(data)
+        n_in = data.node_feats.n_in if streaming_graph else data.node_feats[0].shape[1]
         if mod == "graph":
             net = build_graph_schema(n_in=n_in, width=self.width, depth=self.depth,
                                                  n_out=n_out, primitives=(primitive,), readout="mean").to(self.device)
@@ -1919,11 +2121,31 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         for _ in range(self.epochs):
             np.random.shuffle(idx)
             for j in range(0, n, self._tb()):
-                ids = idx[j:j + 32]; opt.zero_grad()
-                out = self._forward_contract(net, data, ids, mod, with_pos, use_edges, 3.0)
+                ids = idx[j:j + self._tb()]; opt.zero_grad()
+                out = (self._stream_relational_out(net, data, ids, mod) if streaming_graph
+                       else self._forward_contract(net, data, ids, mod, with_pos, use_edges, 3.0))
                 target = yt[ids].long().to(self.device) if task == "classification" else yt[ids].float().unsqueeze(1).to(self.device)
                 lf(out, target).backward(); opt.step()
         return net
+
+    def _operator_solo_net(self, a_shape, sdims, primitive):
+        """Build a single-primitive neural-operator net sized from the field SHAPE metadata alone (in_channels /
+        Fourier-mode budget), so a streaming gibbs solo-deploy net is the SAME size as the resident/subsample
+        one (which _operator_solo_setup builds from the materialized tensor)."""
+        from ..models import build_operator_schema
+        in_ch = a_shape[-1] if len(a_shape) == 2 + sdims else 1
+        grid_min = min(int(s) for s in a_shape[1:1 + sdims]); modes = max(2, min(12, grid_min // 2))
+        return build_operator_schema(width=self.width, depth=self.depth, n_out=1, primitives=(primitive,),
+                                     modes=modes, in_channels=in_ch, spatial_dims=sdims).to(self.device)
+
+    def _stream_relational_out(self, net, data, ids, mod):
+        """Streaming relational forward for the gibbs deploy/score path: collate the minibatch from the
+        GraphSource (via the streaming-aware _forward_relational / _subbatch_sets, cache=None) instead of the
+        resident-index-only _forward_contract."""
+        if mod == "set":
+            Xb, bb, ng = self._subbatch_sets(data, ids, cache=None)
+            return net(Xb, bb, ng)
+        return self._forward_relational(net, data, ids, with_pos=(mod == "equivariant"), cache=None)
 
     def _selected_net_builder(self, data, task):
         """Return a zero-arg callable that rebuilds the SELECTED architecture as a FRESH, UNTRAINED net of
@@ -1967,20 +2189,41 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         """Score a deployed net on the training data's own labels (in-sample proxy for the report's
         'value' field; the runner re-evaluates on the held-out TEST split separately)."""
         mod = self.contract
-        y = np.asarray(data.y)
         if mod == "operator":
+            if self._is_streaming_operator(data):        # streamed two-pass field-R2 (returns the scalar)
+                return float(self._stream_operator_eval(net, data.dense, 32))
             # field a(x) -> u(x): score the in-sample field R2, matching _fit_operator's metric.
             a = data.dense if isinstance(data.dense, torch.Tensor) else torch.tensor(np.asarray(data.dense), dtype=torch.float32)
             xg = data.grid if isinstance(data.grid, torch.Tensor) else torch.tensor(np.asarray(data.grid), dtype=torch.float32)
             with torch.no_grad():
                 pred = net(a.to(self.device), xg.to(self.device)).cpu().numpy()
             uy = np.asarray(data.y, dtype=np.float32)
-            return float(1.0 - ((pred - uy) ** 2).sum() / (((uy - uy.mean()) ** 2).sum() + 1e-12))
+            return float(1.0 - ((pred - uy) ** 2).sum() / (((uy - uy.astype(np.float64).mean()) ** 2).sum() + 1e-12))
+        y = np.asarray(data.y)
         if mod in ("sequence", "spatial", "volumetric", "4d"):
             X = data.dense
-            if mod == "sequence" and X.dim() == 2: X = X.unsqueeze(-1)
             fwd = (lambda xb: net.forward_seq_readout(xb, 1).squeeze(1)) if mod == "sequence" else None
+            if self._is_streaming(X):
+                # chunked accumulated score (no _report side effect on self.net -- this scores a candidate).
+                from .allgraph_streaming import _StreamMetric
+                _rank = {"spatial": 4, "volumetric": 5}.get(mod)
+                src = self._as_grid(X, _rank) if _rank is not None else X
+                acc = _StreamMetric(task, y); n = len(src)
+                for j in range(0, n, 128):
+                    ids = np.arange(j, min(j + 128, n))
+                    with torch.no_grad():
+                        out = (fwd or (lambda xb: net(xb)))(src.get(ids).to(self.device)).cpu()
+                    acc.update(out, y[ids])
+                return acc.result()[1]
+            if mod == "sequence" and X.dim() == 2: X = X.unsqueeze(-1)
             out = self._deploy_grid_eval(net, X, 128, forward=fwd)
+        elif self._is_streaming_graph(data):
+            outs = []; n = len(data.node_feats)
+            for j in range(0, n, 64):
+                ids = np.arange(j, min(j + 64, n))
+                with torch.no_grad():
+                    outs.append(self._stream_relational_out(net, data, ids, mod).cpu())
+            out = torch.cat(outs)
         else:
             with_pos = (mod == "equivariant"); use_edges = mod in ("graph", "equivariant")
             outs = []; n = len(data.node_feats)
@@ -1999,21 +2242,100 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             return 1
         return int(np.asarray(y).max()) + 1
 
-    def _run_epochs(self, net, opt, tr_idx, va_idx, stopper, batch_loss, batch_size, permute, show_progress=True):
+    def _prefetch_depth(self):
+        """Prefetch depth from stream_prefetch: None/False/0 -> 0 (off), True -> 1, int k -> k. Single source
+        of truth for whether async prefetch is active."""
+        p = getattr(self, "stream_prefetch", False)
+        if p is True:
+            return 1
+        if not p:
+            return 0
+        return int(p)
+
+    def _prefetch_batches(self, pm, batch_size, fetch, depth):
+        """Yield (ids, payload) for each minibatch of the fixed permutation `pm`, with `fetch(ids)` -> RNG-free
+        CPU payload run up to `depth` batches AHEAD on ONE background daemon thread through a bounded queue. The
+        permutation is already materialized on the main thread (RNG consumed), so the batch ORDER is fixed and no
+        RNG crosses the thread boundary -> bit-identical to running fetch inline. A worker (fetch) exception is
+        re-raised on the main thread after the queue drains.
+
+        Robustness: if the CONSUMER (compute on the main thread) raises mid-epoch while the producer is blocked
+        on a full queue, a plain blocking put()/join() would deadlock. So the producer puts with a timeout and
+        checks a `stop` Event, and the generator's finally sets `stop` and drains the queue -- the producer then
+        unblocks, observes stop, and exits, so join() always completes (no hang, no leaked thread)."""
+        import queue as _queue
+        import threading as _threading
+        slices = [pm[j:j + batch_size] for j in range(0, len(pm), batch_size)]
+        q = _queue.Queue(maxsize=max(1, depth))
+        box = {}
+        stop = _threading.Event()
+        _SENTINEL = object()
+
+        def _put(item):                                  # blocking put that yields to a stop request
+            while not stop.is_set():
+                try:
+                    q.put(item, timeout=0.2)
+                    return
+                except _queue.Full:
+                    continue
+
+        def _produce():
+            try:
+                for ids in slices:
+                    if stop.is_set():
+                        return
+                    _put((ids, fetch(ids)))
+            except BaseException as e:                    # surface on the main thread, don't die silently
+                box["err"] = e
+            finally:
+                if not stop.is_set():
+                    _put(_SENTINEL)
+
+        t = _threading.Thread(target=_produce, daemon=True)
+        t.start()
+        try:
+            while True:
+                item = q.get()
+                if item is _SENTINEL:
+                    break
+                yield item
+            if "err" in box:
+                raise box["err"]
+        finally:
+            stop.set()                                   # tell the producer to stop
+            try:                                         # unblock a producer parked on a full queue
+                while True:
+                    q.get_nowait()
+            except _queue.Empty:
+                pass
+            t.join()
+
+    def _run_epochs(self, net, opt, tr_idx, va_idx, stopper, batch_loss, batch_size, permute, show_progress=True,
+                    prefetch=None):
         """Shared minibatch training loop for every contract's deploy fit. `batch_loss(ids)` -> scalar loss (the
         contract-specific forward + target); `permute(idx)` -> one epoch's permuted index sequence (each contract
         keeps its own RNG -- torch for dense, numpy for the rest -- so determinism is preserved). Handles the
         alpha sparsity penalty, the running-train-loss early-stop mean (accumulated on-device, read only when a
         stopper monitors TRAIN loss), and val-monitored stopping. Callers own net/opt/data-prep, the val split,
-        the stopper, and the post-loop eval."""
+        the stopper, and the post-loop eval.
+
+        `prefetch` (optional): a (fetch, compute) pair for async input prefetch. When supplied AND the prefetch
+        depth is > 0, each batch's RNG-free fetch runs a few batches ahead on a worker thread and `compute(ids,
+        payload)` runs the device-move + forward + loss on the main thread -- bit-identical to the inline path
+        (which is `batch_loss = lambda ids: compute(ids, fetch(ids))`). The val path always uses batch_loss."""
         track = stopper is not None and va_idx is None
+        depth = self._prefetch_depth() if prefetch is not None else 0
         for _ in self._epoch_iter(show_progress):
-            pm = permute(tr_idx)
+            pm = permute(tr_idx)                          # RNG draw on the MAIN thread, BEFORE any fetch
             run, nb = None, 0
-            for j in range(0, len(pm), batch_size):
-                ids = pm[j:j + batch_size]
+            if depth > 0:
+                fetch, compute = prefetch
+                batches = self._prefetch_batches(pm, batch_size, fetch, depth)
+            else:
+                batches = ((pm[j:j + batch_size], None) for j in range(0, len(pm), batch_size))
+            for ids, payload in batches:
                 opt.zero_grad()
-                loss = batch_loss(ids) + self._alpha_penalty(net)
+                loss = (compute(ids, payload) if depth > 0 else batch_loss(ids)) + self._alpha_penalty(net)
                 loss.backward()
                 # Skip a non-finite update instead of corrupting the weights: deep stacks over long sequences
                 # can transiently blow a batch to inf/NaN; keeping the last finite weights lets training
@@ -2038,22 +2360,156 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         stopper = self._make_stopper() if show_progress else None   # early-stop only the deployed fit
         if show_progress:
             self._break_alpha_symmetry(net)     # sparse: seed the mixture off uniform (deployed fit only)
-        # PERF: the inputs/targets are STATIC across epochs -- move them to the compute device ONCE and index
-        # on-device each step, instead of re-copying every minibatch every epoch (as _fit_operator already
-        # does). On unified-memory (MPS) this is free; on CUDA it adds only |X| to VRAM (<< activations).
-        if not isinstance(X, torch.Tensor):
-            X = torch.as_tensor(np.asarray(X), dtype=torch.float32)
-        Xd = X.to(self.device)
         yt = torch.as_tensor(y)
         yt_dev = (yt.long() if task == "classification" else yt.float().unsqueeze(1)).to(self.device)
-        tr_idx_dev = torch.as_tensor(np.asarray(tr_idx), device=self.device)
-        def _dloss(b):
-            if not torch.is_tensor(b):                       # val path passes numpy index slices
-                b = torch.as_tensor(np.asarray(b), device=self.device)
-            return lf(fwd(Xd[b]), yt_dev[b])
-        # dense permutes on-device via the CPU torch RNG (identical stream to the pre-refactor loop)
-        permute = lambda idx: idx[torch.randperm(len(idx)).to(self.device)]
-        return self._run_epochs(net, opt, tr_idx_dev, va_idx, stopper, _dloss, self._tb(), permute, show_progress)
+        if not self._is_streaming(X):
+            # RESIDENT FAST PATH (unchanged): the inputs/targets are STATIC across epochs -- move them to the
+            # compute device ONCE and index on-device each step, instead of re-copying every minibatch every
+            # epoch. On unified-memory (MPS) this is free; on CUDA it adds only |X| to VRAM (<< activations).
+            if not isinstance(X, torch.Tensor):
+                X = torch.as_tensor(np.asarray(X), dtype=torch.float32)
+            Xd = X.to(self.device)
+            tr_idx_dev = torch.as_tensor(np.asarray(tr_idx), device=self.device)
+            def _dloss(b):
+                if not torch.is_tensor(b):                   # val path passes numpy index slices
+                    b = torch.as_tensor(np.asarray(b), device=self.device)
+                return lf(fwd(Xd[b]), yt_dev[b])
+            # dense permutes on-device via the CPU torch RNG (identical stream to the pre-refactor loop)
+            permute = lambda idx: idx[torch.randperm(len(idx)).to(self.device)]
+            return self._run_epochs(net, opt, tr_idx_dev, va_idx, stopper, _dloss, self._tb(), permute, show_progress)
+        # STREAMING BRANCH: X is a DenseSource -- fetch + H2D only the current minibatch each step, so the full
+        # (n, *sample_shape) tensor is never resident. The labels stay resident (small). This is bit-for-bit
+        # equivalent to the resident path: the ONLY change is dropping the trailing `.to(self.device)` on the
+        # permutation index (a device move consumes no RNG), so torch.randperm draws from the identical global
+        # CPU RNG state at the identical call site -> identical batch membership per step -> identical grads.
+        pin = self._resolve_pin()
+        tr_idx = torch.as_tensor(np.asarray(tr_idx))         # CPU int64 (NOT moved to device)
+        # split fetch (RNG-free CPU read, prefetch-safe) from compute (device move + forward + loss, main thread)
+        def _dfetch(b):
+            ids = b if torch.is_tensor(b) else torch.as_tensor(np.asarray(b))   # val path passes numpy slices
+            Xb = X.get(ids)                                  # (len(ids), *sample_shape) CPU float32; RNG-free
+            if pin:
+                Xb = Xb.pin_memory()
+            return ids, Xb
+        def _dcompute(b, payload):
+            ids, Xb = payload
+            Xb = Xb.to(self.device, non_blocking=pin)
+            return lf(fwd(Xb), yt_dev[ids.to(self.device)])
+        _dloss = lambda b: _dcompute(b, _dfetch(b))          # fused: val path + non-prefetch (byte-identical)
+        permute = lambda idx: idx[torch.randperm(len(idx))]  # SAME draw+site as resident; ONLY .to(device) dropped
+        prefetch = (_dfetch, _dcompute) if self._prefetch_depth() > 0 else None
+        return self._run_epochs(net, opt, tr_idx, va_idx, stopper, _dloss, self._tb(), permute, show_progress,
+                                prefetch=prefetch)
+
+    def _train_dense_iter(self, net, source, task, n_out, forward=None, show_progress=False):
+        """Training loop for the FORWARD-ONLY iterable regime (dense contracts). Self-contained -- it does NOT
+        use _run_epochs/_auto_val_split, which need random access. Each epoch is one restartable pass; a seeded
+        windowed shuffle buffer (RandomState(seed+_ITER_SHUFFLE_SEED+epoch)) replaces torch.randperm, and a
+        hash-of-id split (via _iter_val_member) replaces the seeded index val split. Deterministic given the
+        seed; NOT bit-identical to the map-style / resident fit."""
+        from .allgraph_streaming import _ITER_SHUFFLE_SEED
+        fwd = forward if forward is not None else (lambda xb: net(xb))
+        opt = torch.optim.Adam(net.parameters(), lr=self.lr, weight_decay=self._wd(self._DENSE_WEIGHT_DECAY))
+        lf = nn.CrossEntropyLoss() if task == "classification" else nn.MSELoss()
+        use_val = show_progress and getattr(self, "auto_epoch", None) == "val"
+        stopper = self._make_stopper() if show_progress else None
+        if show_progress:
+            self._break_alpha_symmetry(net)
+        bs, B = self._tb(), max(1, self.stream_shuffle_buffer)
+        pin = self._resolve_pin()
+
+        def _step(batch, state):
+            xb = torch.stack([b[0] for b in batch])
+            if pin:
+                xb = xb.pin_memory()
+            xb = xb.to(self.device, non_blocking=pin)
+            yy = np.asarray([b[1] for b in batch])
+            yt = torch.as_tensor(yy).long() if task == "classification" else torch.as_tensor(yy).float().unsqueeze(1)
+            opt.zero_grad()
+            loss = lf(fwd(xb), yt.to(self.device)) + self._alpha_penalty(net)
+            loss.backward()
+            if self._grads_finite(net):
+                opt.step()
+            if stopper is not None and not use_val:
+                state["run"] = loss.detach() if state["run"] is None else state["run"] + loss.detach()
+                state["nb"] += 1
+
+        for epoch in self._epoch_iter(show_progress):
+            rng = np.random.RandomState(self.seed + _ITER_SHUFFLE_SEED + (epoch if isinstance(epoch, int) else 0))
+            buf, pending, state = [], [], {"run": None, "nb": 0}
+            def _emit(sample):
+                pending.append(sample)
+                if len(pending) >= bs:
+                    _step(pending, state); pending.clear()
+            for sid, x, y in source:
+                if use_val and self._iter_val_member(sid):
+                    continue                             # val samples never train
+                if len(buf) < B:
+                    buf.append((x, y))
+                else:
+                    j = int(rng.randint(len(buf)))       # emit a random buffered sample, replace with the new one
+                    _emit(buf[j]); buf[j] = (x, y)
+            for j in rng.permutation(len(buf)):          # drain the buffer in seeded order
+                _emit(buf[int(j)])
+            if pending:
+                _step(pending, state)                    # flush the last partial batch
+            if stopper is not None:
+                m = self._iter_val_loss(net, source, lf, fwd, task) if use_val \
+                    else float(state["run"] / max(state["nb"], 1))
+                if stopper.step(m):
+                    break
+        return net
+
+    def _iter_val_loss(self, net, source, lf, fwd, task, bs=64):
+        """Mean loss over the iterable regime's hash-held-out val samples, in eval mode (no dropout/BN update ->
+        consumes NO torch RNG, so it cannot perturb the next epoch's weights or shuffle)."""
+        net.eval()
+        tot, nb, pending = 0.0, 0, []
+
+        def _flush():
+            nonlocal tot, nb
+            xb = torch.stack([b[0] for b in pending]).to(self.device)
+            yy = np.asarray([b[1] for b in pending])
+            yt = torch.as_tensor(yy).long() if task == "classification" else torch.as_tensor(yy).float().unsqueeze(1)
+            tot += float(lf(fwd(xb), yt.to(self.device))); nb += 1
+            pending.clear()
+
+        with torch.no_grad():
+            for sid, x, y in source:
+                if not self._iter_val_member(sid):
+                    continue
+                pending.append((x, y))
+                if len(pending) >= bs:
+                    _flush()
+            if pending:
+                _flush()
+        net.train()
+        return tot / max(nb, 1)
+
+    def _iter_grid_eval(self, net, source, task, bs, forward=None):
+        """In-sample score for the iterable regime: one sequential (unshuffled) pass over ALL samples, scored
+        incrementally via _IterMetric (target streams by, so ss_tot is single-pass). Net left in TRAIN mode like
+        the other grid evals. Returns the result dict via _report."""
+        from .allgraph_streaming import _IterMetric
+        fwd = forward if forward is not None else (lambda xb: net(xb))
+        acc = _IterMetric(task)
+        pending = []
+
+        def _flush():
+            xb = torch.stack([b[0] for b in pending]).to(self.device)
+            with torch.no_grad():
+                out = fwd(xb).cpu()
+            acc.update(out, [b[1] for b in pending])
+            pending.clear()
+
+        for sid, x, y in source:
+            pending.append((x, y))
+            if len(pending) >= bs:
+                _flush()
+        if pending:
+            _flush()
+        metric, value = acc.result()
+        return self._report(net, value, metric)
 
     def _report(self, net, value, metric, extra=None):
         self.net = net                                   # keep the trained net for inspection / test eval
@@ -2077,4 +2533,236 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             with torch.no_grad():
                 outs.append(fwd(X[j:j + bs].to(self.device)).cpu())
         return torch.cat(outs)
+
+    # --------------------------------------------------------------------- opt-in dataset streaming
+    def _is_streaming(self, X):
+        """True iff X is a streaming DenseSource (opt-in via AllData.dense_stream). This ONE duck-typed
+        predicate gates every dense streaming branch; when it is False the resident code path is textually
+        unchanged, so resident behaviour and performance are provably identical (one isinstance per fit)."""
+        from .allgraph_streaming import DenseSource
+        return isinstance(X, DenseSource)
+
+    def _is_streaming_graph(self, data):
+        """True iff `data` carries a streaming GraphSource (opt-in via AllData.graph_stream, stored as
+        node_feats). Gates every relational streaming branch; False leaves the resident relational path
+        textually unchanged."""
+        from .allgraph_streaming import GraphSource
+        return isinstance(getattr(data, "node_feats", None), GraphSource)
+
+    def _is_streaming_operator(self, data):
+        """True iff `data` carries a streaming OperatorSource (opt-in via AllData.functions_stream, stored as
+        dense). Gates the operator streaming branch; False leaves the resident operator path unchanged."""
+        from .allgraph_streaming import OperatorSource
+        return isinstance(getattr(data, "dense", None), OperatorSource)
+
+    def _is_iterable(self, X):
+        """True iff X is a forward-only IterableDenseSource (opt-in via AllData.dense_iter). Gates the separate
+        iterable training regime; False leaves every map-style / resident branch unchanged."""
+        from .allgraph_streaming import IterableDenseSource
+        return isinstance(X, IterableDenseSource)
+
+    def _iter_val_member(self, sample_id):
+        """Whether a sample id falls in the iterable regime's held-out val bucket (a seed-keyed blake2b hash),
+        used both to SKIP val samples during training and to KEEP them in the val-loss pass."""
+        from .allgraph_streaming import _iter_val_key, _ITER_VAL_PERMILLE
+        return _iter_val_key(sample_id, self.seed) % 1000 < _ITER_VAL_PERMILLE
+
+    def _resolve_pin(self):
+        """Whether to host-pin streamed minibatches and copy them non_blocking. Pinning only helps (and is only
+        well-supported) on CUDA; None -> auto (pin iff CUDA), truthy/falsy -> forced but still CUDA-gated."""
+        dev = str(getattr(self, "device", "cpu"))
+        if not dev.startswith("cuda"):
+            return False
+        return True if self.stream_pin_memory is None else bool(self.stream_pin_memory)
+
+    def _stream_grid_eval(self, net, source, bs, y, task, forward=None):
+        """Streaming counterpart of `_deploy_grid_eval` + `_eval`: forward the deployed net over the source in
+        sequential arange chunks and accumulate the score INCREMENTALLY (via _StreamMetric), so the full output
+        is never materialized. The net is left in TRAIN mode (batchnorm batch-stats), so -- exactly as the
+        resident eval -- `bs` is part of the result: callers pass the same batch size the contract used.
+        Matches `_metric` exactly (ss_tot from the resident labels), so a single-chunk eval (bs >= n) is
+        bit-identical to the resident score and a multi-chunk eval matches to fp tolerance. Returns the same
+        result dict as `_eval` (via `_report`)."""
+        from .allgraph_streaming import _StreamMetric
+        fwd = forward if forward is not None else (lambda xb: net(xb))
+        yy = np.asarray(y)
+        acc = _StreamMetric(task, yy)
+        n = len(source)
+        for j in range(0, n, bs):
+            ids = np.arange(j, min(j + bs, n))
+            with torch.no_grad():
+                out = fwd(source.get(ids).to(self.device)).cpu()
+            acc.update(out, yy[ids])
+        metric, value = acc.result()
+        return self._report(net, value, metric)
+
+    def _stream_operator_eval(self, net, source, bs):
+        """Streamed field-R2 for the operator contract, matching the resident
+        `1 - sum((pred-u)^2) / (sum((u-mean)^2) + 1e-12)` to fp tolerance without ever holding the full
+        prediction or the full target field resident. TWO passes over the source: pass 1 accumulates the global
+        field mean (over every grid point of every sample); pass 2 accumulates the residual sum of squares (from
+        the net forward) and the total sum of squares (mean-subtracted, matching the resident formula). The net
+        is left in TRAIN mode like the resident eval; operator primitives are per-sample (no batch-coupling), so
+        the sequential arange chunking is score-neutral."""
+        n = len(source)
+        # pass 1: global mean of the target fields
+        sum_u, count = 0.0, 0
+        for j in range(0, n, bs):
+            ub = source.u(np.arange(j, min(j + bs, n)))
+            sum_u += float(ub.sum().item())
+            count += int(ub.numel())
+        mean = sum_u / max(count, 1)
+        # pass 2: residual and (mean-subtracted) total sums of squares
+        ss_res, ss_tot = 0.0, 0.0
+        for j in range(0, n, bs):
+            ids = np.arange(j, min(j + bs, n))
+            ab, xb, ub = source.a(ids).to(self.device), source.grid(ids).to(self.device), source.u(ids)
+            with torch.no_grad():
+                pred = net(ab, xb).cpu()
+            ss_res += float(((pred - ub) ** 2).sum().item())
+            ss_tot += float(((ub - mean) ** 2).sum().item())
+        return 1.0 - ss_res / (ss_tot + 1e-12)
+
+    def _resident_subsample(self, data, cap=None):
+        """Draw ONCE a bounded resident subsample (<= stream_subsample_cap samples) from a streaming source and
+        materialize it as an ordinary in-RAM AllData. Search / selection sub-fits (which re-iterate the data many
+        times) then run UNCHANGED on real tensors, so the out-of-core source is read ONCE for selection rather
+        than hundreds of times. Uses an ISOLATED RandomState(seed+23) (via _reservoir_ids) that touches neither
+        global RNG stream, so the deploy fit's RNG (and its weights) are unperturbed. Dispatches on source
+        family: dense (DenseSource), relational (GraphSource), or operator (OperatorSource)."""
+        from .allgraph_streaming import _reservoir_ids
+        cap = self.stream_subsample_cap if cap is None else cap
+        if self._is_streaming_graph(data):
+            return self._resident_subsample_graph(data, cap)
+        if self._is_streaming_operator(data):
+            return self._resident_subsample_operator(data, cap)
+        src = data.dense
+        ids = _reservoir_ids(len(src), cap, self.seed + 23)
+        # materialize the samples in the SAME shape the deploy fit builds on: spatial/volumetric add a channel
+        # axis via _as_grid (so a (S,H,W) source becomes (S,1,H,W)); sequence/4d present full-rank samples
+        # already. This keeps the selection sub-fits (which read sub.dense directly) shape-consistent with deploy.
+        _rank = {"spatial": 4, "volumetric": 5}.get(self.contract)
+        grid_src = self._as_grid(src, _rank) if _rank is not None else src
+        X = grid_src.get(ids)                                # (S, *deploy_sample_shape) resident float32 CPU
+        y = np.asarray(data.y)[ids] if data.y is not None else None
+        return AllData.dense_tensor(X, y=y, kind_hint=data.kind_hint)
+
+    def _resident_subsample_graph(self, data, cap):
+        """Bounded resident subsample of a streaming GraphSource -> an in-RAM AllData.graphs / .point_sets with
+        the reservoir ids' node/edge/pos materialized and y sliced. kind_hint is left None so the resident
+        tiebreak-candidate / forward logic reads the materialized positions/edges directly."""
+        from .allgraph_streaming import _reservoir_ids
+        src = data.node_feats
+        ids = _reservoir_ids(len(src), cap, self.seed + 23)
+        nf = [src.node(int(i)) for i in ids]
+        y = np.asarray(data.y)[ids] if data.y is not None else None
+        pos = [src.pos(int(i)) for i in ids] if src.has_pos else None
+        if src.has_edges:
+            return AllData.graphs(nf, [src.edge(int(i)) for i in ids], y=y, positions=pos)
+        return AllData.point_sets(nf, y=y, positions=pos)
+
+    def _resident_subsample_operator(self, data, cap):
+        """Bounded resident subsample of a streaming OperatorSource -> an in-RAM AllData.functions. The operator
+        target is the field src.u(ids) (streaming operator data.y is None)."""
+        from .allgraph_streaming import _reservoir_ids
+        src = data.dense
+        ids = _reservoir_ids(len(src), cap, self.seed + 23)
+        return AllData.functions(src.a(ids), src.u(ids), grid=src.grid(ids), spatial_dims=src.spatial_dims)
+
+    def _streaming_subsample(self, data):
+        """Memoized per-fit accessor for the resident selection subsample: returns None for a non-streaming
+        input (so callers fall back to `data`), else draws the subsample at most ONCE per fit (self._subsample_
+        cache, reset at the top of fit()). Every SELECTION site does `sel = self._streaming_subsample(data) or
+        data` so it runs on the bounded subsample under streaming and on the full data otherwise."""
+        streaming = (self._is_streaming(getattr(data, "dense", None)) or self._is_streaming_graph(data)
+                     or self._is_streaming_operator(data))
+        if not streaming:
+            return None
+        if getattr(self, "_subsample_cache", None) is None:
+            self._subsample_cache = self._resident_subsample(data)
+        return self._subsample_cache
+
+    def _check_streaming_supported(self, data, task, select, select_size, tiebreak, stream, n_out=None):
+        """Streaming guard, run right after contract resolution. Streaming is active iff data.dense is a
+        DenseSource (dense), data.node_feats is a GraphSource (relational), data.dense is an OperatorSource
+        (operator), or data.dense is an IterableDenseSource (the forward-only regime); `stream` is an optional
+        caller ASSERTION (True demands streaming, False forbids it). Enforces that the resolved contract matches
+        the source family and raises a clear, actionable error for options that would re-read the full source
+        (or, for the iterable regime, that need random access). Supported under streaming: select in
+        {'argmax','sparse','gibbs'}, select_size, tiebreak, angular_from_data (via a bounded subsample), and
+        auto_epoch; the forward-only iterable regime supports only select in {'argmax','sparse'} + auto_epoch."""
+        dense_stream = self._is_streaming(getattr(data, "dense", None))
+        graph_stream = self._is_streaming_graph(data)
+        op_stream = self._is_streaming_operator(data)
+        iter_stream = self._is_iterable(getattr(data, "dense", None))
+        streaming = dense_stream or graph_stream or op_stream or iter_stream
+        if stream is True and not streaming:
+            raise ValueError("fit(stream=True) but the input is not streaming; build it with "
+                             "AllData.dense_stream(...) / .graph_stream(...) / .functions_stream(...) / "
+                             ".dense_iter(...) to stream.")
+        if stream is False and streaming:
+            raise ValueError("fit(stream=False) but the input is a streaming source; build a resident input "
+                             "(AllData.dense_tensor / .graphs / .point_sets / .functions) to train in memory.")
+        if not streaming:
+            return
+        if iter_stream:
+            # forward-only regime: dense contracts only; no random-access selection (subsample/readout), no
+            # full-dataset diagnostics; classification needs an explicit n_out (targets stream by).
+            if self.contract not in _DENSE_CONTRACTS:
+                raise NotImplementedError(
+                    f"an IterableDenseSource resolved to contract {self.contract!r}; the forward-only iterable "
+                    f"regime covers the dense contracts {sorted(_DENSE_CONTRACTS)}.")
+            blk = []
+            if select_size:
+                blk.append("select_size")
+            if select == "gibbs":
+                blk.append("select='gibbs'")
+            if tiebreak:
+                blk.append("tiebreak=True")
+            if select not in ("argmax", "sparse"):
+                blk.append(f"select={select!r}")
+            for flag in ("readout_select", "kernel_from_xi", "angular_from_data", "price_singular", "price_modes",
+                         "price_equivariance", "report_llc", "developmental_llc", "report_thermo",
+                         "report_response", "report_ledger", "symmetry_routing", "canonicalize_reuse"):
+                if getattr(self, flag, False):
+                    blk.append(flag)
+            if blk:
+                raise NotImplementedError(
+                    "the forward-only iterable regime (AllData.dense_iter) cannot random-access the data, so it "
+                    f"does not support: {', '.join(blk)}. Use AllData.dense_stream (map-style) for those, or "
+                    "disable them. Supported: select in {'argmax','sparse'}, auto_epoch.")
+            if task == "classification" and n_out is None and getattr(data.dense, "n_out", None) is None:
+                raise ValueError("iterable classification needs an explicit n_out (the targets stream by and "
+                                 "cannot be scanned); pass n_out to fit() or AllData.dense_iter(..., n_out=...).")
+            return
+        if dense_stream and self.contract not in _DENSE_CONTRACTS:
+            raise NotImplementedError(
+                f"a dense DenseSource resolved to contract {self.contract!r}; dense streaming covers "
+                f"{sorted(_DENSE_CONTRACTS)}.")
+        if graph_stream and self.contract not in _IRREGULAR_CONTRACTS:
+            raise NotImplementedError(
+                f"a relational GraphSource resolved to contract {self.contract!r}; relational streaming covers "
+                f"{sorted(_IRREGULAR_CONTRACTS)}.")
+        if op_stream and self.contract != "operator":
+            raise NotImplementedError(
+                f"an OperatorSource resolved to contract {self.contract!r}; operator streaming covers 'operator'.")
+        # select_size / select='gibbs' / tiebreak / angular_from_data are SUPPORTED under streaming: they run on
+        # a bounded resident subsample (drawn once, isolated RNG) while the winner deploy-trains on the full
+        # stream. The options below still re-read the FULL dataset and are not yet wired, so they stay blocked.
+        # symmetry_routing / canonicalize_reuse read data.positions (None under a GraphSource) and would crash,
+        # so they are blocked too until routed through the subsample.
+        blocked = []
+        for flag in ("kernel_from_xi", "price_singular", "price_modes", "price_equivariance",
+                     "report_llc", "developmental_llc", "report_thermo", "report_response", "report_ledger",
+                     "symmetry_routing", "canonicalize_reuse"):
+            if getattr(self, flag, False):
+                blocked.append(flag)
+        if blocked:
+            fam = "dense_tensor" if dense_stream else ("functions" if op_stream else "graphs / .point_sets")
+            extra = ", readout_select" if dense_stream else ""
+            raise NotImplementedError(
+                "dataset streaming does not support these options because they re-read the full dataset many "
+                f"times: {', '.join(blocked)}. Train on a resident AllData.{fam}, or disable them. Supported "
+                f"under streaming: select in {{'argmax','sparse','gibbs'}}, select_size, tiebreak, "
+                f"angular_from_data, auto_epoch{extra}.")
 

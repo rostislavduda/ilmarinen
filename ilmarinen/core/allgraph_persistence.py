@@ -19,6 +19,13 @@ class _PersistenceMixin:
         net, mod, dev = self.net, self.contract, self.device
         net.eval()                                    # running BN/dropout stats -> correct on new/small batches
         if getattr(self, "_canonicalization_applied", False) and mod not in ("sequence", "spatial", "volumetric", "4d"):
+            if self._is_streaming_graph(data):
+                # apply_canonicalization materializes node features (it appends canonicalized coordinates per
+                # sample), which a streamed test set cannot supply lazily -- give a clear error, not an opaque
+                # TypeError from indexing the GraphSource as a list.
+                raise NotImplementedError(
+                    "predict() on a streamed test set is not supported for a model that applied a "
+                    "canonicalization quotient at fit time; pass resident data (AllData.graphs / .point_sets).")
             data = self.apply_canonicalization(data)
         if mod == "generated_equivariant":
             # discovered-group contracts are per-datum (each sample's own point set -> group invariants), so
@@ -29,6 +36,17 @@ class _PersistenceMixin:
             # it also has no relational signature; replay the fit-time flatten + encode.
             return self.forward_latent_equivariant(data)
         if mod == "operator":
+            if self._is_streaming_operator(data):        # streamed test set: forward the fields in chunks
+                src = data.dense; n = len(src); outs = []
+                if n == 0:                               # empty test set: mirror the resident single-shot forward
+                    ids = np.arange(0)
+                    with torch.no_grad():
+                        return net(src.a(ids).to(dev), src.grid(ids).to(dev)).cpu()
+                for j in range(0, n, 64):
+                    ids = np.arange(j, min(j + 64, n))
+                    with torch.no_grad():
+                        outs.append(net(src.a(ids).to(dev), src.grid(ids).to(dev)).cpu())
+                return torch.cat(outs)
             a = data.dense if isinstance(data.dense, torch.Tensor) else torch.as_tensor(np.asarray(data.dense), dtype=torch.float32)
             xg = data.grid if isinstance(data.grid, torch.Tensor) else torch.as_tensor(np.asarray(data.grid), dtype=torch.float32)
             with torch.no_grad():
@@ -53,11 +71,18 @@ class _PersistenceMixin:
                     else:
                         outs.append(net(X[j:j + bs].to(dev)).cpu())
             return torch.cat(outs)
-        # relational contracts: set / graph / equivariant -- collate variable-size samples into one batched call
+        # relational contracts: set / graph / equivariant -- collate variable-size samples into one batched call.
+        # Accepts either resident lists or a streaming GraphSource (predict on a streamed test set).
         with_pos = (mod == "equivariant"); use_edges = mod in ("graph", "equivariant")
-        node_t = lambda i: torch.as_tensor(data.node_feats[i], dtype=torch.float32)
-        edge_t = (lambda i: torch.as_tensor(data.edges[i], dtype=torch.long)) if use_edges else None
-        pos_t = (lambda i: torch.as_tensor(data.positions[i], dtype=torch.float32)) if with_pos else None
+        if self._is_streaming_graph(data):
+            src = data.node_feats
+            node_t = lambda i: src.node(i)
+            edge_t = (lambda i: src.edge(i)) if use_edges else None
+            pos_t = (lambda i: src.pos(i)) if with_pos else None
+        else:
+            node_t = lambda i: torch.as_tensor(data.node_feats[i], dtype=torch.float32)
+            edge_t = (lambda i: torch.as_tensor(data.edges[i], dtype=torch.long)) if use_edges else None
+            pos_t = (lambda i: torch.as_tensor(data.positions[i], dtype=torch.float32)) if with_pos else None
         outs = []; n = len(data.node_feats)
         for j in range(0, n, 128):
             ids = np.arange(j, min(j + 128, n))
