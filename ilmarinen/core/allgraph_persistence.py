@@ -38,10 +38,9 @@ class _PersistenceMixin:
         if mod == "operator":
             if self._is_streaming_operator(data):        # streamed test set: forward the fields in chunks
                 src = data.dense; n = len(src); outs = []
-                if n == 0:                               # empty test set: mirror the resident single-shot forward
-                    ids = np.arange(0)
-                    with torch.no_grad():
-                        return net(src.a(ids).to(dev), src.grid(ids).to(dev)).cpu()
+                if n == 0:                               # empty test set: return an empty field WITHOUT forwarding
+                    # (the operator FFT rejects a 0-size batch on some backends, e.g. MKL, so we never call net).
+                    return torch.zeros((0,) + tuple(src.a_shape[1:1 + src.spatial_dims]))
                 for j in range(0, n, 64):
                     ids = np.arange(j, min(j + 64, n))
                     with torch.no_grad():

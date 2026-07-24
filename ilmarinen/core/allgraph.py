@@ -2605,14 +2605,17 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         is left in TRAIN mode like the resident eval; operator primitives are per-sample (no batch-coupling), so
         the sequential arange chunking is score-neutral."""
         n = len(source)
-        # pass 1: global mean of the target fields
+        # pass 1: global mean of the target fields, accumulated in FLOAT64 (matches the resident
+        # uy.astype(np.float64).mean(); a float32 sum drifts platform-dependently -- e.g. under MKL -- and on a
+        # (near-)constant target that drift keeps ss_tot spuriously non-zero instead of collapsing to the guard).
         sum_u, count = 0.0, 0
         for j in range(0, n, bs):
             ub = source.u(np.arange(j, min(j + bs, n)))
-            sum_u += float(ub.sum().item())
+            sum_u += float(ub.double().sum().item())
             count += int(ub.numel())
         mean = sum_u / max(count, 1)
-        # pass 2: residual and (mean-subtracted) total sums of squares
+        # pass 2: residual (float32, matching the resident float32 (pred-u)^2 sum) and the mean-subtracted total
+        # sum of squares (float64, matching the resident float64 (u - float64 mean)^2 sum).
         ss_res, ss_tot = 0.0, 0.0
         for j in range(0, n, bs):
             ids = np.arange(j, min(j + bs, n))
@@ -2620,7 +2623,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             with torch.no_grad():
                 pred = net(ab, xb).cpu()
             ss_res += float(((pred - ub) ** 2).sum().item())
-            ss_tot += float(((ub - mean) ** 2).sum().item())
+            ss_tot += float(((ub.double() - mean) ** 2).sum().item())
         return 1.0 - ss_res / (ss_tot + 1e-12)
 
     def _resident_subsample(self, data, cap=None):
