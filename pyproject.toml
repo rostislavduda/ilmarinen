@@ -1,0 +1,93 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ilmarinen"
+dynamic = ["version"]                       # read from ilmarinen/__init__.py:__version__
+description = "A physics-principled neural-architecture meta-optimizer"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Rostislav Duda", email = "rostislav.duda@protonmail.com" }]
+keywords = [
+    "machine-learning",
+    "neural-architecture-search",
+    "minimum-description-length",
+    "equivariance",
+    "symmetry-discovery",
+    "singular-learning-theory",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Operating System :: OS Independent",
+]
+
+# CORE runtime: enough to import ilmarinen, build an AllGraph, and run a fit on
+# in-memory tensors. Everything below in [optional-dependencies] is imported
+# lazily and only when a given dataset or primitive is used.
+dependencies = [
+    "numpy>=1.26,<3",
+    "scipy>=1.11",
+    "torch>=2.2",
+    "tqdm>=4.60",
+]
+
+[project.optional-dependencies]
+# Model primitives
+ode = ["torchdiffeq>=0.2.4"]
+# Dataset loaders (each pulls only what that family of datasets needs)
+molecules = ["rdkit>=2023.9"]
+timeseries = ["aeon>=0.11"]
+jets = ["h5py>=3.8", "requests>=2.28"]
+vision = ["torchvision>=0.17", "scikit-image>=0.22"]
+medmnist = ["medmnist>=3.0"]
+# Convenience aggregate of every dataset/model extra above
+all = [
+    "torchdiffeq>=0.2.4",
+    "rdkit>=2023.9",
+    "aeon>=0.11",
+    "h5py>=3.8",
+    "requests>=2.28",
+    "torchvision>=0.17",
+    "scikit-image>=0.22",
+    "medmnist>=3.0",
+]
+# Development / CI tooling
+dev = ["pytest>=7.0", "ruff==0.16.0", "pre-commit>=3.5"]
+
+[project.urls]
+Homepage = "https://github.com/rostislavduda/ilmarinen"
+Repository = "https://github.com/rostislavduda/ilmarinen"
+Issues = "https://github.com/rostislavduda/ilmarinen/issues"
+
+# --------------------------------------------------------------------------- build
+[tool.hatch.version]
+path = "ilmarinen/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+# Only the importable library ships in the wheel. The run-in-place script dirs
+# (validation_runners/, studies/, examples/) stay in the source tree.
+packages = ["ilmarinen"]
+
+[tool.hatch.build.targets.sdist]
+include = ["ilmarinen", "README.md", "LICENSE", "NOTICE", "CITATION.cff"]
+
+# --------------------------------------------------------------------------- ruff
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# Conservative, high-signal starter set. Report-only in CI for now (see ci.yml);
+# to be enforced once the existing tree is clean.
+#   E/W  pycodestyle   F  pyflakes   I  isort   B  flake8-bugbear   UP  pyupgrade
+select = ["E", "W", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ilmarinen"]

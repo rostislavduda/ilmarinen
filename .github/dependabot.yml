@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # Keep the GitHub Actions used in workflows current (also clears the
+  # recurring "Node.js 20 is deprecated" annotation once actions bump).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+
+  # Track Python dependency updates declared in pyproject.toml / requirements*.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps
+    groups:
+      # One consolidated PR for routine updates instead of many.
+      python-dependencies:
+        patterns: ["*"]

@@ -58,3 +58,27 @@ jobs:
         # root on sys.path, so the in-place `ilmarinen` package imports without an
         # install. Matches the documented invocation in the README.
         run: python -m pytest tests_unit/ -v
+
+  lint:
+    name: lint (ruff, report-only)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff==0.16.0
+
+      # REPORT-ONLY: `--exit-zero` surfaces findings as annotations without
+      # failing the build, so the existing tree can be cleaned up incrementally.
+      # Remove `--exit-zero` (and drop `|| true` below) to make lint blocking.
+      - name: Ruff lint
+        run: ruff check --output-format=github --exit-zero .
+
+      - name: Ruff format (check only)
+        run: ruff format --check . || true

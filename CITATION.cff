@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using these metadata."
+title: "Ilmarinen: a physics-principled neural-architecture meta-optimizer"
+abstract: >-
+  Ilmarinen selects a neural architecture — its computational contract (arena),
+  its primitive operations, and its width and depth — for a dataset by minimizing
+  a single description-length objective, with every complexity charge derived as a
+  code length rather than a hand-set constant.
+type: software
+authors:
+  - family-names: Duda
+    given-names: Rostislav
+    email: rostislav.duda@protonmail.com
+version: "2.2.0"
+date-released: "2026-07-25"
+license: Apache-2.0
+repository-code: "https://github.com/rostislavduda/ilmarinen"
+url: "https://github.com/rostislavduda/ilmarinen"
+keywords:
+  - machine learning
+  - neural architecture search
+  - minimum description length
+  - equivariance
+  - symmetry discovery
+  - singular learning theory
