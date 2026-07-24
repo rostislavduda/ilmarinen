@@ -1,0 +1,19 @@
+{
+  "title": "Ilmarinen: a physics-principled neural-architecture meta-optimizer",
+  "description": "Ilmarinen selects a neural architecture -- its computational contract (arena), its primitive operations, and its width and depth -- for a dataset by minimizing a single description-length objective, with every complexity charge derived as a code length rather than a hand-set constant.",
+  "upload_type": "software",
+  "access_right": "open",
+  "license": "Apache-2.0",
+  "version": "2.2.0",
+  "creators": [
+    { "name": "Duda, Rostislav" }
+  ],
+  "keywords": [
+    "machine learning",
+    "neural architecture search",
+    "minimum description length",
+    "equivariance",
+    "symmetry discovery",
+    "singular learning theory"
+  ]
+}

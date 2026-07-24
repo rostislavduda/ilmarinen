@@ -1,0 +1,33 @@
+# Keep the build context small and the image reproducible.
+.git
+.github
+.venv
+venv
+.vscode
+.idea
+
+# Local dataset caches / trained artifacts (never belong in the image)
+ilmarinen_data/
+out/
+*.npz
+*.mat
+*.hdf5
+*.pt
+*.pth
+*.ckpt
+
+# Reports (PDFs/LaTeX) — not needed at runtime
+reports/
+
+# Python / test / coverage cruft
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+coverage.txt
+
+# OS cruft
+.DS_Store
