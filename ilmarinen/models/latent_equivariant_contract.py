@@ -50,15 +50,28 @@ class LatentEquivariantContract(nn.Module):
     to the corresponding nonlinear symmetry of x (to the fidelity of phi).
     """
 
-    def __init__(self, encoder, latent_gens, latent_dim, n_out=1, hidden_vec=4, hidden_scalar=8,
-                 depth=2, metric=None, freeze_encoder=True, realization="emlp"):
+    def __init__(
+        self,
+        encoder,
+        latent_gens,
+        latent_dim,
+        n_out=1,
+        hidden_vec=4,
+        hidden_scalar=8,
+        depth=2,
+        metric=None,
+        freeze_encoder=True,
+        realization="emlp",
+    ):
         super().__init__()
         self.encoder = encoder
         if freeze_encoder:
             for p in self.encoder.parameters():
                 p.requires_grad_(False)
-        gens = [g if isinstance(g, torch.Tensor) else torch.as_tensor(np.asarray(g), dtype=torch.float32)
-                for g in latent_gens]
+        gens = [
+            g if isinstance(g, torch.Tensor) else torch.as_tensor(np.asarray(g), dtype=torch.float32)
+            for g in latent_gens
+        ]
         self.latent_dim = int(latent_dim)
         self.realization = realization
         # the latent vector is a single vector in the group rep (n_in_vec=1, vec_dim=latent_dim). The head can
@@ -67,32 +80,67 @@ class LatentEquivariantContract(nn.Module):
         # construction, no basis solve, linear in channels -- see models/scalable_equivariant.py).
         if realization == "scalable":
             from .scalable_equivariant import ScalableEquivariantMLP
-            self._emlp = ScalableEquivariantMLP(gens, n_in_vec=1, vec_dim=self.latent_dim,
-                                                hidden_vec=max(hidden_vec, 8), hidden_scalar=max(hidden_scalar, 16),
-                                                depth=depth, n_out=n_out, metric=metric)
+
+            self._emlp = ScalableEquivariantMLP(
+                gens,
+                n_in_vec=1,
+                vec_dim=self.latent_dim,
+                hidden_vec=max(hidden_vec, 8),
+                hidden_scalar=max(hidden_scalar, 16),
+                depth=depth,
+                n_out=n_out,
+                metric=metric,
+            )
         else:
             from ..core.emlp_layer import EquivariantMLP
-            self._emlp = EquivariantMLP(gens, n_in_vec=1, vec_dim=self.latent_dim, hidden_vec=hidden_vec,
-                                        hidden_scalar=hidden_scalar, depth=depth, n_out=n_out, metric=metric)
+
+            self._emlp = EquivariantMLP(
+                gens,
+                n_in_vec=1,
+                vec_dim=self.latent_dim,
+                hidden_vec=hidden_vec,
+                hidden_scalar=hidden_scalar,
+                depth=depth,
+                n_out=n_out,
+                metric=metric,
+            )
         self.head = self._emlp.torch_module()
 
     def forward(self, x):
-        z = self.encoder(x)                      # (b, latent_dim) : the latent chart
+        z = self.encoder(x)  # (b, latent_dim) : the latent chart
         if self.realization == "scalable":
-            z = z.unsqueeze(1)                   # (b, 1, latent_dim) : one vector in the group rep
-        return self.head(z)                      # equivariant/invariant head on the latent vector
+            z = z.unsqueeze(1)  # (b, 1, latent_dim) : one vector in the group rep
+        return self.head(z)  # equivariant/invariant head on the latent vector
 
     def latent(self, x):
         with torch.no_grad():
             return self.encoder(x)
 
 
-def build_latent_equivariant_contract(encoder, latent_gens, latent_dim, n_out=1, hidden_vec=4,
-                                      hidden_scalar=8, depth=2, metric=None, freeze_encoder=True,
-                                      realization="emlp"):
+def build_latent_equivariant_contract(
+    encoder,
+    latent_gens,
+    latent_dim,
+    n_out=1,
+    hidden_vec=4,
+    hidden_scalar=8,
+    depth=2,
+    metric=None,
+    freeze_encoder=True,
+    realization="emlp",
+):
     """Factory mirroring the other schema builders: returns a LatentEquivariantContract module. Set
     realization='scalable' to use the G-RepsNet/Vector-Neurons head (equivariant by construction, scalable)
     instead of the exact-but-cubic EMLP head."""
-    return LatentEquivariantContract(encoder, latent_gens, latent_dim, n_out=n_out, hidden_vec=hidden_vec,
-                                     hidden_scalar=hidden_scalar, depth=depth, metric=metric,
-                                     freeze_encoder=freeze_encoder, realization=realization)
+    return LatentEquivariantContract(
+        encoder,
+        latent_gens,
+        latent_dim,
+        n_out=n_out,
+        hidden_vec=hidden_vec,
+        hidden_scalar=hidden_scalar,
+        depth=depth,
+        metric=metric,
+        freeze_encoder=freeze_encoder,
+        realization=realization,
+    )

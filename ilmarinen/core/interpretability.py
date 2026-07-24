@@ -26,7 +26,7 @@ def _ipr(alpha):
     if s <= 0:
         return float(len(a))
     a = a / s
-    denom = np.sum(a ** 2)
+    denom = np.sum(a**2)
     return float(1.0 / denom) if denom > 0 else float(len(a))
 
 
@@ -59,12 +59,15 @@ def _explain_cells(net, gibbs_alpha, gibbs_energies, arch_from_result, tie_rel, 
     cells = []
     if gibbs_alpha is not None:
         # a single derived selection over the primitive library, applied at every (homogeneous) cell
-        prims = list(gibbs_alpha.keys()) if isinstance(gibbs_alpha, dict) else \
-            (list(net.cells[0].primitives) if hasattr(net, "cells") else [])
+        prims = (
+            list(gibbs_alpha.keys())
+            if isinstance(gibbs_alpha, dict)
+            else (list(net.cells[0].primitives) if hasattr(net, "cells") else [])
+        )
         av = np.array([gibbs_alpha[p] for p in prims]) if isinstance(gibbs_alpha, dict) else np.asarray(gibbs_alpha)
         depth = len(arch_from_result) if arch_from_result else (len(net.cells) if hasattr(net, "cells") else 1)
         base = _cell_report(prims, av, tie_rel=tie_rel, onehot_ipr=onehot_ipr)
-        base["source"] = "gibbs_solo_energy"      # the faithful, description-length-derived selection
+        base["source"] = "gibbs_solo_energy"  # the faithful, description-length-derived selection
         if gibbs_energies is not None and isinstance(gibbs_energies, dict):
             base["solo_energies"] = {p: float(gibbs_energies[p]) for p in prims}
         for _ in range(depth):
@@ -87,6 +90,7 @@ def _explain_cells(net, gibbs_alpha, gibbs_energies, arch_from_result, tie_rel, 
                 al = ap.detach().cpu().numpy()
             else:
                 import torch
+
                 al = torch.softmax(c.alpha, dim=0).detach().cpu().numpy()
             rep = _cell_report(prims, al, tie_rel=tie_rel, onehot_ipr=onehot_ipr)
             if arch_pc is not None:
@@ -112,7 +116,10 @@ def _explain_internals(net):
                     try:
                         d, phi = core.radial_function(n=32)
                         internals.setdefault(f"cell{i}", {})[name] = {
-                            "kind": "kan_radial", "d": list(map(float, d)), "phi": list(map(float, phi))}
+                            "kind": "kan_radial",
+                            "d": list(map(float, d)),
+                            "phi": list(map(float, phi)),
+                        }
                     except Exception:
                         pass
                 # FNO spectral mode budget: the resolution-independent capacity of the operator layer
@@ -184,12 +191,14 @@ def explain(mg, result=None, tie_rel=0.9, onehot_ipr=1.5):
     n_onehot = sum(1 for c in cells if c["onehot_faithful"])
     n_tie = sum(1 for c in cells if len(c["tie_class"]) > 1)
     faithfulness = {
-        "auxiliary_model_fit": False,               # Pi reads params only -> faithful by construction
+        "auxiliary_model_fit": False,  # Pi reads params only -> faithful by construction
         "cells_total": len(cells),
         "cells_onehot_faithful": n_onehot,
         "cells_with_reported_tie": n_tie,
-        "note": ("argmax paired with IPR per cell; ties surfaced as equivalence classes; one-hot claims "
-                 "only where the simplex is peaked."),
+        "note": (
+            "argmax paired with IPR per cell; ties surfaced as equivalence classes; one-hot claims "
+            "only where the simplex is peaked."
+        ),
     }
 
     return {
@@ -233,36 +242,41 @@ def format_report(R, width=88):
         top3 = list(c["alpha"].items())[:3]
         # 3-decimal display so small-but-nonzero mixture weights are visible (not rounded to 0.00);
         # if the whole simplex is nearly uniform the IPR in the verdict already says so.
-        L.append("     alpha: " + ", ".join(f"{k}={v:.3f}" for k, v in top3)
-                 + (" ..." if c["n_primitives"] > 3 else "")
-                 + (f"   [source: {src}]" if src else ""))
+        L.append(
+            "     alpha: "
+            + ", ".join(f"{k}={v:.3f}" for k, v in top3)
+            + (" ..." if c["n_primitives"] > 3 else "")
+            + (f"   [source: {src}]" if src else "")
+        )
         # if the faithful selection carries clean-solo energies, show the best few (lower = better)
         if c.get("solo_energies"):
             se = sorted(c["solo_energies"].items(), key=lambda kv: kv[1])[:3]
-            L.append("     solo energies (lower=better): "
-                     + ", ".join(f"{k}={v:.3f}" for k, v in se))
+            L.append("     solo energies (lower=better): " + ", ".join(f"{k}={v:.3f}" for k, v in se))
         # inspectable internal for this cell, if any
         cell_int = R["primitive_internals"].get(f"cell{i}")
         if cell_int:
             for pname, info in cell_int.items():
                 if info["kind"] == "kan_radial":
                     d, phi = info["d"], info["phi"]
-                    L.append(f"     inspectable [{pname}] radial phi(d): "
-                             f"phi({d[0]:.2f})={phi[0]:.2f} ... phi({d[-1]:.2f})={phi[-1]:.2f} "
-                             f"(32-pt curve available)")
+                    L.append(
+                        f"     inspectable [{pname}] radial phi(d): "
+                        f"phi({d[0]:.2f})={phi[0]:.2f} ... phi({d[-1]:.2f})={phi[-1]:.2f} "
+                        f"(32-pt curve available)"
+                    )
                 elif info["kind"] == "fno_modes":
                     L.append(f"     inspectable [{pname}] spectral mode budget: {info['modes']}")
 
     sym = R["symmetry"]
     if sym.get("group") or sym.get("canonicalized"):
         L.append("")
-        L.append(f"  symmetry: group={sym.get('group') or 'none'}   "
-                 f"canonicalized={sym.get('canonicalized')}")
+        L.append(f"  symmetry: group={sym.get('group') or 'none'}   canonicalized={sym.get('canonicalized')}")
 
     f = R["faithfulness"]
     L.append("")
-    L.append(f"  faithfulness: no auxiliary model fit (Pi reads params only). "
-             f"{f['cells_onehot_faithful']}/{f['cells_total']} cells one-hot-faithful, "
-             f"{f['cells_with_reported_tie']} reported as ties.")
+    L.append(
+        f"  faithfulness: no auxiliary model fit (Pi reads params only). "
+        f"{f['cells_onehot_faithful']}/{f['cells_total']} cells one-hot-faithful, "
+        f"{f['cells_with_reported_tie']} reported as ties."
+    )
     L.append(bar)
     return "\n".join(L)

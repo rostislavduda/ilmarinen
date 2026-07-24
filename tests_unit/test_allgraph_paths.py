@@ -55,7 +55,7 @@ class TestSelectionModes:
         r = _mg().fit(_linsep(), task="classification", n_out=2, select="gibbs")
         assert RESULT_KEYS.issubset(r.keys()), r.keys()
         assert {"architecture_gibbs", "gibbs_weights", "gibbs_energies"}.issubset(r.keys())
-        assert r["gibbs_alpha"] == r["gibbs_weights"]        # deprecated alias still present
+        assert r["gibbs_alpha"] == r["gibbs_weights"]  # deprecated alias still present
         assert np.isfinite(r["value"])
 
     def test_gibbs_weights_is_simplex(self):
@@ -93,7 +93,7 @@ class TestSelectionModes:
         ipr_free = _mg(width=16, epochs=60, sparsity_mu=0.0).fit(data, n_out=2, select="sparse")["ipr"]
         ipr_priced = _mg(width=16, epochs=60, sparsity_mu=10.0).fit(data, n_out=2, select="sparse")["ipr"]
         assert ipr_priced < ipr_free, (ipr_free, ipr_priced)
-        assert ipr_priced <= ipr_free - 1.0, (ipr_free, ipr_priced)   # a clear, not marginal, reduction
+        assert ipr_priced <= ipr_free - 1.0, (ipr_free, ipr_priced)  # a clear, not marginal, reduction
 
     def test_selection_is_deterministic(self):
         """T-MG-3: each selection mode is reproducible under a fixed seed."""
@@ -168,17 +168,17 @@ class TestEarlyStopperLogic:
         """T-MG-8: after min_epochs, patience consecutive non-improving epochs trigger a stop."""
         s = _EarlyStopper(min_delta=0.01, patience=3, min_epochs=2)
         # two clear improvements (past min_epochs floor), then a flat plateau
-        assert s.step(1.0) is False      # epoch 1 (improve, but < min_epochs)
-        assert s.step(0.5) is False      # epoch 2 (improve)
-        assert s.step(0.5) is False      # epoch 3 bad=1
-        assert s.step(0.5) is False      # epoch 4 bad=2
-        assert s.step(0.5) is True       # epoch 5 bad=3 == patience -> stop
+        assert s.step(1.0) is False  # epoch 1 (improve, but < min_epochs)
+        assert s.step(0.5) is False  # epoch 2 (improve)
+        assert s.step(0.5) is False  # epoch 3 bad=1
+        assert s.step(0.5) is False  # epoch 4 bad=2
+        assert s.step(0.5) is True  # epoch 5 bad=3 == patience -> stop
 
     def test_min_epochs_floor_respected(self):
         """T-MG-8b: never stops before min_epochs even with immediate stagnation."""
         s = _EarlyStopper(min_delta=0.01, patience=1, min_epochs=5)
-        stops = [s.step(1.0) for _ in range(4)]   # epochs 1..4, all stagnant, bad>=patience
-        assert not any(stops), stops               # but below the min_epochs floor -> no stop
+        stops = [s.step(1.0) for _ in range(4)]  # epochs 1..4, all stagnant, bad>=patience
+        assert not any(stops), stops  # but below the min_epochs floor -> no stop
 
     def test_continuous_improvement_never_stops(self):
         """T-MG-8c: a strictly-improving metric resets patience and never stops."""
@@ -188,10 +188,10 @@ class TestEarlyStopperLogic:
     def test_min_delta_is_relative(self):
         """T-MG-8d: a reduction below the RELATIVE min_delta counts as no-improvement."""
         s = _EarlyStopper(min_delta=0.10, patience=2, min_epochs=1)
-        s.step(1.0)                        # best = 1.0
+        s.step(1.0)  # best = 1.0
         # 0.95 is only a 5% cut, below the 10% min_delta -> counts as bad
-        assert s.step(0.95) is False       # bad=1
-        assert s.step(0.94) is True        # bad=2 == patience -> stop
+        assert s.step(0.95) is False  # bad=1
+        assert s.step(0.94) is True  # bad=2 == patience -> stop
 
 
 class TestAutoValSplit:
@@ -209,7 +209,7 @@ class TestAutoValSplit:
         assert va is not None
         assert len(va) == max(int(0.15 * 1000), mg._AUTO_VAL_MIN) == 150
         assert len(tr) + len(va) == 1000
-        assert set(tr).isdisjoint(set(va))     # disjoint split
+        assert set(tr).isdisjoint(set(va))  # disjoint split
 
     def test_val_mode_falls_back_on_small_data(self):
         """T-MG-9c: too-small data can't spare a reliable monitor -> fall back to train-loss monitoring."""
@@ -227,12 +227,13 @@ class TestMakeStopper:
 
     def test_configured_from_ctor(self):
         """T-MG-10b: the stopper inherits patience/min_delta and caps min_epochs at the epoch budget."""
-        mg = _mg(epochs=3, auto_epoch="train", auto_epoch_patience=6,
-                 auto_epoch_min_delta=0.02, auto_epoch_min_epochs=10)
+        mg = _mg(
+            epochs=3, auto_epoch="train", auto_epoch_patience=6, auto_epoch_min_delta=0.02, auto_epoch_min_epochs=10
+        )
         s = mg._make_stopper()
         assert isinstance(s, _EarlyStopper)
         assert s.patience == 6 and s.min_delta == pytest.approx(0.02)
-        assert s.min_epochs == 3      # capped at self.epochs, not the requested 10
+        assert s.min_epochs == 3  # capped at self.epochs, not the requested 10
 
 
 class TestAutoEpochFit:
@@ -242,14 +243,12 @@ class TestAutoEpochFit:
 
     def test_auto_epoch_train_fit(self):
         """T-MG-11: auto_epoch='train' completes and beats chance on separable data."""
-        r = _mg(width=16, epochs=40, auto_epoch="train",
-                auto_epoch_patience=3).fit(_linsep(n=160), n_out=2)
+        r = _mg(width=16, epochs=40, auto_epoch="train", auto_epoch_patience=3).fit(_linsep(n=160), n_out=2)
         assert np.isfinite(r["value"]) and r["value"] > 0.6
 
     def test_auto_epoch_val_fit(self):
         """T-MG-11b: auto_epoch='val' (ample data for a real monitor) completes and beats chance."""
-        r = _mg(width=16, epochs=40, auto_epoch="val",
-                auto_epoch_patience=3).fit(_linsep(n=400), n_out=2)
+        r = _mg(width=16, epochs=40, auto_epoch="val", auto_epoch_patience=3).fit(_linsep(n=400), n_out=2)
         assert np.isfinite(r["value"]) and r["value"] > 0.6
 
 
@@ -260,7 +259,9 @@ def _graphs(n_graphs=16, n_nodes=6, seed=0):
     for _ in range(n_graphs):
         f = rng.randn(n_nodes, 4).astype(np.float32)
         e = np.array([(i, (i + 1) % n_nodes) for i in range(n_nodes)], dtype=np.int64).T
-        nf.append(f); ed.append(e); ys.append(int(f[:, 0].sum() > 0))
+        nf.append(f)
+        ed.append(e)
+        ys.append(int(f[:, 0].sum() > 0))
     return AllData.graphs(nf, ed, y=np.array(ys, dtype=np.int64))
 
 
@@ -289,7 +290,7 @@ class TestCrossFitReuse:
         mg.device = torch.device("meta")
         mg._canonicalized_positions = "STALE"
         mg._canonicalization_applied = True
-        mg.fit(_linsep(), n_out=2)     # a fresh, non-relational fit must scrub all three
+        mg.fit(_linsep(), n_out=2)  # a fresh, non-relational fit must scrub all three
         assert mg.device == mg._base_device
         assert mg._canonicalized_positions is None
         assert mg._canonicalization_applied is False
@@ -340,8 +341,9 @@ class TestPublicMethods:
 
     def test_select_architecture_contract(self):
         """T-MG-16: select_architecture (relational) returns the chosen width*/depth* and its curve (smoke)."""
-        out = _mg().select_architecture(_graphs(), task="classification", n_out=2,
-                                        widths=(8, 16), depths=(1,), seeds=(0,), sweep_epochs=2)
+        out = _mg().select_architecture(
+            _graphs(), task="classification", n_out=2, widths=(8, 16), depths=(1,), seeds=(0,), sweep_epochs=2
+        )
         assert isinstance(out, dict)
         assert {"width_star", "depth_star", "contract"}.issubset(out.keys())
         assert out["width_star"] in (8, 16)
@@ -350,8 +352,9 @@ class TestPublicMethods:
 
     def test_select_architecture_by_area_contract(self):
         """T-MG-16b: select_architecture_by_area returns a joint width*/depth*/area* selection (smoke)."""
-        out = _mg().select_architecture_by_area(_graphs(), task="classification", n_out=2,
-                                                widths=(16, 32), depths=(1,), seeds=(0,), sweep_epochs=2)
+        out = _mg().select_architecture_by_area(
+            _graphs(), task="classification", n_out=2, widths=(16, 32), depths=(1,), seeds=(0,), sweep_epochs=2
+        )
         assert isinstance(out, dict)
         assert {"width_star", "depth_star", "area_star"}.issubset(out.keys())
 
@@ -375,7 +378,7 @@ class TestPerfPaths:
         """T-MG-21: the cached set collation is identical to the per-batch (uncached) path."""
         import torch
 
-        mg = _mg()                                   # device cpu -> cache tensors land on cpu
+        mg = _mg()  # device cpu -> cache tensors land on cpu
         d = _point_sets(n=12, m=5)
         cache = mg._prepare_batch_cache(d, to_device=True)
         assert len(cache["node"]) == 12 and cache["counts"][0] == 5
@@ -387,8 +390,7 @@ class TestPerfPaths:
 
     def test_readout_bakeoff_runs(self):
         """T-MG-22: the sequence readout bake-off (readout_select=True) fits and picks a valid readout."""
-        r = _mg(width=16, epochs=6, readout_select=True).fit(
-            _linsep(n=80), task="classification", n_out=2)
+        r = _mg(width=16, epochs=6, readout_select=True).fit(_linsep(n=80), task="classification", n_out=2)
         assert r["contract"] == "sequence"
         assert r["readout"] in ("mean", "flatten")
 
@@ -507,10 +509,11 @@ class TestDeviceRoutingMPS:
     def test_routed_set_and_cuda_safety(self):
         """T-MG-23: the routed contract set is exact; CUDA/CPU are never forced to CPU; spatial/operator excluded."""
         from ilmarinen.device import MPS_CPU_FASTER_CONTRACTS, prefer_cpu_on_mps
+
         assert MPS_CPU_FASTER_CONTRACTS == {"graph", "equivariant", "set", "sequence", "volumetric", "4d"}
         for c in MPS_CPU_FASTER_CONTRACTS:
             assert prefer_cpu_on_mps(c, "mps") and prefer_cpu_on_mps(c, __import__("torch").device("mps"))
-            assert not prefer_cpu_on_mps(c, "cuda")      # never force CPU on CUDA (Apple-Silicon phenomenon only)
+            assert not prefer_cpu_on_mps(c, "cuda")  # never force CPU on CUDA (Apple-Silicon phenomenon only)
             assert not prefer_cpu_on_mps(c, "cpu")
         for c in ("spatial", "operator"):
             assert not prefer_cpu_on_mps(c, "mps")
@@ -521,9 +524,10 @@ class TestDeviceRoutingMPS:
         CPU when the requested device is MPS -- covering both the post-routing dense pin and the pre-routing
         relational pin."""
         import torch
+
         for data_fn, expect in [(_linsep, "sequence"), (_graphs, "graph")]:
             mg = _mg()
-            mg._base_device = torch.device("mps")        # simulate device='auto'/'mps' on Apple Silicon
+            mg._base_device = torch.device("mps")  # simulate device='auto'/'mps' on Apple Silicon
             r = mg.fit(data_fn(), task="classification", n_out=2)
             assert r["contract"] == expect
             assert str(mg.device) == "cpu", (expect, str(mg.device))
@@ -533,6 +537,7 @@ class TestDeviceRoutingMPS:
         """T-MG-24b: the launch-bound dense grid contracts volumetric and 4d pin to CPU on MPS (spatial does
         NOT -- covered by the real-hardware test below)."""
         import torch
+
         for shape, expect in [((24, 1, 6, 6, 6), "volumetric"), ((20, 1, 4, 4, 4, 4), "4d")]:
             mg = _mg()
             mg._base_device = torch.device("mps")
@@ -555,6 +560,7 @@ class TestDeviceRoutingMPS:
         """T-MG-26: on genuine Apple-Silicon MPS, the dense-conv spatial contract is NOT routed to CPU (it is
         ~5x faster on the GPU). Skipped where MPS is unavailable."""
         from ilmarinen.device import mps_available
+
         if not mps_available():
             pytest.skip("requires Apple-Silicon MPS")
         mg = AllGraph(width=8, depth=1, epochs=2, device="auto", verbose=False, seed=0, contract_router=None)

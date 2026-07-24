@@ -118,7 +118,8 @@ def certificate_lambda_scale(X, y, n_candidates=2000, seed=0):
     Returns (lambda_scale, mean_corr). Sweep lambda in units of lambda_scale (e.g. 0.001-0.05 * scale for the
     full-network area gate, whose effective price is well below the single-atom certificate value)."""
     rng = np.random.default_rng(seed)
-    X = np.asarray(X, dtype=np.float64); y = np.asarray(y, dtype=np.float64)
+    X = np.asarray(X, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
     y = (y - y.mean()) / (y.std() + 1e-8)
     n, d = X.shape
     W = rng.standard_normal((d, n_candidates)) / np.sqrt(d)
@@ -129,9 +130,21 @@ def certificate_lambda_scale(X, y, n_candidates=2000, seed=0):
     return float(corr.max()), float(corr.mean())
 
 
-def fit_variable_width_area(X, y, task="regression", lam=0.005, max_width=32, max_depth=4,
-                            epochs=600, lr=5e-3, seed=0, val_frac=0.25, act="tanh",
-                            tau_start=1.0, tau_end=0.1):
+def fit_variable_width_area(
+    X,
+    y,
+    task="regression",
+    lam=0.005,
+    max_width=32,
+    max_depth=4,
+    epochs=600,
+    lr=5e-3,
+    seed=0,
+    val_frac=0.25,
+    act="tanh",
+    tau_start=1.0,
+    tau_end=0.1,
+):
     """Minimize the generalized-area objective  R + lam * sum_l m_l  by joint training of a VariableWidthNet.
 
     Uses a DETERMINISTIC temperature-annealed gate (tau: tau_start -> tau_end) rather than a stochastic L0
@@ -141,39 +154,55 @@ def fit_variable_width_area(X, y, task="regression", lam=0.005, max_width=32, ma
     lam is on the certificate scale: see certificate_lambda_scale(X, y) for the data-driven lambda scale; the
     full-network area gate operates at roughly 1e-3..5e-2 of that single-atom scale.
     """
-    rng = np.random.RandomState(seed); torch.manual_seed(seed)
-    X = np.asarray(X, dtype=np.float32); y = np.asarray(y)
+    rng = np.random.RandomState(seed)
+    torch.manual_seed(seed)
+    X = np.asarray(X, dtype=np.float32)
+    y = np.asarray(y)
     n, d = X.shape
-    idx = rng.permutation(n); ntr = int(n * (1 - val_frac))
+    idx = rng.permutation(n)
+    ntr = int(n * (1 - val_frac))
     tr, va = idx[:ntr], idx[ntr:]
     Xt, Xv = torch.tensor(X[tr]), torch.tensor(X[va])
     n_out = 1 if task == "regression" else int(np.max(y) + 1)
     if task == "regression":
-        yt = torch.tensor(y[tr].astype(np.float32)); yv = torch.tensor(y[va].astype(np.float32))
+        yt = torch.tensor(y[tr].astype(np.float32))
+        yv = torch.tensor(y[va].astype(np.float32))
         lossf = lambda p, t: ((p - t) ** 2).mean()
     else:
-        yt = torch.tensor(y[tr].astype(np.int64)); yv = torch.tensor(y[va].astype(np.int64))
+        yt = torch.tensor(y[tr].astype(np.int64))
+        yv = torch.tensor(y[va].astype(np.int64))
         lossf = lambda p, t: nn.functional.cross_entropy(p, t)
 
     m = VariableWidthNet(d, n_out=n_out, max_width=max_width, max_depth=max_depth, act=act)
     opt = torch.optim.Adam(m.parameters(), lr=lr)
     m.train()
     for e in range(epochs):
-        tau = max(tau_end, tau_start * (1.0 - e / max(1, epochs)))   # anneal temperature toward tau_end
+        tau = max(tau_end, tau_start * (1.0 - e / max(1, epochs)))  # anneal temperature toward tau_end
         opt.zero_grad()
         loss = lossf(m(Xt, tau), yt) + lam * m.generalized_area(tau)
-        loss.backward(); opt.step()
+        loss.backward()
+        opt.step()
     m.eval()
     with torch.no_grad():
         if task == "regression":
-            pv = m(Xv, tau=0.05); denom = ((yv - yv.mean()) ** 2).sum().item()
-            fit = 1 - ((pv - yv) ** 2).sum().item() / (denom + 1e-12); metric = "R2"
+            pv = m(Xv, tau=0.05)
+            denom = ((yv - yv.mean()) ** 2).sum().item()
+            fit = 1 - ((pv - yv) ** 2).sum().item() / (denom + 1e-12)
+            metric = "R2"
         else:
-            fit = float((m(Xv, tau=0.05).argmax(1) == yv).float().mean().item()); metric = "acc"
+            fit = float((m(Xv, tau=0.05).argmax(1) == yv).float().mean().item())
+            metric = "acc"
     widths = m.widths()
-    return {"widths": widths, "effective_depth": m.effective_depth(),
-            "generalized_area": int(sum(widths)), "metric": metric, "value": float(fit), "lam": lam,
-            "max_width": max_width, "max_depth": max_depth}
+    return {
+        "widths": widths,
+        "effective_depth": m.effective_depth(),
+        "generalized_area": int(sum(widths)),
+        "metric": metric,
+        "value": float(fit),
+        "lam": lam,
+        "max_width": max_width,
+        "max_depth": max_depth,
+    }
 
 
 def area_price_path(X, y, task="regression", lams=None, **kwargs):
@@ -187,17 +216,27 @@ def area_price_path(X, y, task="regression", lams=None, **kwargs):
     rows = []
     for lam in lams:
         r = fit_variable_width_area(X, y, task=task, lam=lam, **kwargs)
-        rows.append({"lam": lam, "widths": r["widths"], "effective_depth": r["effective_depth"],
-                     "generalized_area": r["generalized_area"], "value": r["value"], "metric": r["metric"]})
+        rows.append(
+            {
+                "lam": lam,
+                "widths": r["widths"],
+                "effective_depth": r["effective_depth"],
+                "generalized_area": r["generalized_area"],
+                "value": r["value"],
+                "metric": r["metric"],
+            }
+        )
     return rows
 
 
 def format_area_result(result):
     """Short text report of a fit_variable_width_area result."""
     w = result["widths"]
-    return ("GENERALIZED-AREA SIZE SELECTION (variable width-per-layer + emergent depth)\n"
-            f"  objective: R + lam * sum_l m_l,  lam={result['lam']}\n"
-            f"  per-layer widths [m_1..m_Lmax]: {w}  (max_width={result['max_width']}, max_depth={result['max_depth']})\n"
-            f"  effective depth L = #{{l : m_l>0}} = {result['effective_depth']}\n"
-            f"  generalized area (total neurons) = {result['generalized_area']}\n"
-            f"  held-out {result['metric']} = {result['value']:.3f}")
+    return (
+        "GENERALIZED-AREA SIZE SELECTION (variable width-per-layer + emergent depth)\n"
+        f"  objective: R + lam * sum_l m_l,  lam={result['lam']}\n"
+        f"  per-layer widths [m_1..m_Lmax]: {w}  (max_width={result['max_width']}, max_depth={result['max_depth']})\n"
+        f"  effective depth L = #{{l : m_l>0}} = {result['effective_depth']}\n"
+        f"  generalized area (total neurons) = {result['generalized_area']}\n"
+        f"  held-out {result['metric']} = {result['value']:.3f}"
+    )

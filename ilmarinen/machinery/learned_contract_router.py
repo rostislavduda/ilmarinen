@@ -29,6 +29,7 @@ use the prediction and skip the bake-off. If not, FALL BACK to the bake-off (the
 the outcome to improve the corpus. So the router is never WORSE than the bake-off (it defers when unsure)
 and is much cheaper when confident. A warm default corpus ships so it is useful out of the box.
 """
+
 from __future__ import annotations
 
 import json
@@ -42,7 +43,7 @@ def _per_molecule_blocks(positions, node_feats, edges_or_adj):
     geo, topo, st = [], [], []
     for p, Z, A in zip(positions, node_feats, edges_or_adj):
         Z = np.asarray(Z, float).reshape(len(Z), -1)
-        zc = Z.mean(axis=1) if Z.shape[1] > 1 else Z[:, 0]        # a scalar per node
+        zc = Z.mean(axis=1) if Z.shape[1] > 1 else Z[:, 0]  # a scalar per node
         N = len(zc)
         # geometry: pairwise-distance summary (rotation invariant)
         if p is not None and N > 1:
@@ -94,8 +95,9 @@ def dataset_descriptor(positions, node_feats, adjacencies, y):
 
     avg_N = np.mean([len(z) for z in node_feats]) / 10.0
     avg_E = np.mean([(np.asarray(a).sum() / 2.0 if a is not None else 0.0) for a in adjacencies]) / 20.0
-    return np.array([best_proxy_corr(geo), best_proxy_corr(topo), best_proxy_corr(st),
-                     float(avg_N), float(avg_E)], float)
+    return np.array(
+        [best_proxy_corr(geo), best_proxy_corr(topo), best_proxy_corr(st), float(avg_N), float(avg_E)], float
+    )
 
 
 # --------------------------------------------------------------------------- the router
@@ -105,8 +107,8 @@ class ContractRouter:
     caller can fall back to the bake-off and record the true outcome."""
 
     def __init__(self, min_confidence=0.5, match_dims=3):
-        self.X = np.zeros((0, 5))          # descriptor corpus (full 5-dim: 3 proxies + 2 size stats)
-        self.y = []                        # contract labels
+        self.X = np.zeros((0, 5))  # descriptor corpus (full 5-dim: 3 proxies + 2 size stats)
+        self.y = []  # contract labels
         self.min_confidence = min_confidence
         # Only the first `match_dims` descriptor features are used for prototype matching. The proxy-
         # correlations (dims 0-2: geo/topo/set) are dimensionless in [0,1] and TRANSFER across physical
@@ -132,7 +134,7 @@ class ContractRouter:
         if len(self.y) == 0:
             self._protos = {}
             return
-        Xm = self.X[:, :self.match_dims]                 # transferable proxy features only
+        Xm = self.X[:, : self.match_dims]  # transferable proxy features only
         self._mu = Xm.mean(0)
         self._sd = Xm.std(0) + 1e-9
         Xs = (Xm - self._mu) / self._sd
@@ -146,12 +148,12 @@ class ContractRouter:
         only one class is known (cannot discriminate)."""
         if not self._protos or len(self._protos) < 2:
             return None, 0.0, {"reason": "router has fewer than two contract classes; defer to bake-off"}
-        xs = (np.asarray(descriptor, float)[:self.match_dims] - self._mu) / self._sd
+        xs = (np.asarray(descriptor, float)[: self.match_dims] - self._mu) / self._sd
         dists = {c: float(np.linalg.norm(xs - p)) for c, p in self._protos.items()}
         order = sorted(dists, key=dists.get)
         best, runner = order[0], order[1]
         margin = dists[runner] - dists[best]
-        confidence = margin / (margin + 1.0)          # monotone squash to [0,1)
+        confidence = margin / (margin + 1.0)  # monotone squash to [0,1)
         detail = {"distances": dists, "margin": float(margin), "confidence": float(confidence)}
         return best, float(confidence), detail
 
@@ -161,8 +163,14 @@ class ContractRouter:
 
     # ---- persistence ----
     def to_json(self):
-        return json.dumps({"X": self.X.tolist(), "y": list(self.y),
-                           "min_confidence": self.min_confidence, "match_dims": self.match_dims})
+        return json.dumps(
+            {
+                "X": self.X.tolist(),
+                "y": list(self.y),
+                "min_confidence": self.min_confidence,
+                "match_dims": self.match_dims,
+            }
+        )
 
     @classmethod
     def from_json(cls, s):
@@ -197,15 +205,15 @@ def default_router():
         ([0.06, 0.10, 0.98, 0.8, 0.3], "set"),
         ([0.10, 0.12, 0.93, 0.6, 0.2], "set"),
         # --- REAL molecular geometry (QM7 coordinates, three target types) ---
-        ([1.00, 0.16, 0.27, 1.32, 0.04], "equivariant"),   # QM7 radius of gyration (geometric)
-        ([0.18, 0.96, 0.23, 1.32, 0.04], "graph"),         # QM7 bond count (topological)
-        ([0.18, 0.19, 1.00, 1.32, 0.04], "set"),           # QM7 mean atomic number (set)
+        ([1.00, 0.16, 0.27, 1.32, 0.04], "equivariant"),  # QM7 radius of gyration (geometric)
+        ([0.18, 0.96, 0.23, 1.32, 0.04], "graph"),  # QM7 bond count (topological)
+        ([0.18, 0.19, 1.00, 1.32, 0.04], "set"),  # QM7 mean atomic number (set)
         # --- REAL full-budget bake-off winners on molecular energy/force targets ---
-        ([0.15, 0.21, 0.00, 0.90, 1.54], "equivariant"),   # rMD17-ethanol
-        ([0.62, 0.72, 0.00, 1.47, 0.95], "equivariant"),   # QM7-equiv
+        ([0.15, 0.21, 0.00, 0.90, 1.54], "equivariant"),  # rMD17-ethanol
+        ([0.62, 0.72, 0.00, 1.47, 0.95], "equivariant"),  # QM7-equiv
         # --- REAL particle point clouds (JetNet, a DIFFERENT physical domain) ---
-        ([0.98, 0.81, 0.28, 2.99, 21.3], "equivariant"),   # jet width (geometric)
-        ([0.30, 0.23, 0.96, 2.99, 21.3], "set"),           # total pt (set)
+        ([0.98, 0.81, 0.28, 2.99, 21.3], "equivariant"),  # jet width (geometric)
+        ([0.30, 0.23, 0.96, 2.99, 21.3], "set"),  # total pt (set)
     ]
     for d, c in seeds:
         r.add(d, c)

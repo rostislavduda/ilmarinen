@@ -50,8 +50,9 @@ def test_graph_streaming_bit_identical():
     mg_r = AllGraph(width=8, depth=1, epochs=5, verbose=False, seed=0)
     r_r = mg_r.fit(AllData.graphs(nf, ed, y=y), task="classification", n_out=2)
     mg_s = AllGraph(width=8, depth=1, epochs=5, verbose=False, seed=0)
-    r_s = mg_s.fit(AllData.graph_stream(InMemoryGraphSource(nf, edges=ed), y=y, kind_hint="graph"),
-                   task="classification", n_out=2)
+    r_s = mg_s.fit(
+        AllData.graph_stream(InMemoryGraphSource(nf, edges=ed), y=y, kind_hint="graph"), task="classification", n_out=2
+    )
     assert r_r["contract"] == r_s["contract"] == "graph"
     assert _weights_identical(mg_r.net, mg_s.net)
     assert r_r["value"] == r_s["value"]
@@ -64,20 +65,26 @@ def test_equivariant_streaming_bit_identical():
     mg_r = AllGraph(width=8, depth=1, epochs=4, verbose=False, seed=0)
     r_r = mg_r.fit(AllData.graphs(nf, ed, y=y, positions=pos), task="classification", n_out=2)
     mg_s = AllGraph(width=8, depth=1, epochs=4, verbose=False, seed=0)
-    r_s = mg_s.fit(AllData.graph_stream(InMemoryGraphSource(nf, edges=ed, positions=pos), y=y,
-                                        kind_hint="equivariant"), task="classification", n_out=2)
+    r_s = mg_s.fit(
+        AllData.graph_stream(InMemoryGraphSource(nf, edges=ed, positions=pos), y=y, kind_hint="equivariant"),
+        task="classification",
+        n_out=2,
+    )
     assert r_r["contract"] == r_s["contract"] == "equivariant"
     assert _weights_identical(mg_r.net, mg_s.net)
     assert r_r["value"] == r_s["value"]
 
 
-@pytest.mark.parametrize("task,n_out,auto_epoch", [
-    ("classification", 2, None),
-    ("regression", 1, "val"),
-])
+@pytest.mark.parametrize(
+    "task,n_out,auto_epoch",
+    [
+        ("classification", 2, None),
+        ("regression", 1, "val"),
+    ],
+)
 def test_set_streaming_bit_identical(task, n_out, auto_epoch):
     """T-GSTREAM-3: set contract (edgeless point sets), classification and regression+auto_epoch='val'."""
-    n = 300 if auto_epoch == "val" else 24                # 'val' needs enough for a held-out monitor
+    n = 300 if auto_epoch == "val" else 24  # 'val' needs enough for a held-out monitor
     nf, ycls = _point_sets(n=n)
     y = ycls if task == "classification" else np.array([float(x[:, 0].sum()) for x in nf], np.float32)
     epochs = 20 if auto_epoch else 5
@@ -106,7 +113,7 @@ def test_lazy_graph_source_matches_inmemory():
     mg_b = AllGraph(width=8, depth=1, epochs=4, verbose=False, seed=0)
     mg_b.fit(AllData.graph_stream(lazy, y=y, kind_hint="graph"), n_out=2)
     assert _weights_identical(mg_a.net, mg_b.net)
-    assert loads["n"] > 0                                 # the loader was actually driven
+    assert loads["n"] > 0  # the loader was actually driven
 
 
 def test_streaming_repeatability_and_data_sensitivity():
@@ -153,10 +160,10 @@ def test_graphs_fetched_per_sample_not_cached():
     nf, ed, y = _graphs(n=20)
     epochs = 3
     cs = _CountingGraphSource(nf, ed)
-    mg = AllGraph(width=8, depth=1, epochs=epochs, verbose=False, seed=0)   # auto_epoch off -> train on all n
+    mg = AllGraph(width=8, depth=1, epochs=epochs, verbose=False, seed=0)  # auto_epoch off -> train on all n
     mg.fit(AllData.graph_stream(cs, y=y, kind_hint="graph"), task="classification", n_out=2)
     n = len(nf)
-    assert cs.node_calls == epochs * n + n                # re-fetched each epoch + once for eval; never cached
+    assert cs.node_calls == epochs * n + n  # re-fetched each epoch + once for eval; never cached
 
 
 # --------------------------------------------------------------------------- predict / inertness
@@ -172,7 +179,7 @@ def test_predict_after_streaming_train_matches_resident():
     ps_resident = mg_s.predict(AllData.graphs(nf, ed))
     ps_stream = mg_s.predict(AllData.graph_stream(InMemoryGraphSource(nf, edges=ed), kind_hint="graph"))
     assert np.array_equal(pr, ps_resident)
-    assert np.array_equal(pr, ps_stream)                 # predict accepts a streamed test set too
+    assert np.array_equal(pr, ps_stream)  # predict accepts a streamed test set too
 
 
 def test_streamed_predict_with_canonicalization_errors_clearly():
@@ -181,7 +188,7 @@ def test_streamed_predict_with_canonicalization_errors_clearly():
     nf, ed, y = _graphs(n=12)
     mg = AllGraph(width=8, depth=1, epochs=3, verbose=False, seed=0)
     mg.fit(AllData.graphs(nf, ed, y=y), n_out=2)
-    mg._canonicalization_applied = True                  # simulate a canonicalized fit
+    mg._canonicalization_applied = True  # simulate a canonicalized fit
     with pytest.raises(NotImplementedError, match="canonicalization"):
         mg.predict(AllData.graph_stream(InMemoryGraphSource(nf, edges=ed), kind_hint="graph"))
     # resident predict on the same (canonicalization-flagged) model still takes the normal path
@@ -194,7 +201,9 @@ def test_resident_relational_not_streaming():
     mg = AllGraph(verbose=False)
     assert mg._is_streaming_graph(AllData.graphs(nf, ed, y=y)) is False
     assert mg._is_streaming_graph(AllData.point_sets(nf, y=y)) is False
-    assert mg._is_streaming_graph(AllData.graph_stream(InMemoryGraphSource(nf, edges=ed), y=y, kind_hint="graph")) is True
+    assert (
+        mg._is_streaming_graph(AllData.graph_stream(InMemoryGraphSource(nf, edges=ed), y=y, kind_hint="graph")) is True
+    )
 
 
 # --------------------------------------------------------------------------- guards
@@ -204,15 +213,15 @@ def test_graph_stream_constructor_guards():
     src_no_edges = InMemoryGraphSource(nf)
     src_edges = InMemoryGraphSource(nf, edges=ed)
     with pytest.raises(TypeError):
-        AllData.graph_stream(nf, kind_hint="graph")                       # not a GraphSource
+        AllData.graph_stream(nf, kind_hint="graph")  # not a GraphSource
     with pytest.raises(ValueError):
-        AllData.graph_stream(src_edges)                                   # missing kind_hint
+        AllData.graph_stream(src_edges)  # missing kind_hint
     with pytest.raises(ValueError):
-        AllData.graph_stream(src_edges, kind_hint="spatial")             # dense contract
+        AllData.graph_stream(src_edges, kind_hint="spatial")  # dense contract
     with pytest.raises(ValueError):
-        AllData.graph_stream(src_no_edges, kind_hint="graph")            # graph needs edges
+        AllData.graph_stream(src_no_edges, kind_hint="graph")  # graph needs edges
     with pytest.raises(ValueError):
-        AllData.graph_stream(src_edges, kind_hint="equivariant")         # equivariant needs positions
+        AllData.graph_stream(src_edges, kind_hint="equivariant")  # equivariant needs positions
 
 
 @pytest.mark.parametrize("flag", ["price_singular", "report_llc", "symmetry_routing"])
@@ -227,12 +236,15 @@ def test_graph_stream_still_blocked_options(flag):
         mg.fit(data, task="classification", n_out=2)
 
 
-@pytest.mark.parametrize("kw,setup,kind", [
-    ({"select": "gibbs"}, {}, "graph"),
-    ({"select_size": "sequential"}, {}, "graph"),
-    ({"tiebreak": True}, {}, "equivariant"),
-    ({}, {"angular_from_data": True}, "equivariant"),
-])
+@pytest.mark.parametrize(
+    "kw,setup,kind",
+    [
+        ({"select": "gibbs"}, {}, "graph"),
+        ({"select_size": "sequential"}, {}, "graph"),
+        ({"tiebreak": True}, {}, "equivariant"),
+        ({}, {"angular_from_data": True}, "equivariant"),
+    ],
+)
 def test_graph_stream_selection_supported(kw, setup, kind):
     """T-GSTREAM-10b: select='gibbs' / select_size / tiebreak / angular_from_data run under graph streaming (on a
     bounded resident subsample; the winner deploy-trains on the full stream), producing a finite result."""
@@ -258,11 +270,11 @@ def test_lazy_source_retries_after_transient_loader_error():
         return {"node": nf[i], "edge": ed[i]}
 
     src = LazyGraphSource(loader, n=4, n_in=4, has_edges=True)
-    assert torch.equal(src.node(0), torch.as_tensor(nf[0]))       # load graph 0 -> memo = graph 0
+    assert torch.equal(src.node(0), torch.as_tensor(nf[0]))  # load graph 0 -> memo = graph 0
     state["fail_next"] = True
     with pytest.raises(IOError):
-        src.node(1)                                               # loader raises: memo must stay on graph 0
-    assert torch.equal(src.node(1), torch.as_tensor(nf[1]))       # retry re-loads graph 1 (not stale graph 0)
+        src.node(1)  # loader raises: memo must stay on graph 0
+    assert torch.equal(src.node(1), torch.as_tensor(nf[1]))  # retry re-loads graph 1 (not stale graph 0)
 
 
 def test_graph_stream_assertion_kwarg():
@@ -270,9 +282,9 @@ def test_graph_stream_assertion_kwarg():
     nf, ed, y = _graphs(n=12)
     mg = AllGraph(verbose=False, seed=0, width=8, depth=1, epochs=2)
     with pytest.raises(ValueError):
-        mg.fit(AllData.graphs(nf, ed, y=y), n_out=2, stream=True)         # resident, demanded stream
+        mg.fit(AllData.graphs(nf, ed, y=y), n_out=2, stream=True)  # resident, demanded stream
     d = AllData.graph_stream(InMemoryGraphSource(nf, edges=ed), y=y, kind_hint="graph")
     with pytest.raises(ValueError):
-        mg.fit(d, n_out=2, stream=False)                                 # stream, forbade it
+        mg.fit(d, n_out=2, stream=False)  # stream, forbade it
     r = mg.fit(d, n_out=2, stream=True)
     assert r["contract"] == "graph"

@@ -31,6 +31,7 @@ The result composes with the existing routers: it SUBSUMES the container-type pr
 to split set-vs-graph by adjacency once rotation-invariance is settled), and it is a cleaner, more physical
 label source for the learned contract router than a from-scratch bake-off.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -63,6 +64,7 @@ def _fit_r2(feature_fn, clouds, y, seed=0, epochs=200, width=64):
     """Fit a small MLP y ~ f(feature_fn(cloud)) and return held-out R^2."""
     import torch
     import torch.nn as nn
+
     torch.manual_seed(seed)
     F = np.array([feature_fn(P) for P in clouds], float)
     X = torch.tensor(F, dtype=torch.float32)
@@ -70,8 +72,9 @@ def _fit_r2(feature_fn, clouds, y, seed=0, epochs=200, width=64):
     yt = (yt - yt.mean()) / (yt.std() + 1e-9)
     n = len(X)
     ntr = int(0.75 * n)
-    net = nn.Sequential(nn.Linear(X.shape[1], width), nn.Tanh(),
-                        nn.Linear(width, width), nn.Tanh(), nn.Linear(width, 1))
+    net = nn.Sequential(
+        nn.Linear(X.shape[1], width), nn.Tanh(), nn.Linear(width, width), nn.Tanh(), nn.Linear(width, 1)
+    )
     opt = torch.optim.Adam(net.parameters(), lr=3e-3)
     for _ in range(epochs):
         opt.zero_grad()
@@ -96,11 +99,15 @@ def rotation_invariance_score(clouds, y, seed=0, epochs=200, tol=0.05, min_invar
     canonicalization) is appropriate."""
     r2_inv = _fit_r2(_pairwise_distance_hist, clouds, y, seed=seed, epochs=epochs)
     r2_ori = _fit_r2(_axis_coordinate_hist, clouds, y, seed=seed, epochs=epochs)
-    gap = r2_ori - r2_inv                         # how much orientation helps beyond invariants
+    gap = r2_ori - r2_inv  # how much orientation helps beyond invariants
     invariant = bool(r2_inv >= r2_ori - tol and r2_inv >= min_invariant_r2)
-    return {"r2_invariant": r2_inv, "r2_orientation": r2_ori, "orientation_gain": gap,
-            "rotation_invariant": invariant,
-            "uninformative": bool(r2_inv < min_invariant_r2 and r2_ori < min_invariant_r2)}
+    return {
+        "r2_invariant": r2_inv,
+        "r2_orientation": r2_ori,
+        "orientation_gain": gap,
+        "rotation_invariant": invariant,
+        "uninformative": bool(r2_inv < min_invariant_r2 and r2_ori < min_invariant_r2),
+    }
 
 
 def contract_from_symmetry(data, epochs=200, tol=0.05, min_clouds=30):
@@ -132,17 +139,20 @@ def contract_from_symmetry(data, epochs=200, tol=0.05, min_clouds=30):
         return ("graph" if has_edges else "set"), 0.0, {"reason": "too few clouds for the rotation test"}
     score = rotation_invariance_score(clouds, np.array(yy), epochs=epochs, tol=tol)
     if score["rotation_invariant"]:
-        conf = float(np.clip(0.5 - score["orientation_gain"], 0.0, 1.0))   # more negative gain -> more confident
+        conf = float(np.clip(0.5 - score["orientation_gain"], 0.0, 1.0))  # more negative gain -> more confident
         return "equivariant", conf, {"reason": "target is rotation-invariant -> equivariant", **score}
     if score.get("uninformative"):
         # neither invariant nor orientation features predict the target at this budget -- the rotation test
         # is uninformative. Do NOT canonicalize on noise (that would discard the equivariant contract for
         # the set contract). Defer with zero confidence so the learned/structural router decides; with
         # positions+edges present this correctly leaves the equivariant contract in play.
-        return ("equivariant" if has_edges else "set"), 0.0, {
-            "reason": "rotation test uninformative (geometry non-predictive at budget); defer", **score}
+        return (
+            ("equivariant" if has_edges else "set"),
+            0.0,
+            {"reason": "rotation test uninformative (geometry non-predictive at budget); defer", **score},
+        )
     contract = "graph" if has_edges else "set"
-    conf = float(np.clip(score["orientation_gain"], 0.0, 1.0))             # larger gain -> more confident it is NOT equivariant
+    conf = float(np.clip(score["orientation_gain"], 0.0, 1.0))  # larger gain -> more confident it is NOT equivariant
     return contract, conf, {"reason": "target depends on orientation -> container split", **score}
 
 
@@ -150,6 +160,7 @@ def contract_from_symmetry(data, epochs=200, tol=0.05, min_clouds=30):
 def _dilation_generator(d):
     """The isotropic-scaling (Euler/dilation) generator: the identity matrix. exp(t D) = e^t * I."""
     import numpy as _np
+
     return _np.eye(d)
 
 
@@ -163,30 +174,47 @@ def _candidate_groups(d):
     size). Orthogonal/Lorentz groups preserve an inner product (invariants = inner products); scaling
     rescales it (invariants = ratios/angles), which is why Sim(d) uses scale-normalized features."""
     import numpy as _np
+
     cands = []
     # SO(d): antisymmetric generators, identity metric, no scale-normalization
     so = []
     for i in range(d):
         for j in range(i + 1, d):
-            A = _np.zeros((d, d)); A[i, j] = -1; A[j, i] = 1; so.append(A)
+            A = _np.zeros((d, d))
+            A[i, j] = -1
+            A[j, i] = 1
+            so.append(A)
     if so:
-        cands.append({"name": "SO(%d)" % d, "gens": so, "metric": _np.eye(d),
-                      "n_gen": len(so), "scale_norm": False})
+        cands.append({"name": "SO(%d)" % d, "gens": so, "metric": _np.eye(d), "n_gen": len(so), "scale_norm": False})
         # Similarity group Sim(d) = R^+ x SO(d): rotations + isotropic dilation. Same generators PLUS the
         # dilation generator; invariants are scale-normalized (shape, not size).
-        cands.append({"name": "Sim(%d)" % d, "gens": so + [_dilation_generator(d)], "metric": _np.eye(d),
-                      "n_gen": len(so) + 1, "scale_norm": True})
+        cands.append(
+            {
+                "name": "Sim(%d)" % d,
+                "gens": so + [_dilation_generator(d)],
+                "metric": _np.eye(d),
+                "n_gen": len(so) + 1,
+                "scale_norm": True,
+            }
+        )
     # Lorentz O(1,d-1): spatial rotations + boosts, Minkowski metric
     if d >= 2:
         lor = []
         for i in range(1, d):
             for j in range(i + 1, d):
-                A = _np.zeros((d, d)); A[i, j] = -1; A[j, i] = 1; lor.append(A)   # spatial rotations
+                A = _np.zeros((d, d))
+                A[i, j] = -1
+                A[j, i] = 1
+                lor.append(A)  # spatial rotations
         for i in range(1, d):
-            A = _np.zeros((d, d)); A[0, i] = 1; A[i, 0] = 1; lor.append(A)          # boosts
+            A = _np.zeros((d, d))
+            A[0, i] = 1
+            A[i, 0] = 1
+            lor.append(A)  # boosts
         metric = _np.diag([1.0] + [-1.0] * (d - 1))
-        cands.append({"name": "O(1,%d)" % (d - 1), "gens": lor, "metric": metric,
-                      "n_gen": len(lor), "scale_norm": False})
+        cands.append(
+            {"name": "O(1,%d)" % (d - 1), "gens": lor, "metric": metric, "n_gen": len(lor), "scale_norm": False}
+        )
     return cands
 
 
@@ -197,11 +225,12 @@ def _invariant_features(clouds, metric, scale_norm=False):
     scale_norm is True (similarity/conformal groups, which include isotropic dilation), each cloud is
     normalized by its RMS radius first, so the inner products become SCALE-invariant (shape, not size)."""
     import numpy as _np
+
     feats = []
     for P in clouds:
         P = _np.asarray(P, float)
         if scale_norm:
-            rms = _np.sqrt((P ** 2).sum(1).mean()) + 1e-9
+            rms = _np.sqrt((P**2).sum(1).mean()) + 1e-9
             P = P / rms
         s = P.sum(0)
         spp = float(s @ metric @ s)
@@ -212,7 +241,7 @@ def _invariant_features(clouds, metric, scale_norm=False):
         # shape descriptor: sorted eigenvalues of the centered second-moment (rotation-invariant), which
         # (after scale_norm) captures anisotropy/shape ratios that pooled inner products alone miss.
         Pc = P - P.mean(0)
-        cov = (Pc.T @ Pc) / max(len(P), 1)          # (d,d) second-moment
+        cov = (Pc.T @ Pc) / max(len(P), 1)  # (d,d) second-moment
         eig = _np.sort(_np.linalg.eigvalsh((cov + cov.T) / 2))[::-1]
         feats.append(_np.concatenate([[spp, selfnorm, offmean], eig]))
     return _np.array(feats)
@@ -231,21 +260,21 @@ def _highres_invariants(clouds, metric, scale_norm=False, k_eig=4, n_quant=7):
     features are exact group invariants; being spectra / order-statistics they are permutation-invariant
     too. scale_norm normalizes each cloud by its RMS radius first (for similarity/conformal groups)."""
     import numpy as _np
+
     g = _np.asarray(metric, float)
     qs = _np.linspace(0.0, 1.0, n_quant)
     feats = []
     for P in clouds:
         P = _np.asarray(P, float)
         if scale_norm:
-            P = P / (_np.sqrt((P ** 2).sum(1).mean()) + 1e-9)
+            P = P / (_np.sqrt((P**2).sum(1).mean()) + 1e-9)
         s = P.sum(0)
         G = P @ g @ P.T
         ev = _np.sort(_np.linalg.eigvalsh((G + G.T) / 2))[::-1]
         ev = _np.concatenate([ev[:k_eig], _np.zeros(max(0, k_eig - len(ev)))])
         iu = _np.triu_indices(len(P), 1)
         off = G[iu] if len(iu[0]) > 0 else _np.zeros(1)
-        feats.append(_np.concatenate([[float(s @ g @ s)], ev,
-                                       _np.quantile(off, qs), _np.quantile(_np.diag(G), qs)]))
+        feats.append(_np.concatenate([[float(s @ g @ s)], ev, _np.quantile(off, qs), _np.quantile(_np.diag(G), qs)]))
     return _np.array(feats)
 
 
@@ -255,6 +284,7 @@ def _apply_group(clouds, gens, scale=0.6, seed=1):
     so a target explained by G-invariants must fit equally well on the transformed clouds."""
     import numpy as _np
     from scipy.linalg import expm
+
     rng = _np.random.RandomState(seed)
     t = rng.randn(len(gens)) * scale
     L = expm(sum(t[k] * _np.asarray(gens[k], float) for k in range(len(gens))))
@@ -264,6 +294,7 @@ def _apply_group(clouds, gens, scale=0.6, seed=1):
 def _raw_features(clouds, d):
     """Frame-sensitive (non-invariant) features: per-axis moments of the pooled vector and coordinates."""
     import numpy as _np
+
     feats = []
     for P in clouds:
         P = _np.asarray(P, float)
@@ -276,16 +307,21 @@ def _fit_r2_features(feats, y, seed=0, epochs=200, width=48):
     import numpy as _np
     import torch
     import torch.nn as nn
+
     torch.manual_seed(seed)
     X = torch.tensor(_np.asarray(feats), dtype=torch.float32)
     yt = torch.tensor(_np.asarray(y), dtype=torch.float32).reshape(-1, 1)
     yt = (yt - yt.mean()) / (yt.std() + 1e-9)
-    n = len(X); ntr = int(0.75 * n)
-    net = nn.Sequential(nn.Linear(X.shape[1], width), nn.Tanh(),
-                        nn.Linear(width, width), nn.Tanh(), nn.Linear(width, 1))
+    n = len(X)
+    ntr = int(0.75 * n)
+    net = nn.Sequential(
+        nn.Linear(X.shape[1], width), nn.Tanh(), nn.Linear(width, width), nn.Tanh(), nn.Linear(width, 1)
+    )
     opt = torch.optim.Adam(net.parameters(), lr=3e-3)
     for _ in range(epochs):
-        opt.zero_grad(); ((net(X[:ntr]) - yt[:ntr]) ** 2).mean().backward(); opt.step()
+        opt.zero_grad()
+        ((net(X[:ntr]) - yt[:ntr]) ** 2).mean().backward()
+        opt.step()
     with torch.no_grad():
         p = net(X[ntr:])
         return float(1 - ((p - yt[ntr:]) ** 2).sum() / (((yt[ntr:] - yt[ntr:].mean()) ** 2).sum() + 1e-9))
@@ -298,6 +334,7 @@ def _fit_r2_on(Ftr, ytr, Fte, yte, seed=0, epochs=200, width=64):
     import numpy as _np
     import torch
     import torch.nn as nn
+
     torch.manual_seed(seed)
     X = torch.tensor(_np.asarray(Ftr), dtype=torch.float32)
     yt = torch.tensor(_np.asarray(ytr), dtype=torch.float32).reshape(-1, 1)
@@ -305,11 +342,14 @@ def _fit_r2_on(Ftr, ytr, Fte, yte, seed=0, epochs=200, width=64):
     ym, ysd = yt.mean(), yt.std() + 1e-9
     Xn = (X - mu) / sd
     ytn = (yt - ym) / ysd
-    net = nn.Sequential(nn.Linear(X.shape[1], width), nn.Tanh(),
-                        nn.Linear(width, width), nn.Tanh(), nn.Linear(width, 1))
+    net = nn.Sequential(
+        nn.Linear(X.shape[1], width), nn.Tanh(), nn.Linear(width, width), nn.Tanh(), nn.Linear(width, 1)
+    )
     opt = torch.optim.Adam(net.parameters(), lr=3e-3)
     for _ in range(epochs):
-        opt.zero_grad(); ((net(Xn) - ytn) ** 2).mean().backward(); opt.step()
+        opt.zero_grad()
+        ((net(Xn) - ytn) ** 2).mean().backward()
+        opt.step()
     Xt = (torch.tensor(_np.asarray(Fte), dtype=torch.float32) - mu) / sd
     ytt = (torch.tensor(_np.asarray(yte), dtype=torch.float32).reshape(-1, 1) - ym) / ysd
     with torch.no_grad():
@@ -338,12 +378,13 @@ def detect_symmetry_group(data, tol=0.05, min_clouds=30, epochs=200, min_fit=0.3
     "scale_norm"} ready for AllGraph(generated_equivariant_group=spec).
     """
     import numpy as _np
+
     if getattr(data, "positions", None) is None:
         return None, {"reason": "no coordinate vectors; group detection N/A"}
     clouds = [_np.asarray(P, float) for P in data.positions if _np.asarray(P).ndim == 2 and len(P) >= 2]
     if len(clouds) < min_clouds:
         return None, {"reason": "too few clouds for group detection"}
-    y = _np.asarray(data.y).ravel()[:len(clouds)] if getattr(data, "y", None) is not None else None
+    y = _np.asarray(data.y).ravel()[: len(clouds)] if getattr(data, "y", None) is not None else None
     if y is None or _np.std(y) < 1e-9:
         return None, {"reason": "no usable target for the invariance test"}
     d = clouds[0].shape[1]
@@ -363,13 +404,31 @@ def detect_symmetry_group(data, tol=0.05, min_clouds=30, epochs=200, min_fit=0.3
     results = []
     for c in _candidate_groups(d):
         plain, trans = stable_score(c["metric"], c["gens"], c.get("scale_norm", False))
-        results.append({"name": c["name"], "plain": plain, "trans": trans, "stable": min(plain, trans),
-                        "gens": c["gens"], "metric": c["metric"], "n_gen": c["n_gen"],
-                        "scale_norm": c.get("scale_norm", False)})
-    detail = {"raw_r2": round(raw_r2, 3),
-              "candidates": [{"name": r["name"], "plain": round(r["plain"], 3),
-                              "trans": round(r["trans"], 3), "stable": round(r["stable"], 3),
-                              "n_gen": r["n_gen"]} for r in results]}
+        results.append(
+            {
+                "name": c["name"],
+                "plain": plain,
+                "trans": trans,
+                "stable": min(plain, trans),
+                "gens": c["gens"],
+                "metric": c["metric"],
+                "n_gen": c["n_gen"],
+                "scale_norm": c.get("scale_norm", False),
+            }
+        )
+    detail = {
+        "raw_r2": round(raw_r2, 3),
+        "candidates": [
+            {
+                "name": r["name"],
+                "plain": round(r["plain"], 3),
+                "trans": round(r["trans"], 3),
+                "stable": round(r["stable"], 3),
+                "n_gen": r["n_gen"],
+            }
+            for r in results
+        ],
+    }
     # qualify on the STABLE fit: it must be good (>= min_fit) and not be beaten by non-invariant raw
     # features by more than raw_margin (rejecting non-invariant targets).
     raw_margin = 0.10
@@ -387,10 +446,15 @@ def detect_symmetry_group(data, tol=0.05, min_clouds=30, epochs=200, min_fit=0.3
 
     def canonical_rank(r):
         is_pseudo = float(not _np.allclose(r["metric"], _np.eye(d)))
-        return float(r["scale_norm"]) + is_pseudo   # 0 = canonical Euclidean, higher = less canonical
+        return float(r["scale_norm"]) + is_pseudo  # 0 = canonical Euclidean, higher = less canonical
 
     best = min(tied, key=lambda r: (canonical_rank(r), -r["stable"], r["n_gen"]))
-    spec = {"gens": best["gens"], "vec_dim": d, "metric": best["metric"], "name": best["name"],
-            "scale_norm": best["scale_norm"]}
+    spec = {
+        "gens": best["gens"],
+        "vec_dim": d,
+        "metric": best["metric"],
+        "name": best["name"],
+        "scale_norm": best["scale_norm"],
+    }
     detail["selected"] = best["name"]
     return spec, detail

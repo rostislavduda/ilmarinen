@@ -9,6 +9,7 @@ S*(L) as a multi-seed mean with standard error, and the stopping rule reads the
 *denoised* marginal curve. Significance flags mark rungs whose marginal exceeds
 2 standard errors (genuine signal vs. noise).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -19,8 +20,8 @@ import numpy as np
 @dataclass
 class DepthCurve:
     depths: list
-    S_mean: np.ndarray          # mean validation loss per depth
-    S_se: np.ndarray            # standard error
+    S_mean: np.ndarray  # mean validation loss per depth
+    S_se: np.ndarray  # standard error
     acc_mean: np.ndarray
     marginals: list = field(default_factory=list)  # (mid_depth, per_layer_marginal, marginal_se)
 
@@ -33,7 +34,8 @@ def measure_depth_curve(train_eval_fn, depths, seeds) -> DepthCurve:
         for sd in seeds:
             vl, va = train_eval_fn(L, sd)
             if np.isfinite(vl):
-                vls.append(vl); vas.append(va)
+                vls.append(vl)
+                vas.append(va)
         vls, vas = np.array(vls), np.array(vas)
         S_mean.append(vls.mean())
         S_se.append(vls.std(ddof=1) / np.sqrt(len(vls)) if len(vls) > 1 else 0.0)
@@ -57,7 +59,7 @@ def select_depth(curve: DepthCurve, mu: float) -> int:
     of the first marginal that drops below mu -- i.e. we stop BEFORE paying for the unprofitable layer.
     If every marginal beats mu, take the deepest measured depth.
     """
-    for (mid, m, _me) in curve.marginals:
+    for mid, m, _me in curve.marginals:
         if m < mu:
             return int(np.floor(mid))
     return curve.depths[-1]
@@ -77,10 +79,10 @@ def predict_depth_scaling(alpha: float, mu_ref: float, Lstar_ref: int):
         ReLU   (alpha=2): L* ~ mu^{-1/3}
     """
     power = -1.0 / (alpha + 1.0)
-    C = Lstar_ref / (mu_ref ** power)      # calibrate the constant from the anchor
+    C = Lstar_ref / (mu_ref**power)  # calibrate the constant from the anchor
 
     def L_of_mu(mu: float) -> float:
-        return C * (mu ** power)
+        return C * (mu**power)
 
     return L_of_mu, power
 
@@ -110,7 +112,7 @@ def significant_elbow(curve: DepthCurve, n_se: float = 2.0) -> int:
     demonstrably paying.
     """
     elbow = curve.depths[0]
-    for (mid, m, me) in curve.marginals:
+    for mid, m, me in curve.marginals:
         if m - n_se * me > 0:
             elbow = int(np.ceil(mid))
     return elbow

@@ -18,6 +18,7 @@ discover correlation/mode structure -> tensorize -> reduce -> minimal model. It 
 test with an absence verdict ('unstructured'), held to the same standard as the symmetry detectors:
 it must not hallucinate structure that is not there (validated on a shuffled control).
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -36,17 +37,19 @@ def mutual_information_matrix(X, method="gaussian", bins=8):
         s = X.std(0) + 1e-9
         C = (Xc.T @ Xc) / len(X) / np.outer(s, s)
         C = np.clip(C, -0.999, 0.999)
-        return -0.5 * np.log(1 - C ** 2)
+        return -0.5 * np.log(1 - C**2)
     # binned estimator
     n = X.shape[1]
-    Xd = np.stack([np.digitize(X[:, k], np.quantile(X[:, k], np.linspace(0, 1, bins + 1)[1:-1]))
-                   for k in range(n)], axis=1)
+    Xd = np.stack(
+        [np.digitize(X[:, k], np.quantile(X[:, k], np.linspace(0, 1, bins + 1)[1:-1])) for k in range(n)], axis=1
+    )
     M = np.zeros((n, n))
     for i in range(n):
         for j in range(i, n):
             pij = np.histogram2d(Xd[:, i], Xd[:, j], bins=bins)[0] + 1e-9
             pij /= pij.sum()
-            pi = pij.sum(1, keepdims=True); pj = pij.sum(0, keepdims=True)
+            pi = pij.sum(1, keepdims=True)
+            pj = pij.sum(0, keepdims=True)
             mi = float((pij * np.log(pij / (pi * pj))).sum())
             M[i, j] = M[j, i] = max(mi, 0.0)
     return M
@@ -102,18 +105,19 @@ def detect_grid_width(M, anomaly_tol=0.05):
     def anomaly(W):
         if W - 2 < 1 or W + 2 >= n:
             return 0.0
-        trend = 0.5 * (prof[W - 2] + prof[W + 2])       # decay trend skipping the peak neighborhood
+        trend = 0.5 * (prof[W - 2] + prof[W + 2])  # decay trend skipping the peak neighborhood
         return float(prof[W] - trend)
 
     scores = {W: anomaly(W) for W in cands}
     best = max(scores, key=scores.get)
-    if scores[best] <= anomaly_tol:                     # no anomalous stride -> not a 2D grid
+    if scores[best] <= anomaly_tol:  # no anomalous stride -> not a 2D grid
         return None, scores
     return best, scores
 
 
-def discover_mode_structure(X, method="gaussian", margin_tol=0.05, min_fit=0.15,
-                            candidate_shapes=None, price_mu=None, axis_bits=None):
+def discover_mode_structure(
+    X, method="gaussian", margin_tol=0.05, min_fit=0.15, candidate_shapes=None, price_mu=None, axis_bits=None
+):
     """Discover the coordinate structure of X and the optimal tensorization.
 
     Two-stage: (1) a coarse MI-vs-distance fit gives an initial 1D/2D/unstructured read and gates
@@ -140,6 +144,7 @@ def discover_mode_structure(X, method="gaussian", margin_tol=0.05, min_fit=0.15,
     # to gate 'unstructured', which the significance gate inside the scalable parser handles).
     if price_mu is not None and n > 500:
         from ..machinery.contract_mdl import price_tensorization
+
         pd = price_tensorization(X, mu=price_mu, method=method, axis_bits=axis_bits)
         struct = pd["structure"]
         prim_by_rank = {
@@ -150,9 +155,16 @@ def discover_mode_structure(X, method="gaussian", margin_tol=0.05, min_fit=0.15,
         }
         structure = struct if struct in prim_by_rank else "1d"
         shape = pd["shape"] if struct != "1d" else (n,)
-        return {"structure": structure, "shape": shape, "scores": {}, "width_scores": {},
-                "recommended_primitives": prim_by_rank[structure], "margin": float("nan"),
-                "best_fit": float("nan"), "tensorization_price": pd}
+        return {
+            "structure": structure,
+            "shape": shape,
+            "scores": {},
+            "width_scores": {},
+            "recommended_primitives": prim_by_rank[structure],
+            "margin": float("nan"),
+            "best_fit": float("nan"),
+            "tensorization_price": pd,
+        }
     M = mutual_information_matrix(X, method=method)
     iu = np.triu_indices(n, 1)
     mi = M[iu]
@@ -161,10 +173,9 @@ def discover_mode_structure(X, method="gaussian", margin_tol=0.05, min_fit=0.15,
     d1 = np.abs(iu[0] - iu[1]).astype(float)
     scores["1d"] = _fit_corr(mi, d1)
     shapes = candidate_shapes if candidate_shapes is not None else _divisor_grid_shapes(n)
-    for (H, W) in shapes:
+    for H, W in shapes:
         rc = [(k // W, k % W) for k in range(n)]
-        d2 = np.array([abs(rc[i][0] - rc[j][0]) + abs(rc[i][1] - rc[j][1])
-                       for i, j in zip(*iu)], float)
+        d2 = np.array([abs(rc[i][0] - rc[j][0]) + abs(rc[i][1] - rc[j][1]) for i, j in zip(*iu)], float)
         scores[f"2d_{H}x{W}"] = _fit_corr(mi, d2)
 
     ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
@@ -178,6 +189,7 @@ def discover_mode_structure(X, method="gaussian", margin_tol=0.05, min_fit=0.15,
     if price_mu is not None:
         # DERIVED acceptance: price the added axes against their stride-anomaly fit gain, ANY rank.
         from ..machinery.contract_mdl import price_tensorization
+
         price_detail = price_tensorization(X, mu=price_mu, method=method, axis_bits=axis_bits)
         struct = price_detail["structure"]
         prim_by_rank = {
@@ -217,14 +229,18 @@ def discover_mode_structure(X, method="gaussian", margin_tol=0.05, min_fit=0.15,
             structure, shape, prims = "unstructured", None, ["dense", "norm", "attention"]
         width_scores = {**width_scores, "nd_parse": nd_detail}
 
-    out = {"structure": structure, "shape": shape, "scores": scores,
-           "width_scores": width_scores, "recommended_primitives": prims,
-           "margin": float(margin), "best_fit": float(best_score)}
+    out = {
+        "structure": structure,
+        "shape": shape,
+        "scores": scores,
+        "width_scores": width_scores,
+        "recommended_primitives": prims,
+        "margin": float(margin),
+        "best_fit": float(best_score),
+    }
     if price_detail is not None:
         out["tensorization_price"] = price_detail
     return out
-
-
 
 
 def _all_factorizations(n, max_rank=4, min_side=3):
@@ -233,6 +249,7 @@ def _all_factorizations(n, max_rank=4, min_side=3):
     which the correlation signal cannot reliably distinguish from the flat reading (see parse_grid_shape
     scope note)."""
     import numpy as _np
+
     res = set([(n,)])
 
     def rec(rem, parts):
@@ -245,6 +262,7 @@ def _all_factorizations(n, max_rank=4, min_side=3):
         for d in range(min_side, rem + 1):
             if rem % d == 0 and rem // d >= min_side:
                 rec(rem // d, parts + [d])
+
     rec(n, [])
     return [s for s in res if int(_np.prod(s)) == n and all(x >= min_side for x in s)]
 
@@ -256,11 +274,12 @@ def _neighbor_mi(M, shape):
     0 elsewhere -- so it does not wash out at axis boundaries and is robust where the flat profile is
     degenerate. Higher mean-neighbor-MI = better-fitting shape."""
     import numpy as _np
+
     n = M.shape[0]
     r = len(shape)
     if r == 1:
         return float(_np.mean([M[i, i + 1] for i in range(n - 1)]))
-    strides = [int(_np.prod(shape[k + 1:])) for k in range(r)]
+    strides = [int(_np.prod(shape[k + 1 :])) for k in range(r)]
     rem = _np.arange(n)
     multi = _np.zeros((n, r), int)
     for k in range(r):
@@ -309,12 +328,13 @@ def parse_grid_shape(M, tol=0.02, max_rank=4, min_side=3, sig_ratio=1.6):
     # refuse any promotion beyond 1-D unless the best multi-axis neighbor MI exceeds the off-diagonal
     # baseline by `sig_ratio`. This is what makes the estimator safe to run by default on arbitrary data.
     import numpy as _np
+
     iu = _np.triu_indices(n, 1)
     off_diag = float(_np.mean(M[iu])) if len(iu[0]) else 0.0
     by_rank = {}
     for s in cands:
         by_rank.setdefault(len(s), []).append((_neighbor_mi(M, s), s))
-    best_per = {r: max(v) for r, v in by_rank.items()}                 # (nmi, shape) best at each rank
+    best_per = {r: max(v) for r, v in by_rank.items()}  # (nmi, shape) best at each rank
     max_nmi = max(v[0] for v in best_per.values()) + 1e-9
     risk = {r: 1.0 - nmi / max_nmi for r, (nmi, s) in best_per.items()}
     min_r = min(risk.values())
@@ -326,11 +346,15 @@ def parse_grid_shape(M, tol=0.02, max_rank=4, min_side=3, sig_ratio=1.6):
         nmi_best = best_per[chosen_rank][0]
         if off_diag <= 0 or nmi_best < sig_ratio * off_diag:
             shape, chosen_rank = (n,), 1
-    detail = {"risk_per_rank": {r: round(v, 4) for r, v in sorted(risk.items())},
-              "best_per_rank": {r: best_per[r][1] for r in sorted(best_per)},
-              "rank": chosen_rank, "tol": tol, "min_side": min_side,
-              "neighbor_off_diag_ratio": round(best_per[max(best_per)][0] / (off_diag + 1e-12), 2),
-              "sig_ratio": sig_ratio}
+    detail = {
+        "risk_per_rank": {r: round(v, 4) for r, v in sorted(risk.items())},
+        "best_per_rank": {r: best_per[r][1] for r in sorted(best_per)},
+        "rank": chosen_rank,
+        "tol": tol,
+        "min_side": min_side,
+        "neighbor_off_diag_ratio": round(best_per[max(best_per)][0] / (off_diag + 1e-12), 2),
+        "sig_ratio": sig_ratio,
+    }
     return shape, detail
 
 
@@ -339,6 +363,7 @@ def _pair_mi_gaussian(a, b):
     """Mutual information of two 1-D sample vectors under the Gaussian estimator, computed on demand.
     Returns 0 for a constant column (zero variance -> no information), rather than NaN."""
     import numpy as _np
+
     sa = a.std()
     sb = b.std()
     if sa < 1e-12 or sb < 1e-12:
@@ -356,13 +381,14 @@ def _neighbor_mi_sampled(X, shape, max_pairs=800, seed=0):
     as an axis-k neighbor only if i's coordinate in axis k is not at the boundary (same criterion as the
     dense _neighbor_mi). This is what makes the estimator scale to large D (e.g. full 28^3 volumes)."""
     import numpy as _np
+
     n = X.shape[1]
     r = len(shape)
     rng = _np.random.RandomState(seed)
     if r == 1:
         idx = rng.choice(n - 1, min(max_pairs, n - 1), replace=False)
         return float(_np.mean([_pair_mi_gaussian(X[:, i], X[:, i + 1]) for i in idx]))
-    strides = [int(_np.prod(shape[k + 1:])) for k in range(r)]
+    strides = [int(_np.prod(shape[k + 1 :])) for k in range(r)]
     per = max(max_pairs // r, 40)
     vals = []
     for k in range(r):
@@ -380,6 +406,7 @@ def _neighbor_mi_sampled(X, shape, max_pairs=800, seed=0):
 def _offdiag_mi_sampled(X, max_pairs=1500, seed=1):
     """Off-diagonal MI baseline (for the significance gate), from a random sample of pairs -- no full M."""
     import numpy as _np
+
     n = X.shape[1]
     rng = _np.random.RandomState(seed)
     vals = []
@@ -405,6 +432,7 @@ def parse_grid_shape_scalable(X, tol=0.02, max_rank=4, min_side=3, sig_ratio=1.6
     where forming M once is cheap and exact.
     """
     import numpy as _np
+
     X = _np.asarray(X, float)
     n = X.shape[1]
     cands = _all_factorizations(n, max_rank=max_rank, min_side=min_side)
@@ -426,9 +454,13 @@ def parse_grid_shape_scalable(X, tol=0.02, max_rank=4, min_side=3, sig_ratio=1.6
     shape = best_per[chosen][1]
     if chosen > 1 and (off <= 0 or best_per[chosen][0] < sig_ratio * off):
         shape, chosen = (n,), 1
-    detail = {"risk_per_rank": {r: round(v, 4) for r, v in sorted(risk.items())},
-              "best_per_rank": {r: best_per[r][1] for r in sorted(best_per)},
-              "rank": chosen, "off_diag": round(off, 5),
-              "neighbor_off_diag_ratio": round(best_per[max(best_per)][0] / (off + 1e-12), 2),
-              "scalable": True, "max_pairs": max_pairs}
+    detail = {
+        "risk_per_rank": {r: round(v, 4) for r, v in sorted(risk.items())},
+        "best_per_rank": {r: best_per[r][1] for r in sorted(best_per)},
+        "rank": chosen,
+        "off_diag": round(off, 5),
+        "neighbor_off_diag_ratio": round(best_per[max(best_per)][0] / (off + 1e-12), 2),
+        "scalable": True,
+        "max_pairs": max_pairs,
+    }
     return shape, detail

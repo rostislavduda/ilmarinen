@@ -20,6 +20,7 @@ USAGE:
     python run_cellpainting_validation.py --preset max --select sparse
     python run_cellpainting_validation.py --classes CDK1,AURKB,PLK1,KIF11   # custom perturbation set
 """
+
 import argparse
 import os
 import sys
@@ -50,7 +51,7 @@ def _embeddings(mg, X, batch=128):
     outs = []
     for j in range(0, len(X), batch):
         with torch.no_grad():
-            o = net(X[j:j + batch].to(dev))
+            o = net(X[j : j + batch].to(dev))
         outs.append((cap["z"] if handle is not None else o).cpu())
     if handle is not None:
         handle.remove()
@@ -80,12 +81,19 @@ def retrieval_map(emb, labels):
 def main():
     ap = argparse.ArgumentParser(description="Cell Painting validation: train the AllGraph, report retrieval mAP.")
     # --- Cell-Painting DATA flags (the amount-of-data knob) ---
-    ap.add_argument("--per_class", type=int, default=12,
-                    help="distinct WELLS per perturbation class to fetch/train on (the training-data amount knob)")
+    ap.add_argument(
+        "--per_class",
+        type=int,
+        default=12,
+        help="distinct WELLS per perturbation class to fetch/train on (the training-data amount knob)",
+    )
     ap.add_argument("--sites", type=int, default=2, help="fields (sites) per well")
     ap.add_argument("--hw", type=int, default=48, help="image resize (hw x hw)")
-    ap.add_argument("--classes", default=None,
-                    help="comma-separated perturbation genes (default: the built-in %d-gene set)" % len(CLASSES))
+    ap.add_argument(
+        "--classes",
+        default=None,
+        help="comma-separated perturbation genes (default: the built-in %d-gene set)" % len(CLASSES),
+    )
     # --- inherited pipeline flags (device, budget scaling, readout, processing layers, diagnostics, preset) ---
     add_pipeline_args(ap)
     args = ap.parse_args()
@@ -102,8 +110,9 @@ def main():
     t0 = time.time()
     t_import = time.time()
     try:
-        d = load_cellpainting(device=device, per_class=args.per_class, sites_per_well=args.sites,
-                              hw=args.hw, classes=classes)
+        d = load_cellpainting(
+            device=device, per_class=args.per_class, sites_per_well=args.sites, hw=args.hw, classes=classes
+        )
     except ImportError as e:
         print(f"SKIP -- jump-portrait not installed ({str(e)[:50]}); pip install jump-portrait")
         return
@@ -114,15 +123,13 @@ def main():
     names = d["class_names"]
     ntr = len(d["train"].dense)
     nte = len(d["test"].dense)
-    print(f"loaded: train fields={ntr}  test fields={nte}  K={len(names)} classes  "
-          f"(data import {import_dt:.1f}s)")
+    print(f"loaded: train fields={ntr}  test fields={nte}  K={len(names)} classes  (data import {import_dt:.1f}s)")
 
     # spatial-contract budget, scaled by --epochs_scale like the standard suite
     bud = BUDGET["spatial"]
     mg = make_allgraph(args, bud, device, router, tzmu, enabled_sg)
     mg.progress_desc = "CellPainting"
-    res = mg.fit(d["train"], task=d["task"], select=args.select, tiebreak=args.tiebreak,
-                 select_size=args.select_size)
+    res = mg.fit(d["train"], task=d["task"], select=args.select, tiebreak=args.tiebreak, select_size=args.select_size)
 
     # retrieval mAP on the HELD-OUT fields (honest generalization of the learned representation)
     Xte = d["test"].dense
@@ -131,18 +138,23 @@ def main():
     mapv = retrieval_map(emb, yte)
     # classification accuracy as a secondary reference
     with torch.no_grad():
-        logits = torch.cat([mg.net(Xte[j:j+128].to(mg.device)).cpu() for j in range(0, len(Xte), 128)])
-    acc = float((logits.argmax(1).numpy() == yte) .mean())
+        logits = torch.cat([mg.net(Xte[j : j + 128].to(mg.device)).cpu() for j in range(0, len(Xte), 128)])
+    acc = float((logits.argmax(1).numpy() == yte).mean())
     chance = d["chance"]
     dt = time.time() - t0
 
-    arch = "→".join(res.get("architecture") or [c.primitives[int(c.alpha.argmax())] for c in mg.net.cells]) \
-        if hasattr(mg.net, "cells") else "?"
+    arch = (
+        "→".join(res.get("architecture") or [c.primitives[int(c.alpha.argmax())] for c in mg.net.cells])
+        if hasattr(mg.net, "cells")
+        else "?"
+    )
     params = sum(p.numel() for p in mg.net.parameters())
     print("=" * 100)
     print(f"[{mg.contract:11}] CellPainting  retrieval_mAP={mapv:.4f}  (random ~{chance:.3f})   acc={acc:.4f}")
-    print(f"{'':13} arch=[{arch}]  params={params}  train_fields={ntr}  test_fields={nte}  "
-          f"{dt:.0f}s total ({import_dt:.1f}s data import)")
+    print(
+        f"{'':13} arch=[{arch}]  params={params}  train_fields={ntr}  test_fields={nte}  "
+        f"{dt:.0f}s total ({import_dt:.1f}s data import)"
+    )
     print(f"{'':13} field={d['field']}")
     print("=" * 100)
 

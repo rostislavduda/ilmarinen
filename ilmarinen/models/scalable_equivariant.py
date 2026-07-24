@@ -48,11 +48,12 @@ def _to_metric_tensor(metric, vec_dim, device, dtype):
 
 class _VectorMix(nn.Module):
     """Equivariant linear mixing of vector channels: (b, n_in, d) -> (b, n_out, d) by a scalar matrix W."""
+
     def __init__(self, n_in, n_out):
         super().__init__()
         self.W = nn.Parameter(torch.randn(n_out, n_in) * (1.0 / np.sqrt(max(n_in, 1))))
 
-    def forward(self, V):                         # V: (b, n_in, d)
+    def forward(self, V):  # V: (b, n_in, d)
         return torch.einsum("oi,bid->bod", self.W, V)
 
 
@@ -71,8 +72,12 @@ class _ScalableEquivariantNet(nn.Module):
         self.lift = _VectorMix(n_in_vec, hidden_vec)
         self.vmix = nn.ModuleList([_VectorMix(hidden_vec, hidden_vec) for _ in range(depth)])
         # per-layer invariant gates: consume the hidden_vec invariant norms -> per-channel scalar gate
-        self.gate = nn.ModuleList([nn.Sequential(nn.Linear(hidden_vec, hidden_vec), nn.Tanh(),
-                                                 nn.Linear(hidden_vec, hidden_vec)) for _ in range(depth)])
+        self.gate = nn.ModuleList(
+            [
+                nn.Sequential(nn.Linear(hidden_vec, hidden_vec), nn.Tanh(), nn.Linear(hidden_vec, hidden_vec))
+                for _ in range(depth)
+            ]
+        )
         # scalar stream: pairwise invariants of the hidden vectors -> hidden scalars, updated each layer.
         # The raw invariants <v_i,v_j>_M scale QUADRATICALLY with the input vector magnitude, which is O(1) on
         # synthetic data but large on real inputs (e.g. atomic coordinates, ||v|| ~ 8 -> invariants ~ 64),
@@ -82,31 +87,32 @@ class _ScalableEquivariantNet(nn.Module):
         n_inv = hidden_vec * (hidden_vec + 1) // 2
         self.inv_norm = nn.LayerNorm(n_inv)
         self.scalar_in = nn.Sequential(nn.Linear(n_inv, hidden_scalar), nn.Tanh())
-        self.smix = nn.ModuleList([nn.Sequential(nn.Linear(hidden_scalar + n_inv, hidden_scalar), nn.Tanh())
-                                   for _ in range(depth)])
+        self.smix = nn.ModuleList(
+            [nn.Sequential(nn.Linear(hidden_scalar + n_inv, hidden_scalar), nn.Tanh()) for _ in range(depth)]
+        )
         self.readout = nn.Sequential(nn.Linear(hidden_scalar + n_inv, 32), nn.Tanh(), nn.Linear(32, n_out))
 
-    def _inner(self, V):                          # metric inner products <v_i, v_j>_M -> (b, n, n)
+    def _inner(self, V):  # metric inner products <v_i, v_j>_M -> (b, n, n)
         MV = torch.einsum("de,bne->bnd", self._M, V)
         return torch.einsum("bid,bjd->bij", V, MV)
 
-    def _invariants(self, V):                     # upper-triangular pairwise invariants -> (b, n_inv)
+    def _invariants(self, V):  # upper-triangular pairwise invariants -> (b, n_inv)
         G = self._inner(V)
         b, n, _ = G.shape
         iu = torch.triu_indices(n, n, device=V.device)
-        return self.inv_norm(G[:, iu[0], iu[1]])   # LayerNorm on invariants: still invariant, well-scaled
+        return self.inv_norm(G[:, iu[0], iu[1]])  # LayerNorm on invariants: still invariant, well-scaled
 
-    def _norms(self, V):                          # invariant norms per channel -> (b, n)
+    def _norms(self, V):  # invariant norms per channel -> (b, n)
         d = torch.einsum("bnd,de,bne->bn", V, self._M, V)
         return torch.sqrt(torch.clamp(d, min=1e-8))
 
-    def forward(self, V):                         # V: (b, n_in_vec, vec_dim)
-        h = self.lift(V)                          # (b, hidden_vec, d)
-        s = self.scalar_in(self._invariants(h))   # (b, hidden_scalar)
+    def forward(self, V):  # V: (b, n_in_vec, vec_dim)
+        h = self.lift(V)  # (b, hidden_vec, d)
+        s = self.scalar_in(self._invariants(h))  # (b, hidden_scalar)
         for vmix, gate, smix in zip(self.vmix, self.gate, self.smix):
-            hv = vmix(h)                          # equivariant vector mixing
-            g = torch.tanh(gate(self._norms(hv)))         # invariant gate from the vectors' norms
-            hv = hv * g.unsqueeze(-1)             # Vector-Neurons gating (equivariant: gate is invariant)
+            hv = vmix(h)  # equivariant vector mixing
+            g = torch.tanh(gate(self._norms(hv)))  # invariant gate from the vectors' norms
+            hv = hv * g.unsqueeze(-1)  # Vector-Neurons gating (equivariant: gate is invariant)
             inv = self._invariants(hv)
             s = smix(torch.cat([s, inv], dim=-1))  # invariant scalar update
             h = hv
@@ -133,13 +139,28 @@ class ScalableEquivariantMLP:
         self.metric = metric
 
     def torch_module(self):
-        return _ScalableEquivariantNet(self.n_in_vec, self.vec_dim, hidden_vec=self.hidden_vec,
-                                       hidden_scalar=self.hidden_scalar, depth=self.depth,
-                                       n_out=self.n_out, metric=self.metric)
+        return _ScalableEquivariantNet(
+            self.n_in_vec,
+            self.vec_dim,
+            hidden_vec=self.hidden_vec,
+            hidden_scalar=self.hidden_scalar,
+            depth=self.depth,
+            n_out=self.n_out,
+            metric=self.metric,
+        )
 
 
-def build_scalable_equivariant_mlp(gens, n_in_vec, vec_dim, hidden_vec=8, hidden_scalar=16, depth=2,
-                                   n_out=1, metric=None):
+def build_scalable_equivariant_mlp(
+    gens, n_in_vec, vec_dim, hidden_vec=8, hidden_scalar=16, depth=2, n_out=1, metric=None
+):
     """Factory returning the scalable equivariant nn.Module directly."""
-    return ScalableEquivariantMLP(gens, n_in_vec, vec_dim, hidden_vec=hidden_vec, hidden_scalar=hidden_scalar,
-                                  depth=depth, n_out=n_out, metric=metric).torch_module()
+    return ScalableEquivariantMLP(
+        gens,
+        n_in_vec,
+        vec_dim,
+        hidden_vec=hidden_vec,
+        hidden_scalar=hidden_scalar,
+        depth=depth,
+        n_out=n_out,
+        metric=metric,
+    ).torch_module()

@@ -21,6 +21,7 @@ Usage:
   python run_qm7_symmetry.py --qm7 /path/to/qm7.mat --n_train 800 --protocol solo
   python run_qm7_symmetry.py --qm7 /path/to/qm7.mat --n_train 800 --protocol mixing
 """
+
 import argparse
 import os
 import sys
@@ -48,7 +49,7 @@ class InvariantBranch(nn.Module):
 
     def forward(self, Xc, Tt, Mk):
         n = Xc.shape[0]
-        D = torch.cdist(Xc, Xc)                                     # invariant pairwise distances
+        D = torch.cdist(Xc, Xc)  # invariant pairwise distances
         pm = Mk[:, :, None] * Mk[:, None, :]
         ti = Tt[:, :, None, :].expand(n, self.nA, self.nA, self.nElem)
         tj = Tt[:, None, :, :].expand(n, self.nA, self.nA, self.nElem)
@@ -63,8 +64,9 @@ class DenseBranch(nn.Module):
 
     def __init__(self, n_atoms, n_elem, h=160):
         super().__init__()
-        self.net = nn.Sequential(nn.Linear(n_atoms * (3 + n_elem), h), nn.Tanh(),
-                                 nn.Linear(h, h), nn.Tanh(), nn.Linear(h, 1))
+        self.net = nn.Sequential(
+            nn.Linear(n_atoms * (3 + n_elem), h), nn.Tanh(), nn.Linear(h, h), nn.Tanh(), nn.Linear(h, 1)
+        )
 
     def forward(self, Xc, Tt, Mk):
         n = Xc.shape[0]
@@ -86,30 +88,38 @@ class MixSuperGraph(nn.Module):
 
 def train_branch(branch, X, T, M, yz, tr, epochs, bs=128, lr=3e-3, seed=0):
     torch.manual_seed(seed)
-    op = torch.optim.Adam(branch.parameters(), lr=lr); lf = nn.MSELoss()
+    op = torch.optim.Adam(branch.parameters(), lr=lr)
+    lf = nn.MSELoss()
     for ep in range(epochs):
         pm = tr[torch.randperm(len(tr))]
         for i in range(0, len(pm), bs):
-            bi = pm[i:i + bs]
-            op.zero_grad(); l = lf(branch(X[bi], T[bi], M[bi]), yz[bi])
+            bi = pm[i : i + bs]
+            op.zero_grad()
+            l = lf(branch(X[bi], T[bi], M[bi]), yz[bi])
             if torch.isfinite(l):
-                l.backward(); op.step()
+                l.backward()
+                op.step()
 
 
 def run(args):
     R, Tp, Mk, y = load_qm7(args.qm7)
-    X = torch.tensor(R); T = torch.tensor(Tp); M = torch.tensor(Mk); y = torch.tensor(y)
-    ymean, ystd = y.mean(), y.std(); yz = (y - ymean) / ystd
+    X = torch.tensor(R)
+    T = torch.tensor(Tp)
+    M = torch.tensor(Mk)
+    y = torch.tensor(y)
+    ymean, ystd = y.mean(), y.std()
+    yz = (y - ymean) / ystd
     nA, nElem = X.shape[1], T.shape[2]
     g = torch.Generator().manual_seed(args.seed)
     perm = torch.randperm(len(X), generator=g)
-    tr = perm[:args.n_train]
-    va = perm[args.n_train:args.n_train + 300]
-    te = perm[args.n_train + 300:args.n_train + 300 + 800]
+    tr = perm[: args.n_train]
+    va = perm[args.n_train : args.n_train + 300]
+    te = perm[args.n_train + 300 : args.n_train + 300 + 800]
     Xv, Xte = rotate(X[va], args.seed + 1), rotate(X[te], args.seed + 2)
 
     if args.protocol == "solo":
-        inv = InvariantBranch(nA, nElem); dense = DenseBranch(nA, nElem)
+        inv = InvariantBranch(nA, nElem)
+        dense = DenseBranch(nA, nElem)
         train_branch(inv, X, T, M, yz, tr, args.epochs, seed=args.seed)
         train_branch(dense, X, T, M, yz, tr, args.epochs, seed=args.seed)
         lf = nn.MSELoss()
@@ -124,16 +134,23 @@ def run(args):
         print(f"  selected model rotated-test MAE: {mae:.1f} kcal/mol")
     else:  # mixing
         net = MixSuperGraph(nA, nElem)
-        ap = [net.alpha]; wp = [p for n_, p in net.named_parameters() if not n_.endswith("alpha")]
-        ow = torch.optim.Adam(wp, lr=3e-3); oa = torch.optim.Adam(ap, lr=1e-2); lf = nn.MSELoss()
+        ap = [net.alpha]
+        wp = [p for n_, p in net.named_parameters() if not n_.endswith("alpha")]
+        ow = torch.optim.Adam(wp, lr=3e-3)
+        oa = torch.optim.Adam(ap, lr=1e-2)
+        lf = nn.MSELoss()
         warmup = args.epochs // 3
         for ep in range(args.epochs):
             pm = tr[torch.randperm(len(tr))]
             for i in range(0, len(pm), 128):
-                bi = pm[i:i + 128]
-                ow.zero_grad(); lf(net(X[bi], T[bi], M[bi]), yz[bi]).backward(); ow.step()
+                bi = pm[i : i + 128]
+                ow.zero_grad()
+                lf(net(X[bi], T[bi], M[bi]), yz[bi]).backward()
+                ow.step()
             if ep >= warmup:
-                oa.zero_grad(); lf(net(Xv, T[va], M[va]), yz[va]).backward(); oa.step()
+                oa.zero_grad()
+                lf(net(Xv, T[va], M[va]), yz[va]).backward()
+                oa.step()
         a = torch.softmax(net.alpha, 0).detach().numpy()
         sel = net.primitives[int(a.argmax())]
         with torch.no_grad():
@@ -144,8 +161,7 @@ def run(args):
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--qm7", required=True, help="path to qm7.mat")
     ap.add_argument("--n_train", type=int, default=800)
     ap.add_argument("--protocol", choices=["solo", "mixing"], default="solo")

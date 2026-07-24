@@ -18,6 +18,7 @@ Usage:
   python run_frontier.py --dataset GunPoint
   python run_frontier.py --dataset ItalyPowerDemand --widths 8,16,32,64,128 --mus 0.0005,0.001,0.002,0.005,0.01
 """
+
 import argparse
 import os
 import sys
@@ -37,19 +38,23 @@ DEFAULT_PRIMS = ("plain", "gated", "lstm", "conv", "attention", "dense", "norm",
 def load(name, max_t, val_frac, seed):
     Xtr, ytr = load_classification(name, split="train")
     Xte, yte = load_classification(name, split="test")
-    cls = sorted(set(ytr)); m = {c: i for i, c in enumerate(cls)}
+    cls = sorted(set(ytr))
+    m = {c: i for i, c in enumerate(cls)}
     Xtr = np.transpose(Xtr, (0, 2, 1)).astype(np.float32)
     Xte = np.transpose(Xte, (0, 2, 1)).astype(np.float32)
     T = Xtr.shape[1]
     if max_t and T > max_t:
         step = T // max_t
+
         def pool(X):
             k = (X.shape[1] // step) * step
             return X[:, :k].reshape(X.shape[0], k // step, step, X.shape[2]).mean(axis=2)
+
         Xtr, Xte = pool(Xtr), pool(Xte)
     mu, sd = Xtr.mean((0, 1), keepdims=True), Xtr.std((0, 1), keepdims=True) + 1e-6
     Xtr, Xte = (Xtr - mu) / sd, (Xte - mu) / sd
-    ytr = np.array([m[c] for c in ytr]); yte = np.array([m[c] for c in yte])
+    ytr = np.array([m[c] for c in ytr])
+    yte = np.array([m[c] for c in yte])
     Xtr, ytr = torch.tensor(Xtr), torch.tensor(ytr)
     Xte, yte = torch.tensor(Xte), torch.tensor(yte)
     g = torch.Generator().manual_seed(seed)
@@ -61,25 +66,32 @@ def load(name, max_t, val_frac, seed):
 
 def fit(Xw, yw, Xv, yv, n_in, n_out, prims, width, depth, seed, epochs, readout):
     torch.manual_seed(seed)
-    net = build_schema(depth=depth, width=width, n_in=n_in, n_out=n_out,
-                                   seed=seed, primitives=prims, readout=readout)
+    net = build_schema(depth=depth, width=width, n_in=n_in, n_out=n_out, seed=seed, primitives=prims, readout=readout)
     ap = [c.alpha for c in net.cells]
     wp = [p for n, p in net.named_parameters() if not n.endswith("alpha")]
-    ow = torch.optim.Adam(wp, lr=0.003); oa = torch.optim.Adam(ap, lr=0.02)
-    lf = nn.CrossEntropyLoss(); bs = 32
+    ow = torch.optim.Adam(wp, lr=0.003)
+    oa = torch.optim.Adam(ap, lr=0.02)
+    lf = nn.CrossEntropyLoss()
+    bs = 32
     for ep in range(epochs):
         perm = torch.randperm(len(Xw))
         for i in range(0, len(Xw), bs):
-            bi = perm[i:i + bs]
-            ow.zero_grad(); l = lf(net(Xw[bi]), yw[bi])
+            bi = perm[i : i + bs]
+            ow.zero_grad()
+            l = lf(net(Xw[bi]), yw[bi])
             if torch.isfinite(l):
-                l.backward(); torch.nn.utils.clip_grad_norm_(wp, 5.0); ow.step()
+                l.backward()
+                torch.nn.utils.clip_grad_norm_(wp, 5.0)
+                ow.step()
         perm = torch.randperm(len(Xv))
         for i in range(0, len(Xv), bs):
-            bi = perm[i:i + bs]
-            oa.zero_grad(); la = lf(net(Xv[bi]), yv[bi])
+            bi = perm[i : i + bs]
+            oa.zero_grad()
+            la = lf(net(Xv[bi]), yv[bi])
             if torch.isfinite(la):
-                la.backward(); torch.nn.utils.clip_grad_norm_(ap, 5.0); oa.step()
+                la.backward()
+                torch.nn.utils.clip_grad_norm_(ap, 5.0)
+                oa.step()
         net.update_peak()
     with torch.no_grad():
         vl = float(lf(net(Xv), yv))
@@ -98,10 +110,13 @@ def run(args):
     wnet = {}
     for w in widths:
         vl, net = fit(Xw, yw, Xv, yv, n_in, n_out, prims, w, 1, args.seed, args.epochs, args.readout)
-        wloss[w] = vl; wnet[w] = net
+        wloss[w] = vl
+        wnet[w] = net
     # per-neuron marginals between consecutive widths
-    wmarg = [(widths[i], (wloss[widths[i-1]] - wloss[widths[i]]) / (widths[i] - widths[i-1]))
-             for i in range(1, len(widths))]
+    wmarg = [
+        (widths[i], (wloss[widths[i - 1]] - wloss[widths[i]]) / (widths[i] - widths[i - 1]))
+        for i in range(1, len(widths))
+    ]
     # measure depth-2 val loss at each width (for the depth marginal at that width)
     d2loss = {}
     for w in widths:
@@ -115,17 +130,16 @@ def run(args):
     for mu in mus:
         # width: smallest width whose NEXT marginal falls below mu (i.e. stop paying)
         Kstar = widths[0]
-        for (w, m) in wmarg:
+        for w, m in wmarg:
             if m >= mu:
-                Kstar = w        # this step still pays -> keep the larger width
+                Kstar = w  # this step still pays -> keep the larger width
             else:
                 break
         # depth: justify layer 2 at Kstar iff per-layer marginal (depth1->2) exceeds mu
-        d_marg = (wloss[Kstar] - d2loss[Kstar])   # per-added-layer (one layer step)
+        d_marg = wloss[Kstar] - d2loss[Kstar]  # per-added-layer (one layer step)
         Lstar = 2 if d_marg > mu else 1
         # final model at (K*, L*)
-        vl, net = fit(Xw, yw, Xv, yv, n_in, n_out, prims, Kstar, Lstar, args.seed,
-                      args.epochs, args.readout)
+        vl, net = fit(Xw, yw, Xv, yv, n_in, n_out, prims, Kstar, Lstar, args.seed, args.epochs, args.readout)
         with torch.no_grad():
             acc = float((net(Xte).argmax(-1) == yte).float().mean())
         params = sum(p.numel() for p in net.parameters())
@@ -134,8 +148,7 @@ def run(args):
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dataset", required=True)
     ap.add_argument("--primitives", default=",".join(DEFAULT_PRIMS))
     ap.add_argument("--widths", default="8,16,32,64,128")

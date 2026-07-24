@@ -109,55 +109,107 @@ _LEGACY_EXPORTS = {
 }
 
 
-def __getattr__(name):          # PEP 562: lazily resolve + deprecation-warn the legacy exports
+def __getattr__(name):  # PEP 562: lazily resolve + deprecation-warn the legacy exports
     source = _LEGACY_EXPORTS.get(name)
     if source is not None:
         import importlib
 
         from ._deprecation import warn_legacy
+
         warn_legacy(name, source)
         return getattr(importlib.import_module(source), name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def __dir__():                  # keep the deprecated names discoverable (and visible to test_api_surface)
+def __dir__():  # keep the deprecated names discoverable (and visible to test_api_surface)
     return sorted(list(globals()) + list(_LEGACY_EXPORTS))
+
 
 __version__ = "2.2.0"
 
 __all__ = [
     # primary API
-    "AllGraph", "AllData",
+    "AllGraph",
+    "AllData",
     # opt-in dataset streaming
-    "DenseSource", "InMemoryDenseSource", "MemmapDenseSource",
-    "GraphSource", "InMemoryGraphSource", "LazyGraphSource",
-    "OperatorSource", "InMemoryOperatorSource", "MemmapOperatorSource",
-    "IterableDenseSource", "InMemoryIterableDenseSource",
+    "DenseSource",
+    "InMemoryDenseSource",
+    "MemmapDenseSource",
+    "GraphSource",
+    "InMemoryGraphSource",
+    "LazyGraphSource",
+    "OperatorSource",
+    "InMemoryOperatorSource",
+    "MemmapOperatorSource",
+    "IterableDenseSource",
+    "InMemoryIterableDenseSource",
     # device
-    "best_device", "resolve_device", "mps_available",
+    "best_device",
+    "resolve_device",
+    "mps_available",
     # pipeline stages
-    "route_by_structure", "discover_and_reduce", "continuous_invariant_features",
-    "explain", "format_report",
-    "fit_feature_attribution", "feature_selection_path",
-    "symbolic_readout", "symbolify_model",
-    "effective_dimension", "reduce_redundancy",
-    "ib_rg_flow", "layer_rg_flow", "gib_spectrum", "ib_effective_dimension", "critical_betas",
-    "fit_variable_width_area", "area_price_path", "certificate_lambda_scale", "VariableWidthNet",
-    "measure_depth_curve", "select_depth", "significant_elbow",
-    "contract_evidence", "score_to_nll",
-    "estimate_llc", "free_energy",
-    "omega_func", "total_code_length", "singular_complexity_of", "singular_free_energy",
-    "developmental_llc", "default_checkpoints",
-    "wbic_beta", "free_energy_form", "assert_temperature_consistency", "POTENTIAL_LEVELS",
-    "gibbs_susceptibility", "contract_transition", "response_spectrum",
-    "participation_ratio", "effective_dimension_ledger", "LEDGER_LEVELS",
+    "route_by_structure",
+    "discover_and_reduce",
+    "continuous_invariant_features",
+    "explain",
+    "format_report",
+    "fit_feature_attribution",
+    "feature_selection_path",
+    "symbolic_readout",
+    "symbolify_model",
+    "effective_dimension",
+    "reduce_redundancy",
+    "ib_rg_flow",
+    "layer_rg_flow",
+    "gib_spectrum",
+    "ib_effective_dimension",
+    "critical_betas",
+    "fit_variable_width_area",
+    "area_price_path",
+    "certificate_lambda_scale",
+    "VariableWidthNet",
+    "measure_depth_curve",
+    "select_depth",
+    "significant_elbow",
+    "contract_evidence",
+    "score_to_nll",
+    "estimate_llc",
+    "free_energy",
+    "omega_func",
+    "total_code_length",
+    "singular_complexity_of",
+    "singular_free_energy",
+    "developmental_llc",
+    "default_checkpoints",
+    "wbic_beta",
+    "free_energy_form",
+    "assert_temperature_consistency",
+    "POTENTIAL_LEVELS",
+    "gibbs_susceptibility",
+    "contract_transition",
+    "response_spectrum",
+    "participation_ratio",
+    "effective_dimension_ledger",
+    "LEDGER_LEVELS",
     "build_latent_equivariant_contract",
-    "build_scalable_equivariant_mlp", "ScalableEquivariantMLP",
-    "ApproxEquivariantModel", "select_relaxation", "price_relaxation",
-    "select_modes", "measure_mode_curve", "spectral_code_length",
+    "build_scalable_equivariant_mlp",
+    "ScalableEquivariantMLP",
+    "ApproxEquivariantModel",
+    "select_relaxation",
+    "price_relaxation",
+    "select_modes",
+    "measure_mode_curve",
+    "spectral_code_length",
     "validation",
     # legacy (DEPRECATED -- emit DeprecationWarning on access; removed in a future release)
-    "FashionMNIST", "MeanFieldTheory", "critical_exponent", "empirical_exponent",
-    "build_model", "MODEL_REGISTRY", "build_rnn", "RNN_REGISTRY",
-    "greedy_insertion", "column_generation_solve",
+    "FashionMNIST",
+    "MeanFieldTheory",
+    "critical_exponent",
+    "empirical_exponent",
+    "build_model",
+    "MODEL_REGISTRY",
+    "build_rnn",
+    "RNN_REGISTRY",
+    "greedy_insertion",
+    "column_generation_solve",
 ]

@@ -59,6 +59,7 @@ So the SAME loop and the SAME action serve all five; each contract switches on t
 resources it actually possesses. This module implements the loop generically over any schema that
 exposes per-cell primitive alphas, plus optional width/depth/max-l gates supplied by a thin adapter.
 """
+
 from __future__ import annotations
 
 import math
@@ -96,6 +97,7 @@ def auto_gate_init(target_openness=0.95, mu=None, min_openness=0.75):
 # ~zero Omega cost and is selected by FIT alone (the honest situation: readout is an expressiveness
 # choice, not a capacity cost). This makes readout the 6th joint axis under the same J=R+mu*Omega.
 
+
 class DifferentiableReadout(nn.Module):
     """Softmax mixture over pooling operations, selected by an alpha trained in the joint loop.
     kind='seq' pools over time (last/mean/max); kind='graph' pools over nodes-per-graph
@@ -121,8 +123,7 @@ class DifferentiableReadout(nn.Module):
         super().__init__()
         self.kind = kind
         self.size_prior = size_prior
-        self.ops = {"seq": self._SEQ, "graph": self._GRAPH,
-                    "spatial": self._SPATIAL, "vol": self._SPATIAL}[kind]
+        self.ops = {"seq": self._SEQ, "graph": self._GRAPH, "spatial": self._SPATIAL, "vol": self._SPATIAL}[kind]
         self.alpha = nn.Parameter(torch.zeros(len(self.ops)))
         self.register_buffer("alpha_peak", torch.zeros(len(self.ops)))
 
@@ -133,25 +134,31 @@ class DifferentiableReadout(nn.Module):
         if self.size_prior <= 0:
             return self.alpha.new_zeros(())
         w = torch.softmax(self.alpha, dim=0)
-        sens = torch.tensor([self._SIZE_SENSITIVITY[o] for o in self.ops],
-                            dtype=w.dtype, device=w.device)
+        sens = torch.tensor([self._SIZE_SENSITIVITY[o] for o in self.ops], dtype=w.dtype, device=w.device)
         return self.size_prior * (w * sens).sum()
 
-    def _pool_seq(self, h, op):                                  # h: (b,T,w)
-        if op == "last": return h[:, -1, :]
-        if op == "mean": return h.mean(dim=1)
-        return h.amax(dim=1)                                      # amax, not max().values: MPS-safe over NaN
+    def _pool_seq(self, h, op):  # h: (b,T,w)
+        if op == "last":
+            return h[:, -1, :]
+        if op == "mean":
+            return h.mean(dim=1)
+        return h.amax(dim=1)  # amax, not max().values: MPS-safe over NaN
 
-    def _pool_graph(self, h, batch, n_graphs, op):              # h: (N,w)
+    def _pool_graph(self, h, batch, n_graphs, op):  # h: (N,w)
         from ilmarinen.models.graph_schema import _scatter_max, _scatter_mean, _scatter_sum
-        if op == "sum": return _scatter_sum(h, batch, n_graphs)
-        if op == "mean": return _scatter_mean(h, batch, n_graphs)
+
+        if op == "sum":
+            return _scatter_sum(h, batch, n_graphs)
+        if op == "mean":
+            return _scatter_mean(h, batch, n_graphs)
         return _scatter_max(h, batch, n_graphs)
 
-    def _pool_spatial(self, h, op):                            # h: (b,C,H,W) or (b,C,D,H,W)
+    def _pool_spatial(self, h, op):  # h: (b,C,H,W) or (b,C,D,H,W)
         dims = tuple(range(2, h.dim()))
-        if op == "mean": return h.mean(dim=dims)
-        if op == "max": return h.amax(dim=dims)                   # amax, not max().values: MPS-safe over NaN
+        if op == "mean":
+            return h.mean(dim=dims)
+        if op == "max":
+            return h.amax(dim=dims)  # amax, not max().values: MPS-safe over NaN
         return h.sum(dim=dims)
 
     def forward(self, h, batch=None, n_graphs=None):
@@ -187,8 +194,20 @@ class JointArchServer(nn.Module):
     and their extra axis (kernel already inside the primitive softmax; max-l via a channel-block mask).
     """
 
-    def __init__(self, schema, width, depth, n_out, readout="mean", w_width=1.0, w_depth=1.0,
-                 gate_init=None, target_openness=0.95, learn_readout=False, size_prior=0.0):
+    def __init__(
+        self,
+        schema,
+        width,
+        depth,
+        n_out,
+        readout="mean",
+        w_width=1.0,
+        w_depth=1.0,
+        gate_init=None,
+        target_openness=0.95,
+        learn_readout=False,
+        size_prior=0.0,
+    ):
         super().__init__()
         self.net = schema
         self.width = width
@@ -210,32 +229,33 @@ class JointArchServer(nn.Module):
         # readout head sized to max width; masked channels contribute ~0
         self.head = nn.Linear(width, n_out)
         with torch.no_grad():
-            self.head.weight.normal_(0, (1.0 / width) ** 0.5); self.head.bias.zero_()
+            self.head.weight.normal_(0, (1.0 / width) ** 0.5)
+            self.head.bias.zero_()
 
     # ---- differentiable gates ----
     def width_mask(self):
-        return torch.sigmoid(self.beta_width)                        # (width,)
+        return torch.sigmoid(self.beta_width)  # (width,)
 
     def depth_gates(self):
-        g = torch.sigmoid(self.gamma_depth)                          # (depth,)
+        g = torch.sigmoid(self.gamma_depth)  # (depth,)
         # keep at least the first layer fully on for a well-defined minimal net
         g = torch.cat([g[:1] * 0 + 1.0, g[1:]], dim=0) if self.depth > 1 else g * 0 + 1.0
         return g
 
     def forward(self, x_seq):
-        m = self.width_mask()                                        # (width,)
-        g = self.depth_gates()                                       # (depth,)
+        m = self.width_mask()  # (width,)
+        g = self.depth_gates()  # (depth,)
         h = None
         for l, cell in enumerate(self.net.cells):
             inp = x_seq if l == 0 else h
-            out = cell.mixed(inp)                                # (b,T,width)
-            out = out * m                                            # width mask (Class 2)
+            out = cell.mixed(inp)  # (b,T,width)
+            out = out * m  # width mask (Class 2)
             if l == 0:
                 h = out
             else:
-                h = h + g[l] * out                                   # depth gate (Class 3)
+                h = h + g[l] * out  # depth gate (Class 3)
         if self.learn_readout:
-            pooled = self.readout_head(h * m)                       # readout as a selected axis
+            pooled = self.readout_head(h * m)  # readout as a selected axis
             return self.head(pooled)
         if self.readout == "mean":
             pooled = h.mean(dim=1)
@@ -253,8 +273,9 @@ class JointArchServer(nn.Module):
         prim_cost = self.net.cells[0].alpha.new_zeros(())
         for cell in self.net.cells:
             p = torch.softmax(cell.alpha, dim=0)
-            costs = torch.tensor([sum(x.numel() for x in c.parameters()) for c in cell.cores],
-                                 dtype=p.dtype, device=p.device)
+            costs = torch.tensor(
+                [sum(x.numel() for x in c.parameters()) for c in cell.cores], dtype=p.dtype, device=p.device
+            )
             costs = costs / costs.max()
             prim_cost = prim_cost + (p * costs).sum()
         prim_cost = prim_cost / len(self.net.cells)
@@ -277,8 +298,23 @@ class JointArchServer(nn.Module):
         return out
 
 
-def joint_search(server, Xtr, ytr, Xv, yv, mu, epochs=60, lr=3e-3, gate_lr=0.05,
-                 alpha_lr=0.05, gamma_sharp=0.0, loss_fn=None, bs=32, seed=0, auto_init_mu=True):
+def joint_search(
+    server,
+    Xtr,
+    ytr,
+    Xv,
+    yv,
+    mu,
+    epochs=60,
+    lr=3e-3,
+    gate_lr=0.05,
+    alpha_lr=0.05,
+    gamma_sharp=0.0,
+    loss_fn=None,
+    bs=32,
+    seed=0,
+    auto_init_mu=True,
+):
     """The SINGLE joint gradient loop. Optimizes weights W (on train) and all gate parameters
     Phi = {alpha_prim (per cell), beta_width, gamma_depth} (on validation) under one action
         J = R + mu * Omega(Phi)  [ + gamma_sharp * entropy-sharpening on the primitive softmax ].
@@ -289,13 +325,17 @@ def joint_search(server, Xtr, ytr, Xv, yv, mu, epochs=60, lr=3e-3, gate_lr=0.05,
     if auto_init_mu and hasattr(server, "beta_width"):
         with torch.no_grad():
             b0 = auto_gate_init(0.95, mu=mu)
-            server.beta_width.fill_(b0); server.gamma_depth.fill_(b0)
+            server.beta_width.fill_(b0)
+            server.gamma_depth.fill_(b0)
     gate_params = [server.beta_width, server.gamma_depth]
     alpha_params = [cell.alpha for cell in server.net.cells]
     if getattr(server, "learn_readout", False) and server.readout_head is not None:
         alpha_params = alpha_params + [server.readout_head.alpha]
-    weight_params = [p for n, p in server.named_parameters()
-                     if not n.endswith("alpha") and "beta_width" not in n and "gamma_depth" not in n]
+    weight_params = [
+        p
+        for n, p in server.named_parameters()
+        if not n.endswith("alpha") and "beta_width" not in n and "gamma_depth" not in n
+    ]
     ow = torch.optim.Adam(weight_params, lr=lr)
     og = torch.optim.Adam(gate_params, lr=gate_lr)
     oa = torch.optim.Adam(alpha_params, lr=alpha_lr)
@@ -303,16 +343,19 @@ def joint_search(server, Xtr, ytr, Xv, yv, mu, epochs=60, lr=3e-3, gate_lr=0.05,
         # --- weight step on train ---
         perm = torch.randperm(len(Xtr))
         for i in range(0, len(perm), bs):
-            bi = perm[i:i + bs]
+            bi = perm[i : i + bs]
             ow.zero_grad()
             l = loss_fn(server(Xtr[bi]), ytr[bi])
             if torch.isfinite(l):
-                l.backward(); torch.nn.utils.clip_grad_norm_(weight_params, 5.0); ow.step()
+                l.backward()
+                torch.nn.utils.clip_grad_norm_(weight_params, 5.0)
+                ow.step()
         # --- gate + alpha step on validation, under the priced action ---
-        og.zero_grad(); oa.zero_grad()
+        og.zero_grad()
+        oa.zero_grad()
         lv = loss_fn(server(Xv), yv)
         obj = lv + mu * server.omega()
-        if gamma_sharp > 0:                                          # push primitive softmax to argmax
+        if gamma_sharp > 0:  # push primitive softmax to argmax
             for cell in server.net.cells:
                 p = torch.softmax(cell.alpha, dim=0)
                 obj = obj + gamma_sharp * (-(p * torch.log(p + 1e-9)).sum())
@@ -322,7 +365,8 @@ def joint_search(server, Xtr, ytr, Xv, yv, mu, epochs=60, lr=3e-3, gate_lr=0.05,
         if torch.isfinite(obj):
             obj.backward()
             torch.nn.utils.clip_grad_norm_(gate_params + alpha_params, 5.0)
-            og.step(); oa.step()
+            og.step()
+            oa.step()
             if getattr(server, "learn_readout", False) and server.readout_head is not None:
                 server.readout_head.update_peak()
     with torch.no_grad():
@@ -342,8 +386,7 @@ class EquivariantJointServer(nn.Module):
     width, and depth gates follow the same pattern as JointArchServer. This shows the SAME action
     J=R+mu*Omega drives max-l selection, unifying the l<=1/l<=2 choice into the one loop."""
 
-    def __init__(self, equiv_l2_net, c0, c1, c2, depth, w_l2=1.0, w_depth=1.0,
-                 gate_init=None, target_openness=0.95):
+    def __init__(self, equiv_l2_net, c0, c1, c2, depth, w_l2=1.0, w_depth=1.0, gate_init=None, target_openness=0.95):
         super().__init__()
         self.net = equiv_l2_net
         self.c0, self.c1, self.c2, self.depth = c0, c1, c2, depth
@@ -381,8 +424,9 @@ class EquivariantJointServer(nn.Module):
         prim_cost = self.net.cells[0].alpha.new_zeros(())
         for cell in self.net.cells:
             p = torch.softmax(cell.alpha, dim=0)
-            costs = torch.tensor([sum(x.numel() for x in c.parameters()) for c in cell.cores],
-                                 dtype=p.dtype, device=p.device)
+            costs = torch.tensor(
+                [sum(x.numel() for x in c.parameters()) for c in cell.cores], dtype=p.dtype, device=p.device
+            )
             costs = costs / costs.max()
             prim_cost = prim_cost + (p * costs).sum()
         prim_cost = prim_cost / len(self.net.cells)
@@ -403,8 +447,20 @@ class SpatialJointServer(nn.Module):
     the (b,C,H,W) feature; depth is a per-layer residual gate. Same J=R+mu*Omega loop as the sequence
     server; the base spatial schema is untouched (gates live here)."""
 
-    def __init__(self, spatial_net, width, depth, n_out=None, w_width=1.0, w_depth=1.0, gate_init=None,
-                 target_openness=0.95, learn_readout=False, size_prior=0.0, n_classes=None):
+    def __init__(
+        self,
+        spatial_net,
+        width,
+        depth,
+        n_out=None,
+        w_width=1.0,
+        w_depth=1.0,
+        gate_init=None,
+        target_openness=0.95,
+        learn_readout=False,
+        size_prior=0.0,
+        n_classes=None,
+    ):
         n_out = n_out if n_out is not None else (n_classes if n_classes is not None else 10)
         super().__init__()
         self.net = spatial_net
@@ -422,10 +478,11 @@ class SpatialJointServer(nn.Module):
         self.readout_head = DifferentiableReadout("spatial", size_prior=size_prior) if learn_readout else None
         self.head = nn.Linear(width, n_out)
         with torch.no_grad():
-            self.head.weight.normal_(0, (1.0 / width) ** 0.5); self.head.bias.zero_()
+            self.head.weight.normal_(0, (1.0 / width) ** 0.5)
+            self.head.bias.zero_()
 
     def width_mask(self):
-        return torch.sigmoid(self.beta_width)                        # (width,)
+        return torch.sigmoid(self.beta_width)  # (width,)
 
     def depth_gates(self):
         g = torch.sigmoid(self.gamma_depth)
@@ -433,16 +490,16 @@ class SpatialJointServer(nn.Module):
         return g
 
     def forward(self, x):
-        m = self.width_mask().view(1, -1, 1, 1)                      # (1,C,1,1) channel mask
+        m = self.width_mask().view(1, -1, 1, 1)  # (1,C,1,1) channel mask
         g = self.depth_gates()
-        x = self.net.stem(x)                                         # (b,width,hw,hw)
+        x = self.net.stem(x)  # (b,width,hw,hw)
         h = None
         for l, cell in enumerate(self.net.cells):
-            out = cell(x if l == 0 else h) * m                       # width mask on channels
+            out = cell(x if l == 0 else h) * m  # width mask on channels
             if l == 0:
                 h = out
             else:
-                h = h + g[l] * out                                   # depth-gated residual
+                h = h + g[l] * out  # depth-gated residual
         h = h * m
         pooled = self.readout_head(h) if self.learn_readout else h.mean(dim=(2, 3))
         return self.head(pooled)
@@ -451,10 +508,11 @@ class SpatialJointServer(nn.Module):
         prim_cost = self.net.cells[0].alpha.new_zeros(())
         for cell in self.net.cells:
             p = torch.softmax(cell.alpha, dim=0)
-            costs = torch.tensor([sum(x.numel() for x in c.parameters()) for c in cell.cores],
-                                 dtype=p.dtype, device=p.device)
+            costs = torch.tensor(
+                [sum(x.numel() for x in c.parameters()) for c in cell.cores], dtype=p.dtype, device=p.device
+            )
             costs = costs / costs.max()
-            prim_cost = prim_cost + (p * costs).sum()                # includes kernel k^2 via conv params
+            prim_cost = prim_cost + (p * costs).sum()  # includes kernel k^2 via conv params
         prim_cost = prim_cost / len(self.net.cells)
         width_cost = self.width_mask().sum() / self.width
         depth_cost = self.depth_gates().sum() / self.depth
@@ -472,17 +530,30 @@ class SpatialJointServer(nn.Module):
         return out
 
 
-def joint_search_generic(server, Xtr, ytr, Xv, yv, mu, epochs=50, lr=3e-3, gate_lr=0.08,
-                         alpha_lr=0.05, gamma_sharp=0.02, loss_fn=None, bs=32, seed=0,
-                         cell_container=None):
+def joint_search_generic(
+    server,
+    Xtr,
+    ytr,
+    Xv,
+    yv,
+    mu,
+    epochs=50,
+    lr=3e-3,
+    gate_lr=0.08,
+    alpha_lr=0.05,
+    gamma_sharp=0.02,
+    loss_fn=None,
+    bs=32,
+    seed=0,
+    cell_container=None,
+):
     """Joint loop for any server exposing forward(), omega(), and a base net with per-cell `alpha`.
     cell_container: the module holding .cells (default server.net). Weights on train; gates+alphas on
     val under J=R+mu*Omega. Generalizes joint_search to the spatial/volumetric/graph servers."""
     torch.manual_seed(seed)
     loss_fn = loss_fn or nn.CrossEntropyLoss()
     cells = (cell_container or server.net).cells
-    gate_params = [p for n, p in server.named_parameters()
-                   if "beta_width" in n or "gamma_depth" in n or "beta_l2" in n]
+    gate_params = [p for n, p in server.named_parameters() if "beta_width" in n or "gamma_depth" in n or "beta_l2" in n]
     alpha_params = [cell.alpha for cell in cells]
     if getattr(server, "learn_readout", False) and getattr(server, "readout_head", None) is not None:
         alpha_params = alpha_params + [server.readout_head.alpha]
@@ -495,11 +566,15 @@ def joint_search_generic(server, Xtr, ytr, Xv, yv, mu, epochs=50, lr=3e-3, gate_
     for ep in range(epochs):
         perm = torch.randperm(len(Xtr))
         for i in range(0, len(perm), bs):
-            bi = perm[i:i + bs]
-            ow.zero_grad(); l = loss_fn(server(Xtr[bi]), ytr[bi])
+            bi = perm[i : i + bs]
+            ow.zero_grad()
+            l = loss_fn(server(Xtr[bi]), ytr[bi])
             if torch.isfinite(l):
-                l.backward(); torch.nn.utils.clip_grad_norm_(weight_params, 5.0); ow.step()
-        if og is not None: og.zero_grad()
+                l.backward()
+                torch.nn.utils.clip_grad_norm_(weight_params, 5.0)
+                ow.step()
+        if og is not None:
+            og.zero_grad()
         oa.zero_grad()
         obj = loss_fn(server(Xv), yv) + mu * server.omega()
         if gamma_sharp > 0:
@@ -511,14 +586,18 @@ def joint_search_generic(server, Xtr, ytr, Xv, yv, mu, epochs=50, lr=3e-3, gate_
                 obj = obj + gamma_sharp * (-(pr * torch.log(pr + 1e-9)).sum())
         if torch.isfinite(obj):
             obj.backward()
-            if og is not None: og.step()
+            if og is not None:
+                og.step()
             oa.step()
             if getattr(server, "learn_readout", False) and getattr(server, "readout_head", None) is not None:
                 server.readout_head.update_peak()
     with torch.no_grad():
         pred = server(Xv)
-        score = float((pred.argmax(-1) == yv).float().mean()) if isinstance(loss_fn, nn.CrossEntropyLoss) \
+        score = (
+            float((pred.argmax(-1) == yv).float().mean())
+            if isinstance(loss_fn, nn.CrossEntropyLoss)
             else -float(loss_fn(pred, yv))
+        )
     return score, server
 
 
@@ -529,13 +608,27 @@ class VolumetricJointServer(nn.Module):
     the primitive set) is priced by k^3 via the primitive softmax. Base volumetric schema untouched.
     """
 
-    def __init__(self, vol_net, width, depth, n_out=None, w_width=1.0, w_depth=1.0, gate_init=None,
-                 target_openness=0.95, learn_readout=False, size_prior=0.0, n_classes=None):
+    def __init__(
+        self,
+        vol_net,
+        width,
+        depth,
+        n_out=None,
+        w_width=1.0,
+        w_depth=1.0,
+        gate_init=None,
+        target_openness=0.95,
+        learn_readout=False,
+        size_prior=0.0,
+        n_classes=None,
+    ):
         n_out = n_out if n_out is not None else (n_classes if n_classes is not None else 10)
         super().__init__()
         self.net = vol_net
-        self.width = width; self.depth = depth
-        self.w_width = w_width; self.w_depth = w_depth
+        self.width = width
+        self.depth = depth
+        self.w_width = w_width
+        self.w_depth = w_depth
         b0 = auto_gate_init(target_openness) if gate_init is None else gate_init
         self.beta_width = nn.Parameter(torch.full((width,), b0))
         self.gamma_depth = nn.Parameter(torch.full((depth,), b0))
@@ -543,7 +636,8 @@ class VolumetricJointServer(nn.Module):
         self.readout_head = DifferentiableReadout("vol", size_prior=size_prior) if learn_readout else None
         self.head = nn.Linear(width, n_out)
         with torch.no_grad():
-            self.head.weight.normal_(0, (1.0 / width) ** 0.5); self.head.bias.zero_()
+            self.head.weight.normal_(0, (1.0 / width) ** 0.5)
+            self.head.bias.zero_()
 
     def width_mask(self):
         return torch.sigmoid(self.beta_width)
@@ -554,7 +648,7 @@ class VolumetricJointServer(nn.Module):
         return g
 
     def forward(self, x):
-        m = self.width_mask().view(1, -1, 1, 1, 1)                   # (1,C,1,1,1)
+        m = self.width_mask().view(1, -1, 1, 1, 1)  # (1,C,1,1,1)
         g = self.depth_gates()
         x = self.net.stem(x)
         h = None
@@ -569,21 +663,28 @@ class VolumetricJointServer(nn.Module):
         prim_cost = self.net.cells[0].alpha.new_zeros(())
         for cell in self.net.cells:
             p = torch.softmax(cell.alpha, dim=0)
-            costs = torch.tensor([sum(x.numel() for x in c.parameters()) for c in cell.cores],
-                                 dtype=p.dtype, device=p.device)
+            costs = torch.tensor(
+                [sum(x.numel() for x in c.parameters()) for c in cell.cores], dtype=p.dtype, device=p.device
+            )
             costs = costs / costs.max()
             prim_cost = prim_cost + (p * costs).sum()
         prim_cost = prim_cost / len(self.net.cells)
         readout_cost = self.readout_head.readout_cost() if getattr(self, "learn_readout", False) else 0.0
-        return (prim_cost + self.w_width * self.width_mask().sum() / self.width
-                + self.w_depth * self.depth_gates().sum() / self.depth + readout_cost)
+        return (
+            prim_cost
+            + self.w_width * self.width_mask().sum() / self.width
+            + self.w_depth * self.depth_gates().sum() / self.depth
+            + readout_cost
+        )
 
     def architecture(self):
         with torch.no_grad():
             prims = [cell.primitives[int(torch.argmax(cell.alpha))] for cell in self.net.cells]
-            out = {"primitives": prims,
-                   "width": int((self.width_mask() > 0.5).sum()),
-                   "depth": int((self.depth_gates() > 0.5).sum())}
+            out = {
+                "primitives": prims,
+                "width": int((self.width_mask() > 0.5).sum()),
+                "depth": int((self.depth_gates() > 0.5).sum()),
+            }
             if getattr(self, "learn_readout", False) and self.readout_head is not None:
                 out["readout"] = self.readout_head.selected()
             return out
@@ -595,12 +696,27 @@ class GraphJointServer(nn.Module):
     forward signature is (x, edge_index, batch, n_graphs). width = per-feature-channel mask on the
     node embeddings; depth = per-layer residual gate. Base graph schema untouched."""
 
-    def __init__(self, graph_net, width, depth, n_out, readout="mean", w_width=1.0, w_depth=1.0,
-                 gate_init=None, target_openness=0.95, learn_readout=False, size_prior=0.0):
+    def __init__(
+        self,
+        graph_net,
+        width,
+        depth,
+        n_out,
+        readout="mean",
+        w_width=1.0,
+        w_depth=1.0,
+        gate_init=None,
+        target_openness=0.95,
+        learn_readout=False,
+        size_prior=0.0,
+    ):
         super().__init__()
         self.net = graph_net
-        self.width = width; self.depth = depth; self.readout = readout
-        self.w_width = w_width; self.w_depth = w_depth
+        self.width = width
+        self.depth = depth
+        self.readout = readout
+        self.w_width = w_width
+        self.w_depth = w_depth
         b0 = auto_gate_init(target_openness) if gate_init is None else gate_init
         self.beta_width = nn.Parameter(torch.full((width,), b0))
         self.gamma_depth = nn.Parameter(torch.full((depth,), b0))
@@ -609,7 +725,8 @@ class GraphJointServer(nn.Module):
         self.readout_head = DifferentiableReadout("graph", size_prior=size_prior) if learn_readout else None
         self.head = nn.Linear(width, n_out)
         with torch.no_grad():
-            self.head.weight.normal_(0, (1.0 / width) ** 0.5); self.head.bias.zero_()
+            self.head.weight.normal_(0, (1.0 / width) ** 0.5)
+            self.head.bias.zero_()
 
     def width_mask(self):
         return torch.sigmoid(self.beta_width)
@@ -621,14 +738,15 @@ class GraphJointServer(nn.Module):
 
     def forward(self, x, edge_index, batch, n_graphs):
         from ilmarinen.models.graph_schema import _global_pool
-        m = self.width_mask()                                        # (width,)
+
+        m = self.width_mask()  # (width,)
         g = self.depth_gates()
         h = self.net.embed(x) * m
         for l, cell in enumerate(self.net.cells):
             out = cell(h if l == 0 else h, edge_index) * m
             h = out if l == 0 else h + g[l] * out
         h = h * m
-        if self.learn_readout:                                       # readout as a selected axis
+        if self.learn_readout:  # readout as a selected axis
             pooled = self.readout_head(h, batch, n_graphs)
         else:
             pooled = _global_pool(h, batch, n_graphs, self.readout)
@@ -638,58 +756,86 @@ class GraphJointServer(nn.Module):
         prim_cost = self.net.cells[0].alpha.new_zeros(())
         for cell in self.net.cells:
             p = torch.softmax(cell.alpha, dim=0)
-            costs = torch.tensor([sum(x.numel() for x in c.parameters()) for c in cell.cores],
-                                 dtype=p.dtype, device=p.device)
+            costs = torch.tensor(
+                [sum(x.numel() for x in c.parameters()) for c in cell.cores], dtype=p.dtype, device=p.device
+            )
             costs = costs / costs.max()
             prim_cost = prim_cost + (p * costs).sum()
         prim_cost = prim_cost / len(self.net.cells)
         readout_cost = self.readout_head.readout_cost() if getattr(self, "learn_readout", False) else 0.0
-        return (prim_cost + self.w_width * self.width_mask().sum() / self.width
-                + self.w_depth * self.depth_gates().sum() / self.depth + readout_cost)
+        return (
+            prim_cost
+            + self.w_width * self.width_mask().sum() / self.width
+            + self.w_depth * self.depth_gates().sum() / self.depth
+            + readout_cost
+        )
 
     def architecture(self):
         with torch.no_grad():
             prims = [cell.primitives[int(torch.argmax(cell.alpha))] for cell in self.net.cells]
-            out = {"primitives": prims,
-                   "width": int((self.width_mask() > 0.5).sum()),
-                   "depth": int((self.depth_gates() > 0.5).sum())}
+            out = {
+                "primitives": prims,
+                "width": int((self.width_mask() > 0.5).sum()),
+                "depth": int((self.depth_gates() > 0.5).sum()),
+            }
             if self.learn_readout and self.readout_head is not None:
                 out["readout"] = self.readout_head.selected()
             return out
 
 
-def joint_search_graph(server, graphs, y, tr, va, collate_fn, mu, epochs=40, lr=3e-3, gate_lr=0.08,
-                       alpha_lr=0.05, gamma_sharp=0.02, bs=48, seed=0, regression=True):
+def joint_search_graph(
+    server,
+    graphs,
+    y,
+    tr,
+    va,
+    collate_fn,
+    mu,
+    epochs=40,
+    lr=3e-3,
+    gate_lr=0.08,
+    alpha_lr=0.05,
+    gamma_sharp=0.02,
+    bs=48,
+    seed=0,
+    regression=True,
+):
     """Joint loop for the GRAPH server. graphs/y are the dataset; tr/va index arrays; collate_fn(
     graphs, idx_list) -> (x, edge_index, batch, n_graphs). Weights on train, gates+alphas on val under
     J=R+mu*Omega. Regression (MSE) by default (QM7 energy); set regression=False for classification."""
     import numpy as np
+
     torch.manual_seed(seed)
     lf = nn.MSELoss() if regression else nn.CrossEntropyLoss()
     gate_params = [server.beta_width, server.gamma_depth]
     alpha_params = [cell.alpha for cell in server.net.cells]
     if getattr(server, "learn_readout", False) and server.readout_head is not None:
-        alpha_params = alpha_params + [server.readout_head.alpha]   # readout axis alpha
-    gate_ids = {id(p) for p in gate_params}; alpha_ids = {id(p) for p in alpha_params}
+        alpha_params = alpha_params + [server.readout_head.alpha]  # readout axis alpha
+    gate_ids = {id(p) for p in gate_params}
+    alpha_ids = {id(p) for p in alpha_params}
     weight_params = [p for p in server.parameters() if id(p) not in gate_ids and id(p) not in alpha_ids]
-    ow = torch.optim.Adam(weight_params, lr=lr); og = torch.optim.Adam(gate_params, lr=gate_lr)
+    ow = torch.optim.Adam(weight_params, lr=lr)
+    og = torch.optim.Adam(gate_params, lr=gate_lr)
     oa = torch.optim.Adam(alpha_params, lr=alpha_lr)
     ymean, ystd = float(np.mean(y[tr])), float(np.std(y[tr])) + 1e-9
     for ep in range(epochs):
         np.random.shuffle(tr)
         for i in range(0, len(tr), bs):
-            bi = tr[i:i + bs]
+            bi = tr[i : i + bs]
             x, ei, batch, ng = collate_fn(graphs, bi.tolist())
             target = torch.tensor((y[bi] - ymean) / ystd, dtype=torch.float32)
             ow.zero_grad()
             pred = server(x, ei, batch, ng)
             l = lf(pred, target.unsqueeze(1)) if regression else lf(pred, target.long())
             if torch.isfinite(l):
-                l.backward(); torch.nn.utils.clip_grad_norm_(weight_params, 5.0); ow.step()
+                l.backward()
+                torch.nn.utils.clip_grad_norm_(weight_params, 5.0)
+                ow.step()
         # gate+alpha step on val
         x, ei, batch, ng = collate_fn(graphs, va.tolist())
         target = torch.tensor((y[va] - ymean) / ystd, dtype=torch.float32)
-        og.zero_grad(); oa.zero_grad()
+        og.zero_grad()
+        oa.zero_grad()
         pred = server(x, ei, batch, ng)
         obj = lf(pred, target.unsqueeze(1)) + mu * server.omega()
         if gamma_sharp > 0:
@@ -700,7 +846,9 @@ def joint_search_graph(server, graphs, y, tr, va, collate_fn, mu, epochs=40, lr=
                 pr = torch.softmax(server.readout_head.alpha, dim=0)
                 obj = obj + gamma_sharp * (-(pr * torch.log(pr + 1e-9)).sum())
         if torch.isfinite(obj):
-            obj.backward(); og.step(); oa.step()
+            obj.backward()
+            og.step()
+            oa.step()
             if getattr(server, "learn_readout", False) and server.readout_head is not None:
                 server.readout_head.update_peak()
     # eval MAE on val
@@ -711,8 +859,6 @@ def joint_search_graph(server, graphs, y, tr, va, collate_fn, mu, epochs=40, lr=
     return mae, server
 
 
-
-
 class SetJointServer(nn.Module):
     """Joint-search adapter for the SET contract (Future Direction #6). Same axes as the graph server
     (primitive + width + depth + readout), but the primitives are the permutation-invariant set blocks
@@ -720,12 +866,27 @@ class SetJointServer(nn.Module):
     the whole model stays exactly S_n-invariant. The set is the maximal-symmetry contract; its
     aggregators do NOT collapse (unlike graph aggregators on an edgeless input)."""
 
-    def __init__(self, set_net, width, depth, n_out, readout="mean", w_width=1.0, w_depth=1.0,
-                 gate_init=None, target_openness=0.95, learn_readout=False, size_prior=0.0):
+    def __init__(
+        self,
+        set_net,
+        width,
+        depth,
+        n_out,
+        readout="mean",
+        w_width=1.0,
+        w_depth=1.0,
+        gate_init=None,
+        target_openness=0.95,
+        learn_readout=False,
+        size_prior=0.0,
+    ):
         super().__init__()
         self.net = set_net
-        self.width = width; self.depth = depth; self.readout = readout
-        self.w_width = w_width; self.w_depth = w_depth
+        self.width = width
+        self.depth = depth
+        self.readout = readout
+        self.w_width = w_width
+        self.w_depth = w_depth
         b0 = auto_gate_init(target_openness) if gate_init is None else gate_init
         self.beta_width = nn.Parameter(torch.full((width,), b0))
         self.gamma_depth = nn.Parameter(torch.full((depth,), b0))
@@ -733,7 +894,8 @@ class SetJointServer(nn.Module):
         self.readout_head = DifferentiableReadout("graph", size_prior=size_prior) if learn_readout else None
         self.head = nn.Linear(width, n_out)
         with torch.no_grad():
-            self.head.weight.normal_(0, (1.0 / width) ** 0.5); self.head.bias.zero_()
+            self.head.weight.normal_(0, (1.0 / width) ** 0.5)
+            self.head.bias.zero_()
 
     def width_mask(self):
         return torch.sigmoid(self.beta_width)
@@ -744,6 +906,7 @@ class SetJointServer(nn.Module):
 
     def forward(self, x, batch, n_sets):
         from ilmarinen.models.set_schema import _set_pool
+
         m = self.width_mask()
         g = self.depth_gates()
         h = None
@@ -764,14 +927,21 @@ class SetJointServer(nn.Module):
             prim_cost = prim_cost + (w * torch.arange(1, len(w) + 1, device=w.device, dtype=w.dtype)).sum()
         prim_cost = prim_cost / len(self.net.cells)
         readout_cost = self.readout_head.readout_cost() if getattr(self, "learn_readout", False) else 0.0
-        return (prim_cost + self.w_width * self.width_mask().sum() / self.width
-                + self.w_depth * self.depth_gates().sum() / self.depth + readout_cost)
+        return (
+            prim_cost
+            + self.w_width * self.width_mask().sum() / self.width
+            + self.w_depth * self.depth_gates().sum() / self.depth
+            + readout_cost
+        )
 
     def architecture(self):
         with torch.no_grad():
             prims = [cell.primitives[int(torch.argmax(cell.alpha))] for cell in self.net.cells]
-            out = {"primitives": prims, "width": int((self.width_mask() > 0.5).sum()),
-                   "depth": int((self.depth_gates() > 0.5).sum())}
+            out = {
+                "primitives": prims,
+                "width": int((self.width_mask() > 0.5).sum()),
+                "depth": int((self.depth_gates() > 0.5).sum()),
+            }
             if self.learn_readout and self.readout_head is not None:
                 out["readout"] = self.readout_head.selected()
             return out
@@ -788,18 +958,20 @@ class Grid4dJointServer(nn.Module):
     average-pool over all 4 grid axes (translation-invariant), so the model respects 4D translation
     symmetry through the search. Mirrors VolumetricJointServer at rank 4."""
 
-    def __init__(self, grid_net, width, depth, n_out, w_width=1.0, w_depth=1.0, gate_init=None,
-                 target_openness=0.95):
+    def __init__(self, grid_net, width, depth, n_out, w_width=1.0, w_depth=1.0, gate_init=None, target_openness=0.95):
         super().__init__()
         self.net = grid_net
-        self.width = width; self.depth = depth
-        self.w_width = w_width; self.w_depth = w_depth
+        self.width = width
+        self.depth = depth
+        self.w_width = w_width
+        self.w_depth = w_depth
         b0 = auto_gate_init(target_openness) if gate_init is None else gate_init
         self.beta_width = nn.Parameter(torch.full((width,), b0))
         self.gamma_depth = nn.Parameter(torch.full((depth,), b0))
         self.head = nn.Linear(width, n_out)
         with torch.no_grad():
-            self.head.weight.normal_(0, (1.0 / width) ** 0.5); self.head.bias.zero_()
+            self.head.weight.normal_(0, (1.0 / width) ** 0.5)
+            self.head.bias.zero_()
 
     def width_mask(self):
         return torch.sigmoid(self.beta_width)
@@ -825,14 +997,19 @@ class Grid4dJointServer(nn.Module):
             w = torch.softmax(cell.alpha, dim=0)
             prim_cost = prim_cost + (w * torch.arange(1, len(w) + 1, device=w.device, dtype=w.dtype)).sum()
         prim_cost = prim_cost / len(self.net.cells)
-        return (prim_cost + self.w_width * self.width_mask().sum() / self.width
-                + self.w_depth * self.depth_gates().sum() / self.depth)
+        return (
+            prim_cost
+            + self.w_width * self.width_mask().sum() / self.width
+            + self.w_depth * self.depth_gates().sum() / self.depth
+        )
 
     def architecture(self):
         with torch.no_grad():
-            return {"primitives": [cell.primitives[int(torch.argmax(cell.alpha))] for cell in self.net.cells],
-                    "width": int((self.width_mask() > 0.5).sum()),
-                    "depth": int((self.depth_gates() > 0.5).sum())}
+            return {
+                "primitives": [cell.primitives[int(torch.argmax(cell.alpha))] for cell in self.net.cells],
+                "width": int((self.width_mask() > 0.5).sum()),
+                "depth": int((self.depth_gates() > 0.5).sum()),
+            }
 
     def update_peak(self):
         self.net.update_peak()

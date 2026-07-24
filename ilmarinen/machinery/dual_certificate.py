@@ -38,6 +38,7 @@ Faithfulness notes / honest gaps:
     sup over Theta is the same NP-hard oracle as insertion); we report the
     empirical sup and its margin, and flag if any candidate violates |eta|<=1.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -55,19 +56,19 @@ class CertificateReport:
     lam: float
     K: int
     # feasibility
-    sup_abs_eta_support: float        # max |eta| over support atoms (should be ~1)
-    sup_abs_eta_global: float         # empirical sup |eta| over sampled Theta
-    feasible: bool                    # sup_abs_eta_global <= 1 + tol
+    sup_abs_eta_support: float  # max |eta| over support atoms (should be ~1)
+    sup_abs_eta_global: float  # empirical sup |eta| over sampled Theta
+    feasible: bool  # sup_abs_eta_global <= 1 + tol
     # saturation + sign
-    max_saturation_error: float       # max_k | |eta(Theta_k)| - 1 |
-    max_sign_error: float             # max_k | eta(Theta_k) - sign(alpha_k) |
+    max_saturation_error: float  # max_k | |eta(Theta_k)| - 1 |
+    max_sign_error: float  # max_k | eta(Theta_k) - sign(alpha_k) |
     saturated: bool
     signs_match: bool
     # strict slack / non-degeneracy
-    offsupport_margin: float          # 1 - sup |eta| over off-support samples
+    offsupport_margin: float  # 1 - sup |eta| over off-support samples
     strict_slack: bool
-    grad_norm_at_atoms: float         # max ||grad eta|| at support atoms (should ~0)
-    hessian_negdef_fraction: float    # fraction of atoms with neg-def Hessian of |eta|
+    grad_norm_at_atoms: float  # max ||grad eta|| at support atoms (should ~0)
+    hessian_negdef_fraction: float  # fraction of atoms with neg-def Hessian of |eta|
     nondegenerate: bool
     # overall
     certified: bool
@@ -75,7 +76,7 @@ class CertificateReport:
 
 def _eta_at(theta_w, theta_b, X, q_star, lam):
     """eta(Theta) = (1/lambda) * (1/n) sum_i q*_i phi(x_i; Theta)."""
-    f = phi(X, theta_w, theta_b)           # (n,)
+    f = phi(X, theta_w, theta_b)  # (n,)
     return float((q_star @ f) / (len(q_star) * lam))
 
 
@@ -92,13 +93,15 @@ def _eta_grad_hess(theta_w, theta_b, X, q_star, lam, h=1e-4):
     s = np.sign(e0) if e0 != 0 else 1.0
 
     def absval(p):
-        return s * _eta_at(p[:d], p[d], X, q_star, lam)   # = |eta| near the atom
+        return s * _eta_at(p[:d], p[d], X, q_star, lam)  # = |eta| near the atom
 
     # gradient
     g = np.zeros(d + 1)
     for i in range(d + 1):
-        pp = p0.copy(); pp[i] += h
-        pm = p0.copy(); pm[i] -= h
+        pp = p0.copy()
+        pp[i] += h
+        pm = p0.copy()
+        pm[i] -= h
         g[i] = (absval(pp) - absval(pm)) / (2 * h)
     # Hessian (diagonal + a few off-diagonals would be d^2 cost; for d=784 we
     # compute only the DIAGONAL of the Hessian -- sufficient to test whether the
@@ -107,14 +110,15 @@ def _eta_grad_hess(theta_w, theta_b, X, q_star, lam, h=1e-4):
     hess_diag = np.zeros(d + 1)
     f0 = absval(p0)
     for i in range(d + 1):
-        pp = p0.copy(); pp[i] += h
-        pm = p0.copy(); pm[i] -= h
+        pp = p0.copy()
+        pp[i] += h
+        pm = p0.copy()
+        pm[i] -= h
         hess_diag[i] = (absval(pp) - 2 * f0 + absval(pm)) / (h * h)
     return g, hess_diag
 
 
-def build_certificate(result, X, y, n_probe=20000, tol=1e-2, seed=0,
-                      verify_nondegeneracy=True) -> CertificateReport:
+def build_certificate(result, X, y, n_probe=20000, tol=1e-2, seed=0, verify_nondegeneracy=True) -> CertificateReport:
     """Construct and verify the dual certificate for a greedy_insertion result.
 
     Parameters
@@ -137,7 +141,7 @@ def build_certificate(result, X, y, n_probe=20000, tol=1e-2, seed=0,
         raise ValueError("empty solution; nothing to certify")
 
     # primal reconstruction and residual  q* = y - A rho*
-    Phi = np.column_stack([phi(X, w, b) for (w, b) in neurons])   # (n, K)
+    Phi = np.column_stack([phi(X, w, b) for (w, b) in neurons])  # (n, K)
     pred = Phi @ A
     q_star = y - pred
     lam = result.lam
@@ -155,10 +159,10 @@ def build_certificate(result, X, y, n_probe=20000, tol=1e-2, seed=0,
     # mix data-informed and random candidates (same distribution as the oracle)
     Wp = rng.standard_normal((d, n_probe)) * (1.0 / np.sqrt(d))
     idx = rng.integers(0, n, n_probe // 2)
-    Wp[:, :n_probe // 2] = (X[idx].T / (np.linalg.norm(X[idx], axis=1) + 1e-6))
+    Wp[:, : n_probe // 2] = X[idx].T / (np.linalg.norm(X[idx], axis=1) + 1e-6)
     Bp = rng.standard_normal(n_probe) * 0.5
     Fp = np.tanh(X.T.T @ Wp + Bp)  # (n, n_probe)
-    eta_probe = (q_star @ Fp) / (n * lam)          # (n_probe,)
+    eta_probe = (q_star @ Fp) / (n * lam)  # (n_probe,)
     abs_eta_probe = np.abs(eta_probe)
     sup_global = float(max(sup_support, abs_eta_probe.max()))
     feasible = sup_global <= 1.0 + tol
@@ -173,7 +177,7 @@ def build_certificate(result, X, y, n_probe=20000, tol=1e-2, seed=0,
     nondeg = False
     if verify_nondegeneracy:
         gnorms, negdef_flags = [], []
-        for (w, b) in neurons:
+        for w, b in neurons:
             g, hdiag = _eta_grad_hess(w, b, X, q_star, lam)
             gnorms.append(np.linalg.norm(g))
             # negative-definite proxy: all diagonal Hessian entries < 0
@@ -183,12 +187,13 @@ def build_certificate(result, X, y, n_probe=20000, tol=1e-2, seed=0,
         # non-degenerate if atoms are near-stationary maxima and slack is strict
         nondeg = (grad_norm_max < 0.5) and (hess_negdef_frac > 0.5) and strict_slack
 
-    saturated = max_sat_err < 5e-2      # saturation is approximate (sampled oracle)
+    saturated = max_sat_err < 5e-2  # saturation is approximate (sampled oracle)
     signs_match = max_sign_err < 5e-2
     certified = feasible and saturated and signs_match
 
     return CertificateReport(
-        lam=lam, K=K,
+        lam=lam,
+        K=K,
         sup_abs_eta_support=sup_support,
         sup_abs_eta_global=sup_global,
         feasible=feasible,

@@ -16,6 +16,7 @@ Recommend kernel size k = 2*ceil(xi) + 1 (odd, covers +-xi), clamped to a small 
 This does NOT itself train; it returns a recommended kernel size (and the measured xi) that a caller
 can pass to the spatial/volumetric schema, or use to price a kernel-size selection.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -48,12 +49,16 @@ def _radial_autocorr_3d(field, max_r):
     if var < 1e-12:
         return np.ones(max_r + 1)
     D, H, W = f.shape
-    C = np.zeros(max_r + 1); C[0] = 1.0
+    C = np.zeros(max_r + 1)
+    C[0] = 1.0
     for r in range(1, max_r + 1):
         vals = []
-        if r < D: vals.append((f[:-r] * f[r:]).mean())
-        if r < H: vals.append((f[:, :-r] * f[:, r:]).mean())
-        if r < W: vals.append((f[:, :, :-r] * f[:, :, r:]).mean())
+        if r < D:
+            vals.append((f[:-r] * f[r:]).mean())
+        if r < H:
+            vals.append((f[:, :-r] * f[:, r:]).mean())
+        if r < W:
+            vals.append((f[:, :, :-r] * f[:, :, r:]).mean())
         C[r] = (np.mean(vals) / var) if vals else 0.0
     return C
 
@@ -81,13 +86,15 @@ def recommend_kernel_size(images, ndim=2, candidates=(3, 5, 7, 9), max_r=None, s
     arr = np.asarray(images, dtype=np.float32)
     # collapse channel axis if present
     if ndim == 2:
-        if arr.ndim == 4: arr = arr.mean(1)          # (N,C,H,W)->(N,H,W)
+        if arr.ndim == 4:
+            arr = arr.mean(1)  # (N,C,H,W)->(N,H,W)
         assert arr.ndim == 3, "2D expects (N,H,W) or (N,C,H,W)"
         H, W = arr.shape[1:]
         mr = max_r or min(max(H, W) // 2, 12)
         auto = _radial_autocorr_2d
     else:
-        if arr.ndim == 5: arr = arr.mean(1)
+        if arr.ndim == 5:
+            arr = arr.mean(1)
         assert arr.ndim == 4, "3D expects (N,D,H,W) or (N,C,D,H,W)"
         Dd, H, W = arr.shape[1:]
         mr = max_r or min(max(Dd, H, W) // 2, 8)

@@ -49,6 +49,7 @@ USAGE:
     python validation_runners/run_cellpainting_resolution.py --verify 64           # direct-build check
     python validation_runners/run_cellpainting_resolution.py --classes MYC,RHOA,BRD4,CTNNB1  # transfer
 """
+
 import argparse
 import os
 import sys
@@ -103,18 +104,18 @@ def trained_map(args, X, y, wells, classes, split_seed, depth, device, router, t
     yte = np.asarray(d["test"].y)
     if len(Xte) < 3:
         return float("nan"), float("nan"), 0.0
-    bud = dict(BUDGET["spatial"]); bud["depth"] = depth
+    bud = dict(BUDGET["spatial"])
+    bud["depth"] = depth
     t0 = time.time()
     mg = make_allgraph(args, bud, device, router, tzmu, enabled_sg)
     # make_allgraph hardwires progress=True (right for a single headline fit, wrong here): a grid runs
     # hw x depth x splits fits, and their bars would shred the results table.
     mg.progress = False
-    mg.fit(d["train"], task=d["task"], select=args.select, tiebreak=args.tiebreak,
-           select_size=args.select_size)
+    mg.fit(d["train"], task=d["task"], select=args.select, tiebreak=args.tiebreak, select_size=args.select_size)
     emb = _embeddings(mg, Xte)
     mapv = retrieval_map(emb, yte)
     with torch.no_grad():
-        logits = torch.cat([mg.net(Xte[j:j + 128].to(mg.device)).cpu() for j in range(0, len(Xte), 128)])
+        logits = torch.cat([mg.net(Xte[j : j + 128].to(mg.device)).cpu() for j in range(0, len(Xte), 128)])
     acc = float((logits.argmax(1).numpy() == yte).mean())
     return mapv, acc, time.time() - t0
 
@@ -149,25 +150,42 @@ def main():
     ap.add_argument("--per_class", type=int, default=12, help="distinct WELLS per class (data-amount knob)")
     ap.add_argument("--sites", type=int, default=2, help="fields (sites) per well")
     ap.add_argument("--classes", default=None, help="comma-separated perturbation genes")
-    ap.add_argument("--build_hw", type=int, default=224,
-                    help="resolution of the ONE cached build; every hw in the grid is derived from it "
-                         "locally (default 224). Must be >= max(--hw_grid).")
+    ap.add_argument(
+        "--build_hw",
+        type=int,
+        default=224,
+        help="resolution of the ONE cached build; every hw in the grid is derived from it "
+        "locally (default 224). Must be >= max(--hw_grid).",
+    )
     ap.add_argument("--hw_grid", default="16,24,32,48,64,96,128", help="comma-separated hw values to test")
-    ap.add_argument("--depth_grid", default="2,3,4",
-                    help="comma-separated conv depths; the best depth per hw is reported, so each "
-                         "resolution is judged at the capacity it needs (see the receptive-field note)")
-    ap.add_argument("--splits", type=int, default=5,
-                    help="by-well split seeds per cell -> the error bars (default 5)")
-    ap.add_argument("--ceiling", action="store_true", default=True,
-                    help="also run the model-free pixel-ceiling curve (default on)")
+    ap.add_argument(
+        "--depth_grid",
+        default="2,3,4",
+        help="comma-separated conv depths; the best depth per hw is reported, so each "
+        "resolution is judged at the capacity it needs (see the receptive-field note)",
+    )
+    ap.add_argument("--splits", type=int, default=5, help="by-well split seeds per cell -> the error bars (default 5)")
+    ap.add_argument(
+        "--ceiling", action="store_true", default=True, help="also run the model-free pixel-ceiling curve (default on)"
+    )
     ap.add_argument("--no_ceiling", dest="ceiling", action="store_false")
-    ap.add_argument("--ceiling_only", action="store_true",
-                    help="only the model-free curve -- no training at all (seconds, not hours)")
-    ap.add_argument("--per_channel", action="store_true",
-                    help="also run the model-free curve one STAIN at a time (which channel sets the floor)")
-    ap.add_argument("--verify", type=int, default=None,
-                    help="after the sweep, rebuild this hw DIRECTLY from S3 (not derived) and compare -- "
-                         "confirms the two-stage resampling did not bias the choice")
+    ap.add_argument(
+        "--ceiling_only",
+        action="store_true",
+        help="only the model-free curve -- no training at all (seconds, not hours)",
+    )
+    ap.add_argument(
+        "--per_channel",
+        action="store_true",
+        help="also run the model-free curve one STAIN at a time (which channel sets the floor)",
+    )
+    ap.add_argument(
+        "--verify",
+        type=int,
+        default=None,
+        help="after the sweep, rebuild this hw DIRECTLY from S3 (not derived) and compare -- "
+        "confirms the two-stage resampling did not bias the choice",
+    )
     add_pipeline_args(ap)
     args = ap.parse_args()
     device, router, tzmu, enabled_sg = resolve_pipeline(args, ap)
@@ -175,15 +193,19 @@ def main():
     hw_grid = sorted({int(s) for s in args.hw_grid.split(",") if s.strip()})
     depth_grid = sorted({int(s) for s in args.depth_grid.split(",") if s.strip()})
     if max(hw_grid) > args.build_hw:
-        ap.error(f"--build_hw {args.build_hw} < max(--hw_grid) {max(hw_grid)}: cannot UPSAMPLE a derived "
-                 f"resolution above the build. Raise --build_hw.")
+        ap.error(
+            f"--build_hw {args.build_hw} < max(--hw_grid) {max(hw_grid)}: cannot UPSAMPLE a derived "
+            f"resolution above the build. Raise --build_hw."
+        )
 
     print("=" * 100)
     print(f"CELL PAINTING RESOLUTION STUDY  |  device={device}  epochs_scale={args.epochs_scale}")
     print(f"per_class(wells)={args.per_class}  sites/well={args.sites}  classes={list(classes)}")
     print(f"hw_grid={hw_grid}  depth_grid={depth_grid}  splits={args.splits}  build_hw={args.build_hw}")
-    print(f"cache dir={data_dir()}"
-          f"{'   [TEMP -- set ILMARINEN_DATA_DIR to keep the fetch]' if not os.environ.get('ILMARINEN_DATA_DIR') else ''}")
+    print(
+        f"cache dir={data_dir()}"
+        f"{'   [TEMP -- set ILMARINEN_DATA_DIR to keep the fetch]' if not os.environ.get('ILMARINEN_DATA_DIR') else ''}"
+    )
     print("metric = held-out retrieval mAP (mean +- SE over by-well split seeds); random ~ %.3f" % (1.0 / len(classes)))
     print("=" * 100)
 
@@ -198,15 +220,21 @@ def main():
         print(f"ERROR (data) -- {type(e).__name__}: {str(e)[:70]}")
         return
     native = NATIVE_SHAPE.get("shape")
-    print(f"built/loaded {len(Xb)} fields at hw={args.build_hw} in {time.time()-t0:.0f}s "
-          f"({len(set(wells.tolist()))} wells, {len(classes)} classes)")
+    print(
+        f"built/loaded {len(Xb)} fields at hw={args.build_hw} in {time.time() - t0:.0f}s "
+        f"({len(set(wells.tolist()))} wells, {len(classes)} classes)"
+    )
     if native:
-        print(f"NATIVE field = {native[0]}x{native[1]} px -> a given hw samples at "
-              f"{native[0]}/hw px per output px; multiply by the source's um/px for the physical rate "
-              f"(nuclei ~10-20um survive coarse sampling; Mito/AGP granularity ~1-2um does not)")
+        print(
+            f"NATIVE field = {native[0]}x{native[1]} px -> a given hw samples at "
+            f"{native[0]}/hw px per output px; multiply by the source's um/px for the physical rate "
+            f"(nuclei ~10-20um survive coarse sampling; Mito/AGP granularity ~1-2um does not)"
+        )
     else:
-        print("NATIVE field size unknown (cache was reused, so no image passed through the resizer); "
-              "delete the npz and rebuild to record it")
+        print(
+            "NATIVE field size unknown (cache was reused, so no image passed through the resizer); "
+            "delete the npz and rebuild to record it"
+        )
 
     # ---- 1. model-free pixel ceiling ----
     ceiling = {}
@@ -218,7 +246,7 @@ def main():
             vals = [pixel_ceiling_map(Xh, y, wells, classes, s) for s in range(args.splits)]
             m, se, _ = mean_se(vals)
             ceiling[hw] = (m, se)
-            print(f"{hw:>5}  {_fmt(m):>8}  {_fmt(se, 4):>7}   {hw*hw*len(CHANNELS):>8}")
+            print(f"{hw:>5}  {_fmt(m):>8}  {_fmt(se, 4):>7}   {hw * hw * len(CHANNELS):>8}")
             del Xh
 
     # ---- 1b. per-channel curves ----
@@ -230,14 +258,16 @@ def main():
             Xh = resample_stack(Xb, hw)
             cells = []
             for ci in range(len(CHANNELS)):
-                vals = [pixel_ceiling_map(Xh[:, ci:ci + 1], y, wells, classes, s) for s in range(args.splits)]
+                vals = [pixel_ceiling_map(Xh[:, ci : ci + 1], y, wells, classes, s) for s in range(args.splits)]
                 cells.append(mean_se(vals)[0])
             print(f"{hw:>5}  " + "".join(f"{_fmt(v, 3):>9}" for v in cells))
             del Xh
 
     if args.ceiling_only:
-        print("\n(--ceiling_only: no training run. The break in the curve above is a hard FLOOR -- no hw "
-              "below it can be right for any architecture. Re-run without the flag for the trained grid.)")
+        print(
+            "\n(--ceiling_only: no training run. The break in the curve above is a hard FLOOR -- no hw "
+            "below it can be right for any architecture. Re-run without the flag for the trained grid.)"
+        )
         print("=" * 100)
         return
 
@@ -251,17 +281,25 @@ def main():
             maps, accs, secs = [], [], []
             for s in range(args.splits):
                 try:
-                    mv, av, dt = trained_map(args, Xh, y, wells, classes, s, depth,
-                                             device, router, tzmu, enabled_sg)
+                    mv, av, dt = trained_map(args, Xh, y, wells, classes, s, depth, device, router, tzmu, enabled_sg)
                 except Exception as e:
                     print(f"{hw:>5} {depth:>6}  ERROR -- {type(e).__name__}: {str(e)[:45]}")
                     mv, av, dt = float("nan"), float("nan"), 0.0
-                maps.append(mv); accs.append(av); secs.append(dt)
+                maps.append(mv)
+                accs.append(av)
+                secs.append(dt)
             m, se, n = mean_se(maps)
-            grid[(hw, depth)] = {"mean": m, "se": se, "n": n, "acc": mean_se(accs)[0],
-                                 "sec": float(np.mean(secs)) if secs else 0.0}
-            print(f"{hw:>5} {depth:>6}  {_fmt(m):>8} {_fmt(se, 4):>7}  {_fmt(mean_se(accs)[0], 3):>7}  "
-                  f"{np.mean(secs):>7.0f}")
+            grid[(hw, depth)] = {
+                "mean": m,
+                "se": se,
+                "n": n,
+                "acc": mean_se(accs)[0],
+                "sec": float(np.mean(secs)) if secs else 0.0,
+            }
+            print(
+                f"{hw:>5} {depth:>6}  {_fmt(m):>8} {_fmt(se, 4):>7}  {_fmt(mean_se(accs)[0], 3):>7}  "
+                f"{np.mean(secs):>7.0f}"
+            )
         del Xh
 
     # ---- 3. best depth per hw, then the 1-SE knee ----
@@ -276,8 +314,10 @@ def main():
         bd, cell = max(cells, key=lambda t: t[1]["mean"])
         rows.append({"hw": hw, "depth": bd, "mean": cell["mean"], "se": cell["se"], "sec": cell["sec"]})
         cm = ceiling.get(hw, (None, None))[0]
-        print(f"{hw:>5}  {bd:>10}  {_fmt(cell['mean']):>8} {_fmt(cell['se'], 4):>7}  {_fmt(cm, 3):>8}  "
-              f"{cell['sec']:>7.0f}")
+        print(
+            f"{hw:>5}  {bd:>10}  {_fmt(cell['mean']):>8} {_fmt(cell['se'], 4):>7}  {_fmt(cm, 3):>8}  "
+            f"{cell['sec']:>7.0f}"
+        )
 
     chosen, best_hw, thr = pick_knee(rows)
     print("\n" + "=" * 100)
@@ -287,19 +327,27 @@ def main():
         return
     best = next(r for r in rows if r["hw"] == best_hw)
     pick = next(r for r in rows if r["hw"] == chosen)
-    print(f"BEST cell        : hw={best_hw} depth={best['depth']}  mAP={best['mean']:.4f} "
-          f"(+-{_fmt(best['se'], 4).strip()} SE)")
+    print(
+        f"BEST cell        : hw={best_hw} depth={best['depth']}  mAP={best['mean']:.4f} "
+        f"(+-{_fmt(best['se'], 4).strip()} SE)"
+    )
     print(f"1-SE threshold   : {thr:.4f}")
-    print(f"RECOMMENDED --hw : {chosen}  (depth {pick['depth']}, mAP={pick['mean']:.4f}, "
-          f"{pick['sec']:.0f}s/fit)  <- smallest hw within 1 SE of best")
+    print(
+        f"RECOMMENDED --hw : {chosen}  (depth {pick['depth']}, mAP={pick['mean']:.4f}, "
+        f"{pick['sec']:.0f}s/fit)  <- smallest hw within 1 SE of best"
+    )
     if chosen != best_hw and best["sec"] > 0:
-        print(f"                   {best['sec']/max(pick['sec'],1e-9):.1f}x cheaper than the best cell for "
-              f"a difference inside the noise")
+        print(
+            f"                   {best['sec'] / max(pick['sec'], 1e-9):.1f}x cheaper than the best cell for "
+            f"a difference inside the noise"
+        )
     print("current default  : hw=48 in run_cellpainting_validation.py")
     if args.splits < 3:
         print("CAUTION: --splits < 3, so the SE is not meaningful; the knee is not trustworthy here.")
-    print("Before changing the default, confirm on a DIFFERENT --classes set and --per_class "
-          "(a resolution tuned to one gene set need not transfer), and with --verify.")
+    print(
+        "Before changing the default, confirm on a DIFFERENT --classes set and --per_class "
+        "(a resolution tuned to one gene set need not transfer), and with --verify."
+    )
     print("=" * 100)
 
     # ---- 4. optional direct-build verification of the chosen hw ----
@@ -313,13 +361,16 @@ def main():
             return
         dvals = [pixel_ceiling_map(Xd, yd, wd, cd, s) for s in range(args.splits)]
         rvals = [pixel_ceiling_map(resample_stack(Xb, hw), y, wells, classes, s) for s in range(args.splits)]
-        dm, dse, _ = mean_se(dvals); rm, rse, _ = mean_se(rvals)
+        dm, dse, _ = mean_se(dvals)
+        rm, rse, _ = mean_se(rvals)
         print(f"  direct  ceiling mAP = {_fmt(dm)} +- {_fmt(dse, 4).strip()}")
         print(f"  derived ceiling mAP = {_fmt(rm)} +- {_fmt(rse, 4).strip()}")
         gap = abs(dm - rm)
         tol = 2 * max(dse if not np.isnan(dse) else 0.0, rse if not np.isnan(rse) else 0.0)
-        print(f"  |gap| = {gap:.4f}  vs 2*SE = {tol:.4f}  -> "
-              f"{'consistent (two-stage resampling did not bias the choice)' if gap <= tol else 'DIVERGENT -- re-run the trained grid on direct builds before shipping'}")
+        print(
+            f"  |gap| = {gap:.4f}  vs 2*SE = {tol:.4f}  -> "
+            f"{'consistent (two-stage resampling did not bias the choice)' if gap <= tol else 'DIVERGENT -- re-run the trained grid on direct builds before shipping'}"
+        )
         print("=" * 100)
 
 

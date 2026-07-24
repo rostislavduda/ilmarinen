@@ -79,6 +79,7 @@ module records that, and `assert_temperature_consistency` checks each beta sits 
 raises if code has accidentally coupled them.
 --------------------------------------------------------------------------------------------------------------
 """
+
 from __future__ import annotations
 
 import math
@@ -155,26 +156,38 @@ def assert_temperature_consistency(n, gibbs_beta, *, contract_beta=1.0, tol=1e-9
 
     # Level C: unit-fixed to 1 (nats vs nats).
     if abs(float(contract_beta) - 1.0) > tol:
-        issues.append(f"beta_C = {contract_beta} != 1: the contract posterior is nats-vs-nats, so its inverse "
-                      f"temperature must be exactly 1 (mu_c tempers the prior but does not move beta_C).")
+        issues.append(
+            f"beta_C = {contract_beta} != 1: the contract posterior is nats-vs-nats, so its inverse "
+            f"temperature must be exactly 1 (mu_c tempers the prior but does not move beta_C)."
+        )
 
     # Level A: a free positive knob -- but must be finite/positive, and must NOT have been coupled to beta_W.
     ga = float(gibbs_beta)
     if not math.isfinite(ga) or ga <= 0:
         issues.append(f"beta_A = gibbs_beta = {gibbs_beta} is not a positive finite number.")
     elif abs(ga - beta_W) <= max(tol, 1e-6):
-        issues.append(f"beta_A == beta_W (= 1/log n = {beta_W:.4f}): this is the coupling error the D2 check "
-                      f"guards against. The primitive-readout temperature and the WBIC weight temperature are "
-                      f"different kinds of quantity on different spaces (a dimensionless fit metric on the "
-                      f"simplex vs n*L nats on weight space); equating them collapses the primitive readout to "
-                      f"~uniform. Set gibbs_beta on its own scale (default 8.0 or elbow-calibrated).")
+        issues.append(
+            f"beta_A == beta_W (= 1/log n = {beta_W:.4f}): this is the coupling error the D2 check "
+            f"guards against. The primitive-readout temperature and the WBIC weight temperature are "
+            f"different kinds of quantity on different spaces (a dimensionless fit metric on the "
+            f"simplex vs n*L nats on weight space); equating them collapses the primitive readout to "
+            f"~uniform. Set gibbs_beta on its own scale (default 8.0 or elbow-calibrated)."
+        )
 
     ok = not issues
-    result = {"ok": ok, "beta_W": beta_W, "beta_A": ga, "beta_C": float(contract_beta), "issues": issues,
-              "note": ("One free-energy form F = <rho,E> - (1/beta)H at three levels (weights/primitives/"
-                       "contracts). beta_W=1/log n is theory-fixed (WBIC->RLCT), beta_C=1 is unit-fixed "
-                       "(nats:nats), beta_A=gibbs_beta is a free readout-sharpness knob. They are deliberately "
-                       "DECOUPLED; do not equate them.")}
+    result = {
+        "ok": ok,
+        "beta_W": beta_W,
+        "beta_A": ga,
+        "beta_C": float(contract_beta),
+        "issues": issues,
+        "note": (
+            "One free-energy form F = <rho,E> - (1/beta)H at three levels (weights/primitives/"
+            "contracts). beta_W=1/log n is theory-fixed (WBIC->RLCT), beta_C=1 is unit-fixed "
+            "(nats:nats), beta_A=gibbs_beta is a free readout-sharpness knob. They are deliberately "
+            "DECOUPLED; do not equate them."
+        ),
+    }
     if not ok and raise_on_fail:
         raise ValueError("temperature consistency check failed: " + " | ".join(issues))
     return result

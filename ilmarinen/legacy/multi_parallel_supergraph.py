@@ -26,6 +26,7 @@ Design invariants (carried from the validated parallel + recurrent supergraphs):
 - Per-layer N-way alpha; deep-supervision option so early layers get a bare field.
 - Peak-alpha tracking (the honest selection signal on moderate-margin tasks).
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -67,7 +68,7 @@ class _SpectralCore(nn.Module):
 
     def forward(self, x):  # x: (b, n_in)
         Xf = torch.fft.rfft(x, dim=1)
-        power = Xf.real ** 2 + Xf.imag ** 2
+        power = Xf.real**2 + Xf.imag**2
         return torch.tanh(self.proj(torch.log1p(power)))
 
 
@@ -106,13 +107,13 @@ class _AttentionCore(nn.Module):
         b = x.shape[0]
         if self.pad:
             x = torch.cat([x, x.new_zeros(b, self.pad)], dim=1)
-        tok = x.view(b, self.n_tok, self.d_tok)          # (b, n_tok, d_tok)
-        e = torch.tanh(self.embed(tok))                  # (b, n_tok, d_model)
-        q, k, v = self.Wq(e), self.Wk(e), self.Wv(e)     # (b, n_tok, d_model)
-        scores = torch.matmul(q, k.transpose(1, 2)) / (self.d_model ** 0.5)
-        attn = torch.softmax(scores, dim=-1)             # (b, n_tok, n_tok) data-dependent
-        ctx = torch.matmul(attn, v)                      # (b, n_tok, d_model)
-        pooled = ctx.mean(dim=1)                         # (b, d_model) permutation-invariant
+        tok = x.view(b, self.n_tok, self.d_tok)  # (b, n_tok, d_tok)
+        e = torch.tanh(self.embed(tok))  # (b, n_tok, d_model)
+        q, k, v = self.Wq(e), self.Wk(e), self.Wv(e)  # (b, n_tok, d_model)
+        scores = torch.matmul(q, k.transpose(1, 2)) / (self.d_model**0.5)
+        attn = torch.softmax(scores, dim=-1)  # (b, n_tok, n_tok) data-dependent
+        ctx = torch.matmul(attn, v)  # (b, n_tok, d_model)
+        pooled = ctx.mean(dim=1)  # (b, d_model) permutation-invariant
         return torch.tanh(self.proj(pooled))
 
 
@@ -166,8 +167,13 @@ class _NormCore(nn.Module):
         return torch.tanh(self.proj(self.ln(x)))
 
 
-_PARALLEL_CORES = {"conv": _ConvCore, "spectral": _SpectralCore,
-                   "attention": _AttentionCore, "dense": _DenseCore, "norm": _NormCore}
+_PARALLEL_CORES = {
+    "conv": _ConvCore,
+    "spectral": _SpectralCore,
+    "attention": _AttentionCore,
+    "dense": _DenseCore,
+    "norm": _NormCore,
+}
 
 
 class MultiCellPar(nn.Module):
@@ -184,8 +190,7 @@ class MultiCellPar(nn.Module):
                 cores.append(_PARALLEL_CORES[p](n_in, width))
         self.cores = nn.ModuleList(cores)
         self.alpha = nn.Parameter(torch.zeros(len(primitives)))
-        self.register_buffer("_alpha_peak", torch.full((len(primitives),),
-                                                       1.0 / len(primitives)))
+        self.register_buffer("_alpha_peak", torch.full((len(primitives),), 1.0 / len(primitives)))
 
     def outputs(self, h):
         """All primitives read the same (functionally composed) input h."""
@@ -213,8 +218,17 @@ class MultiParallelSuperGraph(nn.Module):
     N-way softmax over the primitives through a shared per-layer head.
     """
 
-    def __init__(self, depth, width, n_in=128, n_out=2, seed=0, deep_supervision=False,
-                 primitives=("conv", "spectral", "attention"), attn_tokens=16):
+    def __init__(
+        self,
+        depth,
+        width,
+        n_in=128,
+        n_out=2,
+        seed=0,
+        deep_supervision=False,
+        primitives=("conv", "spectral", "attention"),
+        attn_tokens=16,
+    ):
         super().__init__()
         if depth < 1:
             raise ValueError("depth must be >= 1")

@@ -16,6 +16,7 @@ Run from the repository root:
 
     python -m examples.streaming_operator
 """
+
 from __future__ import annotations
 
 import tempfile
@@ -47,7 +48,8 @@ def main():
 
     with tempfile.TemporaryDirectory() as d:
         pa, pu = Path(d) / "a.npy", Path(d) / "u.npy"
-        np.save(pa, a); np.save(pu, u)
+        np.save(pa, a)
+        np.save(pu, u)
         mb = (pa.stat().st_size + pu.stat().st_size) / 1e6
         print(f"wrote input fields {a.shape} and target fields {u.shape} to disk ({mb:.1f} MB)")
 
@@ -61,7 +63,10 @@ def main():
         source = MemmapOperatorSource(str(pa), str(pu))
         mg_stream = AllGraph(**cfg)
         r_stream = mg_stream.fit(
-            AllData.functions_stream(source), task="regression", n_out=1, stream=True,
+            AllData.functions_stream(source),
+            task="regression",
+            n_out=1,
+            stream=True,
         )
 
     print()

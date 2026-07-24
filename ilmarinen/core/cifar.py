@@ -8,21 +8,22 @@ Because loading all 60k JPGs is slow, this loads a requested subset directly
 from disk rather than caching the full set -- the schema test needs only
 a few thousand images.
 """
+
 from __future__ import annotations
 
 import os
 
 import numpy as np
 
-CIFAR_CLASSES = ["airplane", "automobile", "bird", "cat", "deer",
-                 "dog", "frog", "horse", "ship", "truck"]
+CIFAR_CLASSES = ["airplane", "automobile", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck"]
 
 
 def _load_image(path):
     """Load a 32x32 RGB JPG to a (3, 32, 32) float array via skimage."""
     from skimage.io import imread
-    img = imread(path)                       # (32, 32, 3) uint8
-    if img.ndim == 2:                        # grayscale safety
+
+    img = imread(path)  # (32, 32, 3) uint8
+    if img.ndim == 2:  # grayscale safety
         img = np.stack([img] * 3, axis=-1)
     return img.transpose(2, 0, 1).astype(np.float32) / 255.0
 
@@ -41,6 +42,7 @@ class CIFAR10:
     def __init__(self, root: str | None = None):
         if root is None:
             from .paths import cache_path
+
             root = cache_path("CIFAR-10-images-master")
         self.root = root
         if not os.path.isdir(os.path.join(root, "train")):

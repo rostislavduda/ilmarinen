@@ -36,6 +36,7 @@ clean-solo scores that robust_select already computes.
 This module leaves DARTS and every validated schema UNTOUCHED; it is a separate, principled
 selector that reads clean-solo energies and returns the derived Gibbs-alpha.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -51,7 +52,7 @@ def gibbs_alpha(energies, beta):
     """
     Psi = np.asarray(energies, float)
     z = -beta * Psi
-    z -= z.max()                       # stable softmax
+    z -= z.max()  # stable softmax
     w = np.exp(z)
     return w / w.sum()
 
@@ -65,8 +66,8 @@ def replicator_flow(energies, beta, dt=0.01, steps=20000, alpha0=None, tol=1e-12
     n = len(Psi)
     alpha = np.ones(n) / n if alpha0 is None else np.asarray(alpha0, float).copy()
     for _ in range(steps):
-        grad = Psi + (1.0 / beta) * (np.log(np.clip(alpha, tol, None)) + 1.0)   # grad_alpha F_alpha
-        J = np.diag(alpha) - np.outer(alpha, alpha)                              # Fisher-Rao map
+        grad = Psi + (1.0 / beta) * (np.log(np.clip(alpha, tol, None)) + 1.0)  # grad_alpha F_alpha
+        J = np.diag(alpha) - np.outer(alpha, alpha)  # Fisher-Rao map
         alpha = alpha - dt * (J @ grad)
         alpha = np.clip(alpha, tol, None)
         alpha /= alpha.sum()
@@ -104,10 +105,14 @@ def gibbs_alpha_select(build_and_train_solo, primitives, beta=8.0, return_flow=F
     Psi = np.array([-scores[p] for p in prims], float)
     a = gibbs_alpha(Psi, beta)
     alpha = {p: float(a[i]) for i, p in enumerate(prims)}
-    best = prims[int(np.argmin(Psi))]                    # == argmax score == argmax Gibbs prob
-    out = {"best": best, "alpha": alpha,
-           "energies": {p: float(Psi[i]) for i, p in enumerate(prims)},
-           "scores": scores, "beta": beta}
+    best = prims[int(np.argmin(Psi))]  # == argmax score == argmax Gibbs prob
+    out = {
+        "best": best,
+        "alpha": alpha,
+        "energies": {p: float(Psi[i]) for i, p in enumerate(prims)},
+        "scores": scores,
+        "beta": beta,
+    }
     if return_flow:
         af = replicator_flow(Psi, beta)
         out["flow_alpha"] = {p: float(af[i]) for i, p in enumerate(prims)}
@@ -141,7 +146,7 @@ def frontier_curve(energies, betas):
     Psi = np.asarray(energies, float)
     A = gibbs_frontier(Psi, betas)
     fit = A @ Psi
-    negH = np.array([(a * np.log(a + 1e-12)).sum() for a in A])   # = -H
+    negH = np.array([(a * np.log(a + 1e-12)).sum() for a in A])  # = -H
     return negH, fit
 
 

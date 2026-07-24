@@ -21,6 +21,7 @@ CRITICAL SPLIT DISCIPLINE (the subtlety this module enforces):
 Applies to any model exposing a `.block.alpha` (spatial) or per-cell `.alpha`
 (recurrent) parameter; the alpha params are detected by name.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -53,9 +54,9 @@ def _split_alpha_params(model):
     return alpha_params, w_params
 
 
-def bilevel_train(model, Xw, yw, Xa, ya, Xte, yte,
-                  epochs=12, lr_w=0.01, lr_a=0.02, bs=64,
-                  grad_clip=None, track_alpha=False):
+def bilevel_train(
+    model, Xw, yw, Xa, ya, Xte, yte, epochs=12, lr_w=0.01, lr_a=0.02, bs=64, grad_clip=None, track_alpha=False
+):
     """Bilevel training. Weights optimized on (Xw,yw); alpha on (Xa,ya).
 
     Xte/yte is the INDEPENDENT test set (disjoint from both training splits);
@@ -79,7 +80,7 @@ def bilevel_train(model, Xw, yw, Xa, ya, Xte, yte,
         a_ptr = 0
         for i in range(0, nw, bs):
             # (1) alpha step on the held-out alpha-split
-            a_bi = pa[a_ptr:a_ptr + bs]
+            a_bi = pa[a_ptr : a_ptr + bs]
             a_ptr = (a_ptr + bs) % max(na - bs, 1)
             if len(a_bi) > 0:
                 opt_a.zero_grad()
@@ -90,7 +91,7 @@ def bilevel_train(model, Xw, yw, Xa, ya, Xte, yte,
                         torch.nn.utils.clip_grad_norm_(alpha_params, grad_clip)
                     opt_a.step()
             # (2) weight step on the w-split
-            w_bi = pw[i:i + bs]
+            w_bi = pw[i : i + bs]
             opt_w.zero_grad()
             lw = lossf(model(Xw[w_bi]), yw[w_bi])
             if not torch.isfinite(lw):
@@ -107,8 +108,7 @@ def bilevel_train(model, Xw, yw, Xa, ya, Xte, yte,
     return test_acc, model.alpha_report(), train_acc
 
 
-def discretize_and_finetune(model, select_fn, Xw, yw, Xte, yte,
-                            epochs=8, lr=0.01, bs=64, grad_clip=None):
+def discretize_and_finetune(model, select_fn, Xw, yw, Xte, yte, epochs=8, lr=0.01, bs=64, grad_clip=None):
     """Terminal discretization: freeze alpha to the argmax primitive, fine-tune.
 
     select_fn(model) should hard-set each block's alpha to one-hot at its argmax
@@ -130,7 +130,7 @@ def discretize_and_finetune(model, select_fn, Xw, yw, Xte, yte,
     for _ in range(epochs):
         perm = torch.randperm(n)
         for i in range(0, n, bs):
-            bi = perm[i:i + bs]
+            bi = perm[i : i + bs]
             opt.zero_grad()
             loss = lossf(model(Xw[bi]), yw[bi])
             if not torch.isfinite(loss):

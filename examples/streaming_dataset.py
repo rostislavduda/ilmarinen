@@ -14,6 +14,7 @@ Run from the repository root:
 
     python -m examples.streaming_dataset
 """
+
 from __future__ import annotations
 
 import tempfile
@@ -44,7 +45,7 @@ def main():
 
     with tempfile.TemporaryDirectory() as d:
         path = Path(d) / "images.npy"
-        np.save(path, X)                                  # the "on-disk corpus"
+        np.save(path, X)  # the "on-disk corpus"
         size_mb = path.stat().st_size / 1e6
         print(f"wrote {X.shape} dataset to {path.name} ({size_mb:.1f} MB on disk)")
 
@@ -52,7 +53,8 @@ def main():
         mg_resident = AllGraph(**cfg)
         r_res = mg_resident.fit(
             AllData.dense_tensor(X, y, kind_hint="spatial"),
-            task="classification", n_out=2,
+            task="classification",
+            n_out=2,
         )
 
         # ---- STREAMING: the .npy is memmapped; only the minibatch in flight is ever resident ----
@@ -62,13 +64,16 @@ def main():
         mg_stream = AllGraph(**cfg)
         r_stream = mg_stream.fit(
             AllData.dense_stream(source, y=y, kind_hint="spatial"),
-            task="classification", n_out=2,
-            stream=True,                                  # optional: assert we really are streaming
+            task="classification",
+            n_out=2,
+            stream=True,  # optional: assert we really are streaming
         )
 
     print()
     print(f"resident : contract={r_res['contract']:8s} value={r_res['value']:.4f}  n_params={r_res['n_params']}")
-    print(f"streaming: contract={r_stream['contract']:8s} value={r_stream['value']:.4f}  n_params={r_stream['n_params']}")
+    print(
+        f"streaming: contract={r_stream['contract']:8s} value={r_stream['value']:.4f}  n_params={r_stream['n_params']}"
+    )
     print()
     identical = weights_identical(mg_resident.net, mg_stream.net)
     print(f"trained weights bit-identical (streaming == resident): {identical}")

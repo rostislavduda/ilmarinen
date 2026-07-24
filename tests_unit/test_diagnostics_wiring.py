@@ -21,8 +21,13 @@ import pytest
 from ilmarinen import AllData, AllGraph
 
 # every diagnostic key _attach_diagnostics can add, keyed by the flag that gates it
-_DIAG_KEYS = ("llc", "developmental_llc", "thermodynamic_potential",
-              "response_spectroscopy", "effective_dimension_ledger")
+_DIAG_KEYS = (
+    "llc",
+    "developmental_llc",
+    "thermodynamic_potential",
+    "response_spectroscopy",
+    "effective_dimension_ledger",
+)
 
 
 def _tabular(n=80, d=8, seed=0):
@@ -94,7 +99,7 @@ def _equivariant_regression(n=40, m=5, seed=0):
         nf.append(np.ones((m, 1), np.float32))
         ed.append(np.array([(i, (i + 1) % m) for i in range(m)], np.int64).T)
         po.append(P)
-        y.append(float((P ** 2).sum()))
+        y.append(float((P**2).sum()))
     y = np.array(y, np.float32)
     y = (y - y.mean()) / (y.std() + 1e-8)
     return AllData.graphs(nf, ed, y=y, positions=po)
@@ -111,8 +116,16 @@ class TestDiagnosticReportBodies:
     @pytest.fixture(scope="class")
     def dense_fit(self):
         # short developmental trajectory/checkpoints so _developmental_report is fast; harmless to _llc_report
-        mg = AllGraph(width=8, depth=1, epochs=5, device="cpu", verbose=False, seed=0,
-                      developmental_llc_epochs=8, developmental_llc_checkpoints=[2, 4, 8])
+        mg = AllGraph(
+            width=8,
+            depth=1,
+            epochs=5,
+            device="cpu",
+            verbose=False,
+            seed=0,
+            developmental_llc_epochs=8,
+            developmental_llc_checkpoints=[2, 4, 8],
+        )
         data = _tabular()
         mg.fit(data, task="classification", n_out=2)
         return mg, data
@@ -147,7 +160,6 @@ class TestDiagnosticReportBodies:
         assert mg.contract == "equivariant"
         probe = res.get("equivariance_breaking")
         assert isinstance(probe, dict)
-        for k in ("breaking_signal", "symmetry_broken", "resid_explained_invariant",
-                  "resid_explained_noninvariant"):
+        for k in ("breaking_signal", "symmetry_broken", "resid_explained_invariant", "resid_explained_noninvariant"):
             assert k in probe, f"missing probe key {k!r}"
         assert isinstance(probe["symmetry_broken"], bool)

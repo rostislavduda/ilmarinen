@@ -31,6 +31,7 @@ interpretable spec -- mu is automated. The irreducible residue is only WHICH obj
 which is genuinely a preference, not derivable from data. So mu is not a fundamental limitation; it is a
 preference that standard 1-D determinations resolve once made concrete.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -43,13 +44,13 @@ def select_mu_for_budget(fit_fn, budget, mu_lo=1e-4, mu_hi=10.0, iters=12):
     lo, hi = mu_lo, mu_hi
     best = None
     for _ in range(iters):
-        mu = np.sqrt(lo * hi)                      # geometric bisection (mu spans orders of magnitude)
+        mu = np.sqrt(lo * hi)  # geometric bisection (mu spans orders of magnitude)
         acc, omega = fit_fn(mu)
         best = (mu, acc, omega)
         if omega > budget:
-            lo = mu                                # over budget -> need higher price
+            lo = mu  # over budget -> need higher price
         else:
-            hi = mu                                # within budget -> can afford lower price
+            hi = mu  # within budget -> can afford lower price
     return best
 
 

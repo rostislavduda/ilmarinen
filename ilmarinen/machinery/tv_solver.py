@@ -28,6 +28,7 @@ exact and cheap for the modest number of selected atoms. Atom SELECTION still
 uses the Frank-Wolfe correlation oracle (that part was already correct); only
 the amplitude fit changes from OLS to L1.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -43,15 +44,15 @@ def lasso_coordinate_descent(Phi, y, lam1, iters=500, tol=1e-8):
     """Solve  min_a 1/2||Phi a - y||^2 + lam1 ||a||_1  by coordinate descent."""
     n, K = Phi.shape
     a = np.zeros(K)
-    col_sq = (Phi ** 2).sum(0) + 1e-12
+    col_sq = (Phi**2).sum(0) + 1e-12
     r = y - Phi @ a
     for _ in range(iters):
         a_old = a.copy()
         for k in range(K):
-            r = r + Phi[:, k] * a[k]                 # remove atom k
+            r = r + Phi[:, k] * a[k]  # remove atom k
             rho_k = Phi[:, k] @ r
             a[k] = _soft_threshold(rho_k, lam1) / col_sq[k]
-            r = r - Phi[:, k] * a[k]                 # re-add atom k
+            r = r - Phi[:, k] * a[k]  # re-add atom k
         if np.max(np.abs(a - a_old)) < tol:
             break
     return a
@@ -59,14 +60,14 @@ def lasso_coordinate_descent(Phi, y, lam1, iters=500, tol=1e-8):
 
 @dataclass
 class TVResult:
-    K_selected: int                  # atoms selected by Frank-Wolfe
-    K_active: int                    # atoms with nonzero amplitude after L1 (the true support)
-    lam1: float                      # L1 penalty on amplitudes
+    K_selected: int  # atoms selected by Frank-Wolfe
+    K_active: int  # atoms with nonzero amplitude after L1 (the true support)
+    lam1: float  # L1 penalty on amplitudes
     train_acc: float
     test_acc: float
-    neurons: list = field(default_factory=list)      # (w, b) for all selected atoms
-    amplitudes: np.ndarray | None = None             # L1 amplitudes (some may be 0)
-    active_mask: np.ndarray | None = None            # which atoms are in the support
+    neurons: list = field(default_factory=list)  # (w, b) for all selected atoms
+    amplitudes: np.ndarray | None = None  # L1 amplitudes (some may be 0)
+    active_mask: np.ndarray | None = None  # which atoms are in the support
 
 
 def tv_faithful_solve(X, y, Xt, yt, lam1=1.0, n_select=80, n_candidates=400, seed=0):
@@ -87,7 +88,7 @@ def tv_faithful_solve(X, y, Xt, yt, lam1=1.0, n_select=80, n_candidates=400, see
     for _ in range(n_select):
         W = rng.standard_normal((d, n_candidates)) * (1.0 / np.sqrt(d))
         idx = rng.integers(0, n, n_candidates // 2)
-        W[:, :n_candidates // 2] = (X[idx].T / (np.linalg.norm(X[idx], axis=1) + 1e-6))
+        W[:, : n_candidates // 2] = X[idx].T / (np.linalg.norm(X[idx], axis=1) + 1e-6)
         B = rng.standard_normal(n_candidates) * 0.5
         F = np.tanh(X @ W + B)
         Fc = F - F.mean(0, keepdims=True)

@@ -43,8 +43,21 @@ import numpy as np
 import torch
 
 
-def estimate_llc(model, loss_closure, n, *, chains=5, steps=400, burn=150, eps=3e-5, gamma=100.0,
-                 nbeta=None, device=None, seed=0, return_traces=False):
+def estimate_llc(
+    model,
+    loss_closure,
+    n,
+    *,
+    chains=5,
+    steps=400,
+    burn=150,
+    eps=3e-5,
+    gamma=100.0,
+    nbeta=None,
+    device=None,
+    seed=0,
+    return_traces=False,
+):
     """Estimate the Local Learning Coefficient (approx. RLCT) of a FITTED model at its current parameters.
 
     model         : an nn.Module whose current parameters are the fitted optimum w* (LLC is LOCAL to w*).
@@ -63,7 +76,8 @@ def estimate_llc(model, loss_closure, n, *, chains=5, steps=400, burn=150, eps=3
     """
     if device is None:
         device = next(model.parameters()).device
-    g = torch.Generator(device="cpu"); g.manual_seed(seed)
+    g = torch.Generator(device="cpu")
+    g.manual_seed(seed)
     beta = (1.0 / float(np.log(max(n, 3)))) if nbeta is None else float(nbeta) / n
 
     params = [p for p in model.parameters() if p.requires_grad]
@@ -120,10 +134,12 @@ def estimate_llc(model, loss_closure, n, *, chains=5, steps=400, burn=150, eps=3
         "beta": beta,
         "n": int(n),
         "valid": bool(valid),
-        "note": ("SGLD local learning coefficient (Lau et al.): lambda ~ RLCT <= k/2. ratio->0 signals a more "
-                 "singular (degenerate) solution; the free energy uses lambda*log n in place of (k/2)*log n. "
-                 "VALID ONLY at a converged local minimum -- a strongly negative lambda means w* is not "
-                 "converged (train the net longer), not a real complexity."),
+        "note": (
+            "SGLD local learning coefficient (Lau et al.): lambda ~ RLCT <= k/2. ratio->0 signals a more "
+            "singular (degenerate) solution; the free energy uses lambda*log n in place of (k/2)*log n. "
+            "VALID ONLY at a converged local minimum -- a strongly negative lambda means w* is not "
+            "converged (train the net longer), not a real complexity."
+        ),
     }
     if return_traces:
         out["traces"] = traces
@@ -138,8 +154,18 @@ def free_energy(L_star, lam, n):
     return float(n) * float(L_star) + float(lam) * float(np.log(max(n, 3)))
 
 
-def calibrate_llc(model, loss_closure, n, *, gammas=(1.0, 10.0, 100.0, 300.0), eps_list=(1e-5, 3e-5, 1e-4),
-                  chains=3, steps=300, burn=120, seed=0):
+def calibrate_llc(
+    model,
+    loss_closure,
+    n,
+    *,
+    gammas=(1.0, 10.0, 100.0, 300.0),
+    eps_list=(1e-5, 3e-5, 1e-4),
+    chains=3,
+    steps=300,
+    burn=120,
+    seed=0,
+):
     """Sweep (gamma, eps) and report lambda_hat for each, to find the hyperparameter PLATEAU where the
     estimate is insensitive to the knobs (the standard LLC calibration -- Lau et al. look for the range where
     lambda_hat is flat in eps). Returns a list of {gamma, eps, lambda, lambda_std}; pick a (gamma, eps) in
@@ -147,7 +173,6 @@ def calibrate_llc(model, loss_closure, n, *, gammas=(1.0, 10.0, 100.0, 300.0), e
     rows = []
     for gm in gammas:
         for ep in eps_list:
-            r = estimate_llc(model, loss_closure, n, chains=chains, steps=steps, burn=burn,
-                             eps=ep, gamma=gm, seed=seed)
+            r = estimate_llc(model, loss_closure, n, chains=chains, steps=steps, burn=burn, eps=ep, gamma=gm, seed=seed)
             rows.append({"gamma": gm, "eps": ep, "lambda": r["lambda"], "lambda_std": r["lambda_std"]})
     return rows

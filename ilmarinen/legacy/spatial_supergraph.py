@@ -23,6 +23,7 @@ on a REDUCED spatial resolution after an initial shared stem (a fixed conv+pool
 that both primitives sit on top of), keeping the dense primitive tractable while
 preserving the conv-vs-dense contrast at the mixing layer.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -113,7 +114,8 @@ class SpatialSuperGraph(nn.Module):
         stem_stride = 32 // hw
         self.stem = nn.Sequential(
             nn.Conv2d(3, width, kernel_size=3, stride=stem_stride, padding=1),
-            nn.BatchNorm2d(width), nn.ReLU(),
+            nn.BatchNorm2d(width),
+            nn.ReLU(),
         )
         for m in self.stem:
             if isinstance(m, nn.Conv2d):
@@ -125,11 +127,11 @@ class SpatialSuperGraph(nn.Module):
     def forward(self, x):
         x = self.stem(x)
         x = self.block(x)
-        x = x.mean(dim=(2, 3))            # global average pool
+        x = x.mean(dim=(2, 3))  # global average pool
         return self.head(x)
 
     def alpha_report(self):
-        return [self.block.alpha_weights()]     # [conv_weight, dense_weight]
+        return [self.block.alpha_weights()]  # [conv_weight, dense_weight]
 
     def first_last_weight(self):
         return self.block.conv.conv.weight, self.head.weight

@@ -40,6 +40,7 @@ toward the others where it is not (e.g. permuted voxels, where translation equiv
 All prior modules are left UNTOUCHED; this is a new capability in a new module, mirroring
 spatial_schema.py one tensor rank higher.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -69,6 +70,7 @@ class _Conv3dVolumetric(nn.Module):
     """3x3x3 convolution, same padding: weight-sharing under the 3D translation group. kernel_size is
     parameterized so larger-receptive-field variants (k5) can subclass this, mirroring the 2D spatial
     schema's conv2d_k5/k7; padding is kept 'same' as kernel_size//2."""
+
     name = "conv3d"
 
     def __init__(self, cin, width, dhw, kernel_size=3):
@@ -83,6 +85,7 @@ class _Conv3dVolumetric(nn.Module):
 class _Conv3dK5(_Conv3dVolumetric):
     """5x5x5 conv variant -- larger 3D receptive field for volumetric data with longer spatial correlation
     length (the 3D analogue of conv2d_k5). Lets kernel_from_xi extend to the volumetric contract."""
+
     name = "conv3d_k5"
 
     def __init__(self, cin, width, dhw):
@@ -93,13 +96,15 @@ class _ConvDWVolumetric(nn.Module):
     """Depthwise 3x3x3 + pointwise 1x1x1 (separable 3D conv): a cheaper conv variant.
     Depthwise operates per-channel, so we first lift to `width` with a 1x1x1, then depthwise-mix
     spatially. Far fewer params than full 3D conv at large width (3D kernels are k^3)."""
+
     name = "conv_dw"
 
     def __init__(self, cin, width, dhw):
         super().__init__()
-        self.lift = nn.Conv3d(cin, width, kernel_size=1)                              # pointwise lift
-        self.dw = nn.Conv3d(width, width, kernel_size=3, padding=1, groups=width)     # depthwise
-        _init_conv3d(self.lift); _init_conv3d(self.dw)
+        self.lift = nn.Conv3d(cin, width, kernel_size=1)  # pointwise lift
+        self.dw = nn.Conv3d(width, width, kernel_size=3, padding=1, groups=width)  # depthwise
+        _init_conv3d(self.lift)
+        _init_conv3d(self.dw)
 
     def forward_volumetric(self, x):
         return self.dw(self.lift(x))
@@ -108,6 +113,7 @@ class _ConvDWVolumetric(nn.Module):
 class _PointwiseVolumetric(nn.Module):
     """1x1x1 convolution: per-voxel channel mixing, NO spatial weight-sharing across a
     neighborhood -- the 'affine + pointwise' primitive with no 3D receptive field."""
+
     name = "pointwise"
 
     def __init__(self, cin, width, dhw):
@@ -123,6 +129,7 @@ class _DenseVolumetric(nn.Module):
     """Flatten + linear + reshape: unconstrained affine over the whole volume -- the
     no-inductive-bias baseline that convolution should beat on genuine volumetric data.
     Note: at a D*H*W volume this is very large; kept small by the stem's downsampling."""
+
     name = "dense"
 
     def __init__(self, cin, width, dhw):
@@ -140,6 +147,7 @@ class _DenseVolumetric(nn.Module):
 
 class _NormVolumetric(nn.Module):
     """BatchNorm3d over channels + a 1x1x1 mix: the volumetric stabilizer (normalization)."""
+
     name = "norm"
 
     def __init__(self, cin, width, dhw):
@@ -157,6 +165,7 @@ class _AttentionVolumetric(nn.Module):
     Q,K,V are 1x1x1 projections; attention mixes voxels by softmax(QK^T/sqrt(d)). This is the
     routing primitive on a 3D grid (permutation-equivariant over voxel locations). Cost is
     O((DHW)^2) so it is only tractable on small/pooled volumes -- the stem downsamples for this."""
+
     name = "attention"
 
     def __init__(self, cin, width, dhw):
@@ -170,11 +179,11 @@ class _AttentionVolumetric(nn.Module):
 
     def forward_volumetric(self, x):
         b, _, D, H, W = x.shape
-        q = self.q(x).flatten(2).transpose(1, 2)      # (b, DHW, width)
+        q = self.q(x).flatten(2).transpose(1, 2)  # (b, DHW, width)
         k = self.k(x).flatten(2).transpose(1, 2)
         v = self.v(x).flatten(2).transpose(1, 2)
-        att = torch.softmax(q @ k.transpose(1, 2) / (self.width ** 0.5), dim=-1)
-        out = att @ v                                  # (b, DHW, width)
+        att = torch.softmax(q @ k.transpose(1, 2) / (self.width**0.5), dim=-1)
+        out = att @ v  # (b, DHW, width)
         return out.transpose(1, 2).reshape(b, self.width, D, H, W)
 
 
@@ -208,7 +217,7 @@ class _VolumetricCell(nn.Module):
         # weighted sum over primitives without stacking (avoids an extra full (P,b,w,D,H,W) copy of all P
         # primitives' volumes; sum_p w_p*out_p == the einsum over the stack). Matches the 4d/operator cells.
         w = torch.softmax(self.alpha, dim=0)
-        outs = [c.forward_volumetric(x) for c in self.cores]                      # P x (b,w,D,H,W)
+        outs = [c.forward_volumetric(x) for c in self.cores]  # P x (b,w,D,H,W)
         mixed = sum(wi * o for wi, o in zip(w, outs))
         return F.relu(self.bn(mixed))
 
@@ -227,9 +236,17 @@ class VolumetricSchema(nn.Module):
     the three spatial axes + a linear head produce the class logits.
     """
 
-    def __init__(self, width=16, dhw=8, depth=1, n_in=1, n_classes=10, seed=0,
-                 primitives=("conv3d", "conv_dw", "pointwise", "dense", "norm", "attention"),
-                 vol_size=16):
+    def __init__(
+        self,
+        width=16,
+        dhw=8,
+        depth=1,
+        n_in=1,
+        n_classes=10,
+        seed=0,
+        primitives=("conv3d", "conv_dw", "pointwise", "dense", "norm", "attention"),
+        vol_size=16,
+    ):
         super().__init__()
         torch.manual_seed(seed)
         self.primitives = tuple(primitives)
@@ -237,14 +254,13 @@ class VolumetricSchema(nn.Module):
         stem_stride = max(1, vol_size // dhw)
         self.stem = nn.Sequential(
             nn.Conv3d(n_in, width, kernel_size=3, stride=stem_stride, padding=1),
-            nn.BatchNorm3d(width), nn.ReLU(),
+            nn.BatchNorm3d(width),
+            nn.ReLU(),
         )
         for m in self.stem:
             if isinstance(m, nn.Conv3d):
                 _init_conv3d(m)
-        self.cells = nn.ModuleList([
-            _VolumetricCell(width, width, dhw, self.primitives) for _ in range(depth)
-        ])
+        self.cells = nn.ModuleList([_VolumetricCell(width, width, dhw, self.primitives) for _ in range(depth)])
         self.head = nn.Linear(width, n_classes)
         _init_lin(self.head, 1.0)
 
@@ -252,7 +268,7 @@ class VolumetricSchema(nn.Module):
         x = self.stem(x)
         for cell in self.cells:
             x = cell(x)
-        x = x.mean(dim=(2, 3, 4))            # global average pool over D,H,W
+        x = x.mean(dim=(2, 3, 4))  # global average pool over D,H,W
         return self.head(x)
 
     def update_peak(self):
@@ -266,16 +282,30 @@ class VolumetricSchema(nn.Module):
         return [c.alpha_peak.detach().cpu().numpy() for c in self.cells]
 
     def architecture(self):
-        return [self.primitives[int(np.argmax(c.alpha_peak.detach().cpu().numpy()))]
-                for c in self.cells]
+        return [self.primitives[int(np.argmax(c.alpha_peak.detach().cpu().numpy()))] for c in self.cells]
 
 
-def build_volumetric_schema(width=16, dhw=8, depth=1, n_in=1, n_out=None, seed=0,
-                                        primitives=("conv3d", "conv_dw", "pointwise", "dense",
-                                                    "norm", "attention"), vol_size=16, n_classes=None):
+def build_volumetric_schema(
+    width=16,
+    dhw=8,
+    depth=1,
+    n_in=1,
+    n_out=None,
+    seed=0,
+    primitives=("conv3d", "conv_dw", "pointwise", "dense", "norm", "attention"),
+    vol_size=16,
+    n_classes=None,
+):
     # canonical param is n_out; n_classes kept as backward-compatible alias
     if n_out is None:
         n_out = n_classes if n_classes is not None else 10
-    return VolumetricSchema(width=width, dhw=dhw, depth=depth, n_in=n_in,
-                                       n_classes=n_out, seed=seed, primitives=primitives,
-                                       vol_size=vol_size)
+    return VolumetricSchema(
+        width=width,
+        dhw=dhw,
+        depth=depth,
+        n_in=n_in,
+        n_classes=n_out,
+        seed=seed,
+        primitives=primitives,
+        vol_size=vol_size,
+    )

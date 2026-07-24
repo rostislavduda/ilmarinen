@@ -24,6 +24,7 @@ frontier builder + price_selection selectors (select_mu_by_elbow / select_by_tol
 select_mu_for_budget) choose mu by the SAME rules as width/depth. Torch-friendly (accepts a tensor and
 returns a differentiable scalar) and numpy-friendly (for the frontier/analysis paths).
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -52,6 +53,7 @@ def sparsity_price(alpha_tensor):
     weights (per cell); for a multi-cell net sum this over cells. Rewarding concentration (minimizing
     -sum a^2) pushes each cell toward few primitives, keeping a mixture only where it pays."""
     import torch  # local import so the module is usable without torch for the numpy paths
+
     a = alpha_tensor
     if not torch.is_tensor(a):
         a = torch.as_tensor(np.asarray(a), dtype=torch.float32)
@@ -96,6 +98,7 @@ def select_sparsity_by_elbow(fit_at_mu, mus):
     -- the effective-#-primitives at which extra branches stop paying (the deployment analogue of the
     width/depth elbow). Returns (chosen_entry, frontier)."""
     from .price_selection import select_mu_by_elbow
+
     frontier = sparsity_frontier(fit_at_mu, mus)
     return select_mu_by_elbow(frontier), frontier
 

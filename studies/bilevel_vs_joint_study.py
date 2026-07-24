@@ -29,7 +29,10 @@ Two parts:
 
 Run: python studies/bilevel_vs_joint_study.py
 """
-import warnings; warnings.filterwarnings("ignore")
+
+import warnings
+
+warnings.filterwarnings("ignore")
 import sys
 
 import numpy as np
@@ -66,7 +69,7 @@ def _train(model, Xtr, ytr, Xte, yte, mode, epochs=35, lr=0.01, bs=16, seed=0):
         pw, pa = torch.randperm(nw), torch.randperm(na)
         q = 0
         for i in range(0, nw, bs):
-            a_bi = pa[q:q + bs]
+            a_bi = pa[q : q + bs]
             q = (q + bs) % max(na - bs, 1)
             if len(a_bi) > 0:
                 oa.zero_grad()
@@ -75,7 +78,7 @@ def _train(model, Xtr, ytr, Xte, yte, mode, epochs=35, lr=0.01, bs=16, seed=0):
                     la.backward()
                     torch.nn.utils.clip_grad_norm_(ap, 5.0)
                     oa.step()
-            w_bi = pw[i:i + bs]
+            w_bi = pw[i : i + bs]
             ow.zero_grad()
             lw = lf(model(Xw_t[w_bi]), yw_t[w_bi])
             if torch.isfinite(lw):
@@ -95,16 +98,20 @@ def _compare(Xtr, ytr, Xte, yte, n_out, n_seeds=8, width=24, readout="flatten", 
     for mode in ("joint", "bilevel"):
         alphas, tes, trs, sels = [], [], [], []
         for seed in range(n_seeds):
-            m = Schema(depth=1, width=width, n_in=Xtr.shape[2], n_out=n_out,
-                                  seed=seed, primitives=PRIMS, readout=readout)
+            m = Schema(
+                depth=1, width=width, n_in=Xtr.shape[2], n_out=n_out, seed=seed, primitives=PRIMS, readout=readout
+            )
             te, tr, a = _train(m, Xtr, ytr, Xte, yte, mode, epochs=epochs, seed=seed)
-            alphas.append(a); tes.append(te); trs.append(tr)
+            alphas.append(a)
+            tes.append(te)
+            trs.append(tr)
             sels.append(PRIMS[int(np.argmax(a))])
         A = np.array(alphas)
         out[mode] = dict(
             mean_alpha=A.mean(0),
             sel_hist={p: sels.count(p) for p in PRIMS if sels.count(p) > 0},
-            te_mean=float(np.mean(tes)), te_std=float(np.std(tes)),
+            te_mean=float(np.mean(tes)),
+            te_std=float(np.std(tes)),
             tr_mean=float(np.mean(trs)),
         )
     return out
@@ -148,6 +155,7 @@ def controlled_capacity_trap(n_seeds=8):
 
 def _load_ucr(name, max_t=80):
     from aeon.datasets import load_classification
+
     Xtr, ytr = load_classification(name, split="train")
     Xte, yte = load_classification(name, split="test")
     Xtr = np.transpose(Xtr, (0, 2, 1)).astype(np.float32)

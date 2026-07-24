@@ -22,6 +22,7 @@ DESIGN (see also the class docstrings):
 This is DISTINCT from two other "stream" usages in the package: the recurrent per-timestep streaming API in
 ``models/schema.py`` (online sequence inference) and the URL download-streaming in ``core/data_sources.py``.
 """
+
 from __future__ import annotations
 
 import threading
@@ -70,7 +71,7 @@ class _LRUCache:
 
     def put(self, key, value, cost=1):
         if self._cap <= 0 or cost > self._cap:
-            return                                       # a single item larger than the whole budget is not stored
+            return  # a single item larger than the whole budget is not stored
         if self._lock is not None:
             with self._lock:
                 self._put(key, value, cost)
@@ -123,7 +124,7 @@ class DenseSource:
     _sample_shape: tuple = ()
     dtype = np.float32
 
-    def __len__(self):                                   # pragma: no cover - abstract
+    def __len__(self):  # pragma: no cover - abstract
         raise NotImplementedError
 
     @property
@@ -136,7 +137,7 @@ class DenseSource:
         """Rank of the full tensor (``1 + len(sample_shape)``), mirroring ``torch.Tensor.dim()``."""
         return 1 + len(self._sample_shape)
 
-    def get(self, ids):                                  # pragma: no cover - abstract
+    def get(self, ids):  # pragma: no cover - abstract
         raise NotImplementedError
 
 
@@ -173,7 +174,7 @@ class MemmapDenseSource(DenseSource):
         if isinstance(path_or_memmap, np.memmap):
             self._mm = path_or_memmap
         elif isinstance(path_or_memmap, np.ndarray):
-            self._mm = path_or_memmap                    # already an array-like; indexed lazily if it is a memmap
+            self._mm = path_or_memmap  # already an array-like; indexed lazily if it is a memmap
         else:
             self._mm = np.load(path_or_memmap, mmap_mode=mmap_mode)
         if self._mm.ndim < 1:
@@ -190,10 +191,10 @@ class MemmapDenseSource(DenseSource):
     def get(self, ids):
         idx = _as_id_array(ids)
         if self._cache._cap <= 0:
-            order = np.argsort(idx, kind="stable")       # ascending read order for memmap locality
+            order = np.argsort(idx, kind="stable")  # ascending read order for memmap locality
             gathered = np.asarray(self._mm[idx[order]])  # contiguous-ish read
             out = np.empty_like(gathered)
-            out[order] = gathered                        # unpermute: out[k] is the row for idx[k]
+            out[order] = gathered  # unpermute: out[k] is the row for idx[k]
             return torch.as_tensor(np.ascontiguousarray(out), dtype=torch.float32)
         # cached path: serve hits from the LRU, read only the missing ids from the memmap (sorted for locality)
         out = np.empty((len(idx),) + tuple(self._sample_shape), dtype=self.dtype)
@@ -210,8 +211,8 @@ class MemmapDenseSource(DenseSource):
             order = np.argsort(mids, kind="stable")
             gathered = np.asarray(self._mm[mids[order]])
             for j, k in enumerate(miss[order]):
-                row = np.array(gathered[j])              # COPY (not a view into `gathered`): a view would pin
-                out[k] = row                             # the whole minibatch buffer, blowing the cache budget
+                row = np.array(gathered[j])  # COPY (not a view into `gathered`): a view would pin
+                out[k] = row  # the whole minibatch buffer, blowing the cache budget
                 self._cache.put(int(idx[k]), row, cost=1)
         return torch.as_tensor(np.ascontiguousarray(out), dtype=torch.float32)
 
@@ -244,7 +245,8 @@ class _GridView(DenseSource):
                 f"streaming DenseSource presents rank-{sdim} samples but the rank-{rank} grid contract expects "
                 f"samples of rank {rank - 1} (grid only) or {rank} (channel + grid). Reshape the source so each "
                 f"sample is (C, *grid) or (*grid); flat-vector reshape-to-latent-lattice is not supported under "
-                f"streaming (pass a kind_hint and pre-shaped samples).")
+                f"streaming (pass a kind_hint and pre-shaped samples)."
+            )
         self.dtype = getattr(source, "dtype", np.float32)
 
     def __len__(self):
@@ -345,10 +347,10 @@ class GraphSource:
     has_edges: bool = False
     has_pos: bool = False
 
-    def __len__(self):                                   # pragma: no cover - abstract
+    def __len__(self):  # pragma: no cover - abstract
         raise NotImplementedError
 
-    def node(self, i):                                   # pragma: no cover - abstract
+    def node(self, i):  # pragma: no cover - abstract
         raise NotImplementedError
 
     def edge(self, i):
@@ -467,10 +469,10 @@ def _infer_operator_sdims(a_shape, u_shape, spatial_dims):
 def _default_operator_grid(a_shape, spatial_dims):
     """The default uniform [0,1]^d meshgrid (*grid, sdims), built with torch exactly as AllData.functions does,
     so a grid=None OperatorSource is bit-identical to the resident default grid."""
-    grid_shape = a_shape[1:1 + spatial_dims]
+    grid_shape = a_shape[1 : 1 + spatial_dims]
     axes = [torch.linspace(0.0, 1.0, int(s)) for s in grid_shape]
     mesh = torch.meshgrid(*axes, indexing="ij")
-    return torch.stack(mesh, dim=-1)                     # (*grid, sdims) torch float32
+    return torch.stack(mesh, dim=-1)  # (*grid, sdims) torch float32
 
 
 class OperatorSource:
@@ -489,16 +491,16 @@ class OperatorSource:
 
     spatial_dims: int = 1
     a_shape: tuple = ()
-    _grid_single = None                                  # (*grid, sdims) torch tensor, broadcast per batch
-    _grid_full = None                                    # (n, *grid, sdims) ndarray, indexed per batch
+    _grid_single = None  # (*grid, sdims) torch tensor, broadcast per batch
+    _grid_full = None  # (n, *grid, sdims) ndarray, indexed per batch
 
-    def __len__(self):                                   # pragma: no cover - abstract
+    def __len__(self):  # pragma: no cover - abstract
         raise NotImplementedError
 
-    def _a_raw(self, ids):                               # pragma: no cover - abstract
+    def _a_raw(self, ids):  # pragma: no cover - abstract
         raise NotImplementedError
 
-    def _u_raw(self, ids):                               # pragma: no cover - abstract
+    def _u_raw(self, ids):  # pragma: no cover - abstract
         raise NotImplementedError
 
     def _setup_grid(self, grid):
@@ -512,7 +514,8 @@ class OperatorSource:
             if g.shape[0] != self.a_shape[0]:
                 raise ValueError(
                     f"explicit operator grid must have shape (n, *grid, spatial_dims) with n={self.a_shape[0]}; "
-                    f"got leading dim {g.shape[0]}. Pass grid=None to broadcast one shared grid.")
+                    f"got leading dim {g.shape[0]}. Pass grid=None to broadcast one shared grid."
+                )
             self._grid_full = np.ascontiguousarray(g)
             self._grid_single = None
 
@@ -537,8 +540,9 @@ class InMemoryOperatorSource(OperatorSource):
         self._a = np.ascontiguousarray(a.detach().cpu().numpy() if isinstance(a, torch.Tensor) else np.asarray(a))
         self._u = np.ascontiguousarray(u.detach().cpu().numpy() if isinstance(u, torch.Tensor) else np.asarray(u))
         if self._a.shape[0] != self._u.shape[0]:
-            raise ValueError(f"a and u must have the same number of samples; got {self._a.shape[0]} and "
-                             f"{self._u.shape[0]}.")
+            raise ValueError(
+                f"a and u must have the same number of samples; got {self._a.shape[0]} and {self._u.shape[0]}."
+            )
         self.a_shape = self._a.shape
         self.spatial_dims = _infer_operator_sdims(self._a.shape, self._u.shape, spatial_dims)
         self._setup_grid(grid)
@@ -563,13 +567,15 @@ class MemmapOperatorSource(OperatorSource):
     arrays, same ids -> separate keys). Cached rows are byte-identical to a fresh read, so caching never changes
     a returned field; ``cache_threadsafe=True`` guards them for async prefetch (item 3)."""
 
-    def __init__(self, a_path, u_path, grid=None, spatial_dims=None, mmap_mode="r",
-                 cache_bytes=0, cache_threadsafe=False):
+    def __init__(
+        self, a_path, u_path, grid=None, spatial_dims=None, mmap_mode="r", cache_bytes=0, cache_threadsafe=False
+    ):
         self._a = a_path if isinstance(a_path, (np.ndarray, np.memmap)) else np.load(a_path, mmap_mode=mmap_mode)
         self._u = u_path if isinstance(u_path, (np.ndarray, np.memmap)) else np.load(u_path, mmap_mode=mmap_mode)
         if self._a.shape[0] != self._u.shape[0]:
-            raise ValueError(f"a and u must have the same number of samples; got {self._a.shape[0]} and "
-                             f"{self._u.shape[0]}.")
+            raise ValueError(
+                f"a and u must have the same number of samples; got {self._a.shape[0]} and {self._u.shape[0]}."
+            )
         self.a_shape = tuple(self._a.shape)
         self.spatial_dims = _infer_operator_sdims(tuple(self._a.shape), tuple(self._u.shape), spatial_dims)
         self._setup_grid(grid)
@@ -598,9 +604,9 @@ class MemmapOperatorSource(OperatorSource):
             order = np.argsort(mids, kind="stable")
             gathered = np.asarray(mm[mids[order]])
             for j, k in enumerate(miss[order]):
-                row = np.array(gathered[j])              # COPY (a view would pin the whole field minibatch buffer)
+                row = np.array(gathered[j])  # COPY (a view would pin the whole field minibatch buffer)
                 out[k] = row
-                cache.put(int(idx[k]), row, cost=int(row.nbytes))   # BYTE budget: fields are large
+                cache.put(int(idx[k]), row, cost=int(row.nbytes))  # BYTE budget: fields are large
         return out
 
     def _a_raw(self, ids):
@@ -619,8 +625,8 @@ class MemmapOperatorSource(OperatorSource):
 # scoped to the dense contract family.
 import hashlib  # noqa: E402 (kept next to its only user)
 
-_ITER_SHUFFLE_SEED = 47                                   # offset for the per-epoch windowed-shuffle RandomState
-_ITER_VAL_PERMILLE = 150                                  # ~15% of ids fall in the val bucket
+_ITER_SHUFFLE_SEED = 47  # offset for the per-epoch windowed-shuffle RandomState
+_ITER_VAL_PERMILLE = 150  # ~15% of ids fall in the val bucket
 
 
 def _iter_val_key(sample_id, seed):
@@ -655,7 +661,7 @@ class IterableDenseSource:
     def dim(self):
         return 1 + len(self._sample_shape)
 
-    def __iter__(self):                                  # pragma: no cover - abstract
+    def __iter__(self):  # pragma: no cover - abstract
         raise NotImplementedError
 
 
@@ -701,7 +707,7 @@ class _IterMetric:
             self._ss_res += float(((pred - y) ** 2).sum())
             yd = y.astype(np.float64)
             self._sum_y += float(yd.sum())
-            self._sum_y2 += float((yd ** 2).sum())
+            self._sum_y2 += float((yd**2).sum())
         self._n += int(len(y))
 
     def result(self):
@@ -711,5 +717,5 @@ class _IterMetric:
             return ("acc" if self.task == "classification" else "R2"), float("nan")
         if self.task == "classification":
             return "acc", float(self._correct / self._n)
-        ss_tot = self._sum_y2 - self._sum_y ** 2 / self._n
+        ss_tot = self._sum_y2 - self._sum_y**2 / self._n
         return "R2", float(1 - self._ss_res / (ss_tot + 1e-12))

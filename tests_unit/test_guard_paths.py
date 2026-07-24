@@ -50,8 +50,7 @@ def test_unknown_select_size_mode_raises():
     'sequential' / off -- but an arbitrary string is not.) This is the guard behind the select_size arg the
     two runners pass in different spellings."""
     with pytest.raises(ValueError, match="unknown select_size mode"):
-        AllGraph(width=8, depth=1, epochs=2, seed=0).fit(
-            _dense(), task="classification", n_out=2, select_size="bogus")
+        AllGraph(width=8, depth=1, epochs=2, seed=0).fit(_dense(), task="classification", n_out=2, select_size="bogus")
 
 
 def test_disabled_arena_with_no_representable_alternative_raises():
@@ -59,7 +58,8 @@ def test_disabled_arena_with_no_representable_alternative_raises():
     which needs edges, given edgeless dense data), the fallback resolver raises rather than guessing."""
     with pytest.raises(ValueError, match="no enabled contract"):
         AllGraph(width=8, depth=1, epochs=2, seed=0, enabled_contracts="graph").fit(
-            _dense(), task="classification", n_out=2)
+            _dense(), task="classification", n_out=2
+        )
 
 
 def test_operator_nan_input_raises():
@@ -70,8 +70,7 @@ def test_operator_nan_input_raises():
     y = a.copy()
     a[0, 0] = np.nan
     with pytest.raises(ValueError, match="NaN"):
-        AllGraph(width=8, depth=1, epochs=2, seed=0).fit(
-            AllData.functions(a, y), task="regression", n_out=1)
+        AllGraph(width=8, depth=1, epochs=2, seed=0).fit(AllData.functions(a, y), task="regression", n_out=1)
 
 
 # =========================================================================== fallback behaviour (smoke)
@@ -86,7 +85,7 @@ class TestArenaFallbacks:
         rng = np.random.RandomState(0)
         nf = [rng.randn(4, 3).astype(np.float32) for _ in range(30)]
         d = AllData.point_sets(nf, y=(np.arange(30) % 2).astype(np.int64))
-        d.kind_hint = "graph"                                          # force a relational route, no edges
+        d.kind_hint = "graph"  # force a relational route, no edges
         mg = AllGraph(width=8, depth=1, epochs=2, seed=0)
         mg.fit(d, task="classification", n_out=2)
         assert mg.contract == "set"

@@ -66,7 +66,8 @@ def test_operator_memmap_source_equivalent(tmp_path):
     """T-OSTREAM-3: a MemmapOperatorSource over real .npy field files is bit-identical to the resident fit."""
     a, u = _op_1d(n=48)
     pa, pu = tmp_path / "a.npy", tmp_path / "u.npy"
-    np.save(pa, a); np.save(pu, u)
+    np.save(pa, a)
+    np.save(pu, u)
     mg_r = AllGraph(width=8, depth=1, epochs=6, verbose=False, seed=0)
     r_r = mg_r.fit(AllData.functions(a, u), task="regression", n_out=1)
     mg_s = AllGraph(width=8, depth=1, epochs=6, verbose=False, seed=0)
@@ -78,7 +79,7 @@ def test_operator_memmap_source_equivalent(tmp_path):
 def test_operator_explicit_grid_equivalent():
     """T-OSTREAM-4: an explicit per-sample grid streams bit-identically (source indexes the same grid rows)."""
     a, u = _op_1d(n=40, grid=16)
-    x = np.linspace(0, 1, 16, dtype=np.float32)[None, :, None].repeat(40, 0)   # (n, grid, sdims=1)
+    x = np.linspace(0, 1, 16, dtype=np.float32)[None, :, None].repeat(40, 0)  # (n, grid, sdims=1)
     mg_r = AllGraph(width=8, depth=1, epochs=5, verbose=False, seed=0)
     r_r = mg_r.fit(AllData.functions(a, u, grid=x), task="regression", n_out=1)
     mg_s = AllGraph(width=8, depth=1, epochs=5, verbose=False, seed=0)
@@ -114,7 +115,9 @@ def test_streamed_field_r2_matches_resident_formula():
     streamed = mg._stream_operator_eval(mg.net, src, bs=7)
     # resident field-R2 over the whole dataset with the same (train-mode) net
     with torch.no_grad():
-        pred = mg.net(src.a(np.arange(len(src))).to(mg.device), src.grid(np.arange(len(src))).to(mg.device)).cpu().numpy()
+        pred = (
+            mg.net(src.a(np.arange(len(src))).to(mg.device), src.grid(np.arange(len(src))).to(mg.device)).cpu().numpy()
+        )
     uy = u
     resident = 1.0 - ((pred - uy) ** 2).sum() / (((uy - uy.mean()) ** 2).sum() + 1e-12)
     assert streamed == pytest.approx(float(resident), abs=1e-5)
@@ -125,7 +128,8 @@ class _CountingOperatorSource(OperatorSource):
     """Counts field fetches and the largest single request; asserts no request exceeds a cap."""
 
     def __init__(self, a, u, row_cap):
-        self._a = np.ascontiguousarray(a); self._u = np.ascontiguousarray(u)
+        self._a = np.ascontiguousarray(a)
+        self._u = np.ascontiguousarray(u)
         self.a_shape = self._a.shape
         self.spatial_dims = _infer_operator_sdims(self._a.shape, self._u.shape, None)
         self._setup_grid(None)
@@ -138,13 +142,15 @@ class _CountingOperatorSource(OperatorSource):
 
     def _a_raw(self, ids):
         ids = np.asarray(ids)
-        self.a_calls += 1; self.max_rows = max(self.max_rows, len(ids))
+        self.a_calls += 1
+        self.max_rows = max(self.max_rows, len(ids))
         assert len(ids) <= self.row_cap, f"a() requested {len(ids)} > cap {self.row_cap}"
         return self._a[ids]
 
     def _u_raw(self, ids):
         ids = np.asarray(ids)
-        self.u_calls += 1; self.max_rows = max(self.max_rows, len(ids))
+        self.u_calls += 1
+        self.max_rows = max(self.max_rows, len(ids))
         assert len(ids) <= self.row_cap, f"u() requested {len(ids)} > cap {self.row_cap}"
         return self._u[ids]
 
@@ -155,15 +161,15 @@ def test_operator_no_full_materialization():
     a, u = _op_1d(n=200, grid=16)
     train_bs, epochs = 32, 2
     cs = _CountingOperatorSource(a, u, row_cap=train_bs)
-    mg = AllGraph(width=8, depth=1, epochs=epochs, verbose=False, seed=0)   # auto_epoch off, train_batch=32
+    mg = AllGraph(width=8, depth=1, epochs=epochs, verbose=False, seed=0)  # auto_epoch off, train_batch=32
     mg.fit(AllData.functions_stream(cs), task="regression", n_out=1)
     n = len(a)
-    per_pass = -(-n // train_bs)                          # ceil
+    per_pass = -(-n // train_bs)  # ceil
     assert cs.max_rows <= train_bs < n
     # training: epochs passes fetch a+grid+u (a_calls and u_calls each get `epochs*per_pass`); eval pass 1
     # fetches u only (+per_pass u_calls), eval pass 2 fetches a+u (+per_pass each).
-    assert cs.a_calls == epochs * per_pass + per_pass            # train + eval pass 2
-    assert cs.u_calls == epochs * per_pass + 2 * per_pass        # train + eval pass 1 + eval pass 2
+    assert cs.a_calls == epochs * per_pass + per_pass  # train + eval pass 2
+    assert cs.u_calls == epochs * per_pass + 2 * per_pass  # train + eval pass 1 + eval pass 2
 
 
 # --------------------------------------------------------------------------- predict / inertness
@@ -192,10 +198,12 @@ def test_operator_constant_target_r2_parity():
     a = np.random.RandomState(0).randn(50, 40).astype(np.float32)
     u = np.full((50, 40), 3.14159, np.float32)
     r_r = AllGraph(width=8, depth=1, epochs=3, verbose=False, seed=0).fit(
-        AllData.functions(a, u), task="regression", n_out=1)["value"]
+        AllData.functions(a, u), task="regression", n_out=1
+    )["value"]
     r_s = AllGraph(width=8, depth=1, epochs=3, verbose=False, seed=0).fit(
-        AllData.functions_stream(InMemoryOperatorSource(a, u)), task="regression", n_out=1)["value"]
-    assert abs(r_r - r_s) / max(abs(r_r), abs(r_s), 1e-12) < 1e-3   # was ~1.0 (100x divergence) before the fix
+        AllData.functions_stream(InMemoryOperatorSource(a, u)), task="regression", n_out=1
+    )["value"]
+    assert abs(r_r - r_s) / max(abs(r_r), abs(r_s), 1e-12) < 1e-3  # was ~1.0 (100x divergence) before the fix
 
 
 def test_operator_predict_empty_streamed_test_set():
@@ -207,7 +215,7 @@ def test_operator_predict_empty_streamed_test_set():
     mg.fit(AllData.functions(a, u), task="regression", n_out=1)
     empty = InMemoryOperatorSource(np.zeros((0, 16), np.float32), np.zeros((0, 16), np.float32))
     out = mg.predict(AllData.functions_stream(empty))
-    assert out.shape[0] == 0 and tuple(out.shape[1:]) == (16,)   # (0, grid)
+    assert out.shape[0] == 0 and tuple(out.shape[1:]) == (16,)  # (0, grid)
 
 
 def test_operator_resident_not_streaming():
@@ -227,7 +235,7 @@ def test_operator_source_metadata():
     assert s1.spatial_dims == 1 and s1.a_shape == (10, 16)
     g = s1.grid(np.arange(3))
     assert g.shape == (3, 16, 1)
-    assert torch.equal(g[0], _default_operator_grid((10, 16), 1))   # matches the resident default grid
+    assert torch.equal(g[0], _default_operator_grid((10, 16), 1))  # matches the resident default grid
     a2, u2 = _op_2d(n=6, hw=8)
     s2 = InMemoryOperatorSource(a2, u2)
     assert s2.spatial_dims == 2 and s2.grid(np.arange(2)).shape == (2, 8, 8, 2)
@@ -238,17 +246,17 @@ def test_operator_stream_constructor_and_fit_guards():
     a, u = _op_1d(n=30)
     src = InMemoryOperatorSource(a, u)
     with pytest.raises(TypeError):
-        AllData.functions_stream(a)                                  # not an OperatorSource
+        AllData.functions_stream(a)  # not an OperatorSource
     with pytest.raises(ValueError):
-        AllData.functions_stream(src, kind_hint="spatial")          # operator only
+        AllData.functions_stream(src, kind_hint="spatial")  # operator only
     with pytest.raises(ValueError):
-        InMemoryOperatorSource(a, u[:10])                           # mismatched sample counts
+        InMemoryOperatorSource(a, u[:10])  # mismatched sample counts
     data = AllData.functions_stream(src)
-    with pytest.raises(NotImplementedError):                        # price_modes re-reads the fields
+    with pytest.raises(NotImplementedError):  # price_modes re-reads the fields
         AllGraph(verbose=False, seed=0, price_modes=True).fit(data, task="regression", n_out=1)
     mg = AllGraph(verbose=False, seed=0, width=8, depth=1, epochs=2)
     with pytest.raises(ValueError):
-        mg.fit(AllData.functions(a, u), task="regression", n_out=1, stream=True)   # resident, demanded stream
+        mg.fit(AllData.functions(a, u), task="regression", n_out=1, stream=True)  # resident, demanded stream
     r = mg.fit(data, task="regression", n_out=1, stream=True)
     assert r["contract"] == "operator"
 
@@ -289,17 +297,20 @@ def test_operator_vector_input_memmap_and_prefetch(tmp_path):
     """T-OSTREAM-15: multi-channel input over a memmap source, and prefetch-bit-identity, both hold."""
     a, u = _vec_in_1d()
     pa, pu = tmp_path / "a.npy", tmp_path / "u.npy"
-    np.save(pa, a); np.save(pu, u)
+    np.save(pa, a)
+    np.save(pu, u)
     mg_r = AllGraph(width=8, depth=1, epochs=6, verbose=False, seed=0)
     r_r = mg_r.fit(AllData.functions(a, u, spatial_dims=1), task="regression", n_out=1)
     mg_m = AllGraph(width=8, depth=1, epochs=6, verbose=False, seed=0)
-    r_m = mg_m.fit(AllData.functions_stream(MemmapOperatorSource(str(pa), str(pu), spatial_dims=1)),
-                   task="regression", n_out=1)
+    r_m = mg_m.fit(
+        AllData.functions_stream(MemmapOperatorSource(str(pa), str(pu), spatial_dims=1)), task="regression", n_out=1
+    )
     assert _weights_identical(mg_r.net, mg_m.net) and r_r["value"] == pytest.approx(r_m["value"], abs=1e-5)
 
     def pf(depth):
         mg = AllGraph(width=8, depth=1, epochs=5, verbose=False, seed=0, stream_prefetch=depth)
         mg.fit(AllData.functions_stream(InMemoryOperatorSource(a, u, spatial_dims=1)), task="regression", n_out=1)
         return mg.net.state_dict()
+
     s0 = pf(0)
     assert all(torch.equal(s0[k], pf(3)[k]) for k in s0)

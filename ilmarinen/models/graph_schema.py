@@ -42,6 +42,7 @@ here without external dependencies (pure torch scatter via index_add / scatter_r
 
 All prior modules are left UNTOUCHED; this is a new capability in a new module.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -112,13 +113,16 @@ def _scatter_std(src, index, n):
 # Each core: forward_graph(x (N,F), edge_index (2,|E|)) -> (N, width).
 # edge_index rows are [src, dst]; messages flow src -> dst.
 
+
 class _GCNGraph(nn.Module):
     """Degree-normalized mean aggregation (isotropic message passing)."""
+
     name = "gcn"
 
     def __init__(self, fin, width):
         super().__init__()
-        self.lin = nn.Linear(fin, width); _init_lin(self.lin)
+        self.lin = nn.Linear(fin, width)
+        _init_lin(self.lin)
 
     def forward_graph(self, x, edge_index):
         n = x.shape[0]
@@ -131,12 +135,15 @@ class _GCNGraph(nn.Module):
 
 class _SAGEGraph(nn.Module):
     """GraphSAGE-style: max-pool aggregation of transformed neighbor messages, concat with self."""
+
     name = "sage"
 
     def __init__(self, fin, width):
         super().__init__()
-        self.msg = nn.Linear(fin, width); self.self_lin = nn.Linear(fin, width)
-        _init_lin(self.msg); _init_lin(self.self_lin)
+        self.msg = nn.Linear(fin, width)
+        self.self_lin = nn.Linear(fin, width)
+        _init_lin(self.msg)
+        _init_lin(self.self_lin)
 
     def forward_graph(self, x, edge_index):
         n = x.shape[0]
@@ -148,6 +155,7 @@ class _SAGEGraph(nn.Module):
 
 class _GINGraph(nn.Module):
     """Graph Isomorphism Network: sum aggregation + MLP update ( (1+eps)*x_v + sum_u x_u )."""
+
     name = "gin"
 
     def __init__(self, fin, width):
@@ -172,54 +180,60 @@ class _PNAGraph(nn.Module):
     PNA's multi-aggregator + degree-scaler design is the canonical expressiveness fix, and is strong on
     real molecular/benchmark graphs. This is a genuinely distinct primitive from the single-aggregator
     cores (gcn=mean, sage=mean+max, gin=sum, gat=attention)."""
+
     name = "pna"
 
     def __init__(self, fin, width):
         super().__init__()
-        self.lin = nn.Linear(fin, width); _init_lin(self.lin)
+        self.lin = nn.Linear(fin, width)
+        _init_lin(self.lin)
         # 4 aggregators x 3 scalers = 12 combined channels of width, projected back to width
         self.n_agg = 4
         self.n_scale = 3
-        self.proj = nn.Linear(width * self.n_agg * self.n_scale, width); _init_lin(self.proj)
+        self.proj = nn.Linear(width * self.n_agg * self.n_scale, width)
+        _init_lin(self.proj)
 
     def forward_graph(self, x, edge_index):
         n = x.shape[0]
         h = self.lin(x)
         src, dst = edge_index[0], edge_index[1]
-        m = h[src]                                                    # messages
+        m = h[src]  # messages
         # Share the scatter passes across the four aggregators + the degree scaler. mean and std both need
         # the running sum and count, and std also needs sum-of-squares; computing each scatter ONCE and
         # deriving mean = sum/cnt, std = sqrt(E[x^2]-E[x]^2) avoids recomputing the sum/count three times
         # (previously _scatter_mean ran inside both the mean aggregator and _scatter_std, and the degree was
         # scattered a third time).
         ones = m.new_ones(m.shape[0], 1)
-        cnt = _scatter_sum(ones, dst, n)                              # (n,1) in-degree (== deg)
+        cnt = _scatter_sum(ones, dst, n)  # (n,1) in-degree (== deg)
         cnt_c = cnt.clamp(min=1)
-        s = _scatter_sum(m, dst, n)                                  # (n,width) sum of messages
-        ssq = _scatter_sum(m * m, dst, n)                            # (n,width) sum of squares
+        s = _scatter_sum(m, dst, n)  # (n,width) sum of messages
+        ssq = _scatter_sum(m * m, dst, n)  # (n,width) sum of squares
         mean = s / cnt_c
         var = (ssq / cnt_c - mean * mean).clamp(min=0.0)
         std = torch.sqrt(var + 1e-6)
         mx = _scatter_max(m, dst, n)
         mn = _scatter_min(m, dst, n)
-        agg = torch.cat([mean, mx, mn, std], dim=1)                  # (n, 4*width)
+        agg = torch.cat([mean, mx, mn, std], dim=1)  # (n, 4*width)
         # degree-scalers: identity, amplification (log(d+1)/delta), attenuation (delta/log(d+1))
         log_deg = torch.log(cnt + 1.0)
-        delta = 1.0                                                  # normalization constant (avg log-deg ~1)
+        delta = 1.0  # normalization constant (avg log-deg ~1)
         amp = log_deg / delta
         att = delta / (log_deg + 1e-6)
-        scaled = torch.cat([agg, agg * amp, agg * att], dim=1)       # (n, 12*width)
+        scaled = torch.cat([agg, agg * amp, agg * att], dim=1)  # (n, 12*width)
         return h + self.proj(scaled)
 
 
 class _GATGraph(nn.Module):
     """Single-head graph attention: learned per-edge weights (anisotropic aggregation)."""
+
     name = "gat"
 
     def __init__(self, fin, width):
         super().__init__()
-        self.lin = nn.Linear(fin, width); _init_lin(self.lin)
-        self.att = nn.Linear(2 * width, 1); _init_lin(self.att)
+        self.lin = nn.Linear(fin, width)
+        _init_lin(self.lin)
+        self.att = nn.Linear(2 * width, 1)
+        _init_lin(self.att)
 
     def forward_graph(self, x, edge_index):
         n = x.shape[0]
@@ -237,11 +251,13 @@ class _GATGraph(nn.Module):
 
 class _DenseGraph(nn.Module):
     """Per-node MLP with NO message passing (ignores edges) -- the no-graph-structure baseline."""
+
     name = "dense"
 
     def __init__(self, fin, width):
         super().__init__()
-        self.lin = nn.Linear(fin, width); _init_lin(self.lin)
+        self.lin = nn.Linear(fin, width)
+        _init_lin(self.lin)
 
     def forward_graph(self, x, edge_index):
         return self.lin(x)
@@ -249,11 +265,13 @@ class _DenseGraph(nn.Module):
 
 class _NormGraph(nn.Module):
     """Per-node feature standardization + linear -- the stabilizer (mitigates over-smoothing)."""
+
     name = "norm"
 
     def __init__(self, fin, width):
         super().__init__()
-        self.lin = nn.Linear(fin, width); _init_lin(self.lin)
+        self.lin = nn.Linear(fin, width)
+        _init_lin(self.lin)
         self.ln = nn.LayerNorm(width)
 
     def forward_graph(self, x, edge_index):
@@ -317,25 +335,33 @@ class GraphSchema(nn.Module):
       -> (n_graphs, n_out)
     """
 
-    def __init__(self, fin, width=32, depth=2, n_out=1, seed=0,
-                 primitives=("gcn", "sage", "gin", "gat", "dense", "norm"), readout="mean"):
+    def __init__(
+        self,
+        fin,
+        width=32,
+        depth=2,
+        n_out=1,
+        seed=0,
+        primitives=("gcn", "sage", "gin", "gat", "dense", "norm"),
+        readout="mean",
+    ):
         super().__init__()
         if readout not in ("mean", "sum", "max"):
             raise ValueError("readout must be 'mean', 'sum', or 'max'")
         torch.manual_seed(seed)
         self.primitives = tuple(primitives)
         self.width, self.depth, self.readout = width, depth, readout
-        self.embed = nn.Linear(fin, width); _init_lin(self.embed)
-        self.cells = nn.ModuleList([
-            _GraphCell(width, width, self.primitives) for _ in range(depth)
-        ])
-        self.head = nn.Linear(width, n_out); _init_lin(self.head)
+        self.embed = nn.Linear(fin, width)
+        _init_lin(self.embed)
+        self.cells = nn.ModuleList([_GraphCell(width, width, self.primitives) for _ in range(depth)])
+        self.head = nn.Linear(width, n_out)
+        _init_lin(self.head)
 
     def forward(self, x, edge_index, batch, n_graphs):
         h = self.embed(x)
         for cell in self.cells:
             h = cell(h, edge_index)
-        pooled = _global_pool(h, batch, n_graphs, self.readout)   # (n_graphs, width)
+        pooled = _global_pool(h, batch, n_graphs, self.readout)  # (n_graphs, width)
         return self.head(pooled)
 
     def update_peak(self):
@@ -349,17 +375,24 @@ class GraphSchema(nn.Module):
         return [c.alpha_peak.detach().cpu().numpy() for c in self.cells]
 
     def architecture(self):
-        return [self.primitives[int(np.argmax(c.alpha_peak.detach().cpu().numpy()))]
-                for c in self.cells]
+        return [self.primitives[int(np.argmax(c.alpha_peak.detach().cpu().numpy()))] for c in self.cells]
 
 
-def build_graph_schema(n_in=None, width=32, depth=2, n_out=1, seed=0,
-                                   primitives=("gcn", "sage", "gin", "gat", "dense", "norm"),
-                                   readout="mean", fin=None):
+def build_graph_schema(
+    n_in=None,
+    width=32,
+    depth=2,
+    n_out=1,
+    seed=0,
+    primitives=("gcn", "sage", "gin", "gat", "dense", "norm"),
+    readout="mean",
+    fin=None,
+):
     # canonical param is n_in; fin kept as backward-compatible alias
     if n_in is None:
         n_in = fin
     if n_in is None:
         raise TypeError("build_graph_schema requires n_in (input feature dim)")
-    return GraphSchema(fin=n_in, width=width, depth=depth, n_out=n_out, seed=seed,
-                                  primitives=primitives, readout=readout)
+    return GraphSchema(
+        fin=n_in, width=width, depth=depth, n_out=n_out, seed=seed, primitives=primitives, readout=readout
+    )

@@ -36,8 +36,8 @@ class FeatureGate(nn.Module):
 
     def __init__(self, n_features, init_open=True, beta=0.66, gamma=-0.1, zeta=1.1):
         super().__init__()
-        self.beta, self.gamma, self.zeta = beta, gamma, zeta   # hard-concrete stretch parameters
-        init = 2.0 if init_open else 0.0                       # start mostly OPEN
+        self.beta, self.gamma, self.zeta = beta, gamma, zeta  # hard-concrete stretch parameters
+        init = 2.0 if init_open else 0.0  # start mostly OPEN
         self.log_alpha = nn.Parameter(torch.full((n_features,), float(init)))
 
     def _sample_z(self):
@@ -46,8 +46,8 @@ class FeatureGate(nn.Module):
             s = torch.sigmoid((torch.log(u) - torch.log(1 - u) + self.log_alpha) / self.beta)
         else:
             s = torch.sigmoid(self.log_alpha / self.beta)
-        s_bar = s * (self.zeta - self.gamma) + self.gamma      # stretch beyond [0,1]
-        return s_bar.clamp(0.0, 1.0)                            # hard-clamp -> genuine 0/1 saturation
+        s_bar = s * (self.zeta - self.gamma) + self.gamma  # stretch beyond [0,1]
+        return s_bar.clamp(0.0, 1.0)  # hard-clamp -> genuine 0/1 saturation
 
     def gate(self):
         # deterministic gate value (for reporting / eval): clamped stretched sigmoid at the mode.
@@ -77,10 +77,10 @@ class FeatureGate(nn.Module):
         # effective number of features: IPR on the gate vector, but computed on g^2 (energy) so that a few
         # dominant gates are not swamped by many small-but-nonzero noise gates. This tracks the ACTIVE-set
         # size closely when the gate is well-separated, and is the honest 'how many features carry weight'.
-        g2 = g ** 2
+        g2 = g**2
         s2 = g2.sum()
         gnorm = g2 / s2 if s2 > 0 else g2
-        eff = float(1.0 / np.sum(gnorm ** 2)) if np.sum(gnorm ** 2) > 0 else float(d)
+        eff = float(1.0 / np.sum(gnorm**2)) if np.sum(gnorm**2) > 0 else float(d)
         return {
             "gates": {names[i]: float(g[i]) for i in range(d)},
             "active": [names[i] for i in order if g[i] > keep_thresh],
@@ -108,8 +108,19 @@ class GatedMLP(nn.Module):
         return h.squeeze(-1) if self.n_out == 1 else h
 
 
-def fit_feature_attribution(X, y, task="regression", mu=0.03, feature_names=None, hidden=32,
-                            epochs=400, lr=5e-3, keep_thresh=0.5, seed=0, val_frac=0.25):
+def fit_feature_attribution(
+    X,
+    y,
+    task="regression",
+    mu=0.03,
+    feature_names=None,
+    hidden=32,
+    epochs=400,
+    lr=5e-3,
+    keep_thresh=0.5,
+    seed=0,
+    val_frac=0.25,
+):
     """Fit a priced feature gate over the features X to attribute which ones the signal needs.
 
     X : (n, d) feature matrix (ideally already in the invariant basis).
@@ -119,8 +130,10 @@ def fit_feature_attribution(X, y, task="regression", mu=0.03, feature_names=None
     Returns a dict: the attribution (active set, ranking, gates, effective count), the held-out fit, and mu.
     Faithful: the reported gate is exactly the gate the head was trained through.
     """
-    rng = np.random.RandomState(seed); torch.manual_seed(seed)
-    X = np.asarray(X, dtype=np.float32); y = np.asarray(y)
+    rng = np.random.RandomState(seed)
+    torch.manual_seed(seed)
+    X = np.asarray(X, dtype=np.float32)
+    y = np.asarray(y)
     n, d = X.shape
     # COLLINEARITY GUARD: the L0 feature gate has no unique sparse solution when features are strongly
     # correlated (redundant), so the attribution becomes unreliable (validated: on correlated features it
@@ -133,26 +146,30 @@ def fit_feature_attribution(X, y, task="regression", mu=0.03, feature_names=None
         C = (Xc / sd).T @ (Xc / sd) / n
         off = C - np.eye(d)
         collinearity = float(np.abs(off).sum() / (d * (d - 1)))
-    idx = rng.permutation(n); ntr = int(n * (1 - val_frac))
+    idx = rng.permutation(n)
+    ntr = int(n * (1 - val_frac))
     tr, va = idx[:ntr], idx[ntr:]
     Xt, Xv = torch.tensor(X[tr]), torch.tensor(X[va])
     n_out = 1 if task == "regression" else int(np.max(y) + 1)
     if task == "regression":
-        yt = torch.tensor(y[tr].astype(np.float32)); yv = torch.tensor(y[va].astype(np.float32))
+        yt = torch.tensor(y[tr].astype(np.float32))
+        yv = torch.tensor(y[va].astype(np.float32))
         lossf = lambda p, t: ((p - t) ** 2).mean()
     else:
-        yt = torch.tensor(y[tr].astype(np.int64)); yv = torch.tensor(y[va].astype(np.int64))
+        yt = torch.tensor(y[tr].astype(np.int64))
+        yv = torch.tensor(y[va].astype(np.int64))
         lossf = lambda p, t: nn.functional.cross_entropy(p, t)
 
     m = GatedMLP(d, hidden=hidden, n_out=n_out)
     opt = torch.optim.Adam(m.parameters(), lr=lr)
-    m.train()                                    # stochastic hard-concrete gate active during fitting
+    m.train()  # stochastic hard-concrete gate active during fitting
     for _ in range(epochs):
         opt.zero_grad()
         loss = lossf(m(Xt), yt) + m.fgate.price(mu)
-        loss.backward(); opt.step()
+        loss.backward()
+        opt.step()
 
-    m.eval()                                     # deterministic gate for scoring + attribution
+    m.eval()  # deterministic gate for scoring + attribution
     with torch.no_grad():
         if task == "regression":
             pv = m(Xv)
@@ -169,42 +186,58 @@ def fit_feature_attribution(X, y, task="regression", mu=0.03, feature_names=None
     # check catches locally-correlated bases (e.g. adjacent time-series timesteps) that a global mean
     # correlation under-measures.
     gv = np.array(list(attr["gates"].values()))
-    frac_saturated = float(np.mean((gv < 0.1) | (gv > 0.9)))   # fraction decisively closed or open
+    frac_saturated = float(np.mean((gv < 0.1) | (gv > 0.9)))  # fraction decisively closed or open
     reliable = (collinearity < 0.35) and (frac_saturated > 0.5)
-    return {"attribution": attr, "metric": metric, "value": float(fit), "mu": mu,
-            "collinearity": collinearity, "frac_saturated": frac_saturated, "reliable": bool(reliable)}
+    return {
+        "attribution": attr,
+        "metric": metric,
+        "value": float(fit),
+        "mu": mu,
+        "collinearity": collinearity,
+        "frac_saturated": frac_saturated,
+        "reliable": bool(reliable),
+    }
 
 
-def feature_selection_path(X, y, task="regression", mus=(0.0, 0.05, 0.1, 0.2, 0.4),
-                           feature_names=None, **kwargs):
+def feature_selection_path(X, y, task="regression", mus=(0.0, 0.05, 0.1, 0.2, 0.4), feature_names=None, **kwargs):
     """Trace which features survive as the sparsity price mu rises -- the feature-level analog of the priced
     width/primitive sweeps. Returns a list of (mu, active_set, effective_num_features, fit) rows. The stable
     active set across a range of mu is the robust attributed feature set."""
     rows = []
     for mu in mus:
         r = fit_feature_attribution(X, y, task=task, mu=mu, feature_names=feature_names, **kwargs)
-        rows.append({"mu": mu, "active": r["attribution"]["active"],
-                     "effective_num_features": r["attribution"]["effective_num_features"],
-                     "value": r["value"], "metric": r["metric"]})
+        rows.append(
+            {
+                "mu": mu,
+                "active": r["attribution"]["active"],
+                "effective_num_features": r["attribution"]["effective_num_features"],
+                "value": r["value"],
+                "metric": r["metric"],
+            }
+        )
     return rows
 
 
 def format_attribution(result):
     """Render a fit_feature_attribution result as a short text block."""
     a = result["attribution"]
-    L = ["FEATURE ATTRIBUTION (Tier-2: priced in-model gate, faithful by construction)",
-         f"  fit {result['metric']}={result['value']:.3f}   price mu={result['mu']}   "
-         f"effective #features={a['effective_num_features']:.2f} of {a['n_features']}",
-         f"  active (g>0.5): {a['active'] if a['active'] else '(none survived)'}",
-         "  gates (top): " + ", ".join(f"{k}={v:.2f}" for k, v in
-                                       sorted(a['gates'].items(), key=lambda kv: -kv[1])[:6])]
+    L = [
+        "FEATURE ATTRIBUTION (Tier-2: priced in-model gate, faithful by construction)",
+        f"  fit {result['metric']}={result['value']:.3f}   price mu={result['mu']}   "
+        f"effective #features={a['effective_num_features']:.2f} of {a['n_features']}",
+        f"  active (g>0.5): {a['active'] if a['active'] else '(none survived)'}",
+        "  gates (top): " + ", ".join(f"{k}={v:.2f}" for k, v in sorted(a["gates"].items(), key=lambda kv: -kv[1])[:6]),
+    ]
     if not result.get("reliable", True):
         reasons = []
         if result.get("collinearity", 0) >= 0.35:
             reasons.append(f"mean|corr|={result['collinearity']:.2f} (collinear/redundant features)")
         if result.get("frac_saturated", 1.0) <= 0.5:
-            reasons.append(f"only {result.get('frac_saturated', 0)*100:.0f}% of gates saturated "
-                           f"(the gate did not concentrate)")
-        L.append("  ** UNRELIABLE: " + "; ".join(reasons) + " -- no unique sparse attribution exists here; "
-                 "treat the active set and ranking with caution.")
+            reasons.append(
+                f"only {result.get('frac_saturated', 0) * 100:.0f}% of gates saturated (the gate did not concentrate)"
+            )
+        L.append(
+            "  ** UNRELIABLE: " + "; ".join(reasons) + " -- no unique sparse attribution exists here; "
+            "treat the active set and ranking with caution."
+        )
     return "\n".join(L)

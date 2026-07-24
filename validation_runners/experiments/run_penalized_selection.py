@@ -27,6 +27,7 @@ Usage:
   python run_penalized_selection.py --dataset GunPoint --mu 0.3
   python run_penalized_selection.py --dataset ItalyPowerDemand --mu 0.5 --widths 8,16,32,64 --acc_tol 0.02
 """
+
 import argparse
 import os
 import sys
@@ -46,19 +47,23 @@ DEFAULT_PRIMS = ("plain", "gated", "lstm", "conv", "attention", "dense", "norm",
 def load(name, max_t, val_frac, seed):
     Xtr, ytr = load_classification(name, split="train")
     Xte, yte = load_classification(name, split="test")
-    cls = sorted(set(ytr)); m = {c: i for i, c in enumerate(cls)}
+    cls = sorted(set(ytr))
+    m = {c: i for i, c in enumerate(cls)}
     Xtr = np.transpose(Xtr, (0, 2, 1)).astype(np.float32)
     Xte = np.transpose(Xte, (0, 2, 1)).astype(np.float32)
     T = Xtr.shape[1]
     if max_t and T > max_t:
         step = T // max_t
+
         def pool(X):
             k = (X.shape[1] // step) * step
             return X[:, :k].reshape(X.shape[0], k // step, step, X.shape[2]).mean(axis=2)
+
         Xtr, Xte = pool(Xtr), pool(Xte)
     mu, sd = Xtr.mean((0, 1), keepdims=True), Xtr.std((0, 1), keepdims=True) + 1e-6
     Xtr, Xte = (Xtr - mu) / sd, (Xte - mu) / sd
-    ytr = np.array([m[c] for c in ytr]); yte = np.array([m[c] for c in yte])
+    ytr = np.array([m[c] for c in ytr])
+    yte = np.array([m[c] for c in yte])
     Xtr, ytr = torch.tensor(Xtr), torch.tensor(ytr)
     Xte, yte = torch.tensor(Xte), torch.tensor(yte)
     g = torch.Generator().manual_seed(seed)
@@ -71,31 +76,34 @@ def load(name, max_t, val_frac, seed):
 def primitive_costs(net):
     """Normalized parameter cost per primitive (from the first cell's cores)."""
     cell = net.cells[0]
-    raw = torch.tensor([sum(x.numel() for x in core.parameters()) for core in cell.cores],
-                       dtype=torch.float32)
+    raw = torch.tensor([sum(x.numel() for x in core.parameters()) for core in cell.cores], dtype=torch.float32)
     return raw / raw.max()
 
 
-def fit(Xw, yw, Xv, yv, n_in, n_out, prims, width, depth, seed, epochs, readout,
-        mu, gamma, lr=0.003, alpha_lr=0.02, bs=32):
+def fit(
+    Xw, yw, Xv, yv, n_in, n_out, prims, width, depth, seed, epochs, readout, mu, gamma, lr=0.003, alpha_lr=0.02, bs=32
+):
     torch.manual_seed(seed)
-    net = build_schema(depth=depth, width=width, n_in=n_in, n_out=n_out,
-                                   seed=seed, primitives=prims, readout=readout)
-    costs = primitive_costs(net)                      # (n_prim,), normalized
+    net = build_schema(depth=depth, width=width, n_in=n_in, n_out=n_out, seed=seed, primitives=prims, readout=readout)
+    costs = primitive_costs(net)  # (n_prim,), normalized
     ap = [c.alpha for c in net.cells]
     wp = [p for n, p in net.named_parameters() if not n.endswith("alpha")]
-    ow = torch.optim.Adam(wp, lr=lr); oa = torch.optim.Adam(ap, lr=alpha_lr)
+    ow = torch.optim.Adam(wp, lr=lr)
+    oa = torch.optim.Adam(ap, lr=alpha_lr)
     lf = nn.CrossEntropyLoss()
     for ep in range(epochs):
         perm = torch.randperm(len(Xw))
         for i in range(0, len(Xw), bs):
-            bi = perm[i:i + bs]
-            ow.zero_grad(); l = lf(net(Xw[bi]), yw[bi])
+            bi = perm[i : i + bs]
+            ow.zero_grad()
+            l = lf(net(Xw[bi]), yw[bi])
             if torch.isfinite(l):
-                l.backward(); torch.nn.utils.clip_grad_norm_(wp, 5.0); ow.step()
+                l.backward()
+                torch.nn.utils.clip_grad_norm_(wp, 5.0)
+                ow.step()
         perm = torch.randperm(len(Xv))
         for i in range(0, len(Xv), bs):
-            bi = perm[i:i + bs]
+            bi = perm[i : i + bs]
             oa.zero_grad()
             la = lf(net(Xv[bi]), yv[bi])
             # differentiable complexity penalty + entropy sharpening, summed over layers
@@ -105,9 +113,11 @@ def fit(Xw, yw, Xv, yv, n_in, n_out, prims, width, depth, seed, epochs, readout,
                 w = torch.softmax(cell.alpha, dim=0)
                 comp = comp + (w * costs).sum()
                 ent = ent - (w * torch.log(w + 1e-9)).sum()
-            obj = la + mu * comp + gamma * ent        # gamma>0 sharpens (subtracts entropy)
+            obj = la + mu * comp + gamma * ent  # gamma>0 sharpens (subtracts entropy)
             if torch.isfinite(obj):
-                obj.backward(); torch.nn.utils.clip_grad_norm_(ap, 5.0); oa.step()
+                obj.backward()
+                torch.nn.utils.clip_grad_norm_(ap, 5.0)
+                oa.step()
         net.update_peak()
     with torch.no_grad():
         va = float((net(Xv).argmax(-1) == yv).float().mean())
@@ -123,8 +133,9 @@ def run(args):
     # active; pick the SMALLEST width whose val accuracy is within acc_tol of the best.
     rows = []
     for w in widths:
-        va, net = fit(Xw, yw, Xv, yv, n_in, n_out, prims, w, args.depth, args.seed,
-                      args.epochs, args.readout, args.mu, args.gamma)
+        va, net = fit(
+            Xw, yw, Xv, yv, n_in, n_out, prims, w, args.depth, args.seed, args.epochs, args.readout, args.mu, args.gamma
+        )
         rows.append((w, va, net))
     best_va = max(va for _, va, _ in rows)
     Kstar, netK = next((w, net) for (w, va, net) in rows if va >= best_va - args.acc_tol)
@@ -145,8 +156,7 @@ def run(args):
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dataset", required=True)
     ap.add_argument("--primitives", default=",".join(DEFAULT_PRIMS))
     ap.add_argument("--widths", default="8,16,32,64")

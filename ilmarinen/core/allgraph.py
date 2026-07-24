@@ -30,6 +30,7 @@ Level 2 -- GRID-RANK dispatch (existing machinery). For a dense tensor, pick the
 
 The class exposes a single .fit(data, y) that routes, builds, trains, and reports.
 """
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -60,15 +61,14 @@ class AllData:
       y           : targets
     """
 
-    def __init__(self, kind_hint=None, dense=None, node_feats=None, positions=None, edges=None, y=None,
-                 grid=None):
+    def __init__(self, kind_hint=None, dense=None, node_feats=None, positions=None, edges=None, y=None, grid=None):
         self.kind_hint = kind_hint
         self.dense = dense
         self.node_feats = node_feats
         self.positions = positions
         self.edges = edges
         self.y = y
-        self.grid = grid            # (n, N) sample coordinates for function-valued (operator) data
+        self.grid = grid  # (n, N) sample coordinates for function-valued (operator) data
 
     # ---- ergonomic constructors (these encode the type in how you build the object) ----
     @classmethod
@@ -97,18 +97,22 @@ class AllData:
         bake-off, so it relaxes the strict single-minibatch RAM footprint of the pure deploy fit -- lower
         stream_subsample_cap (or leave readout_select off) if that peak allocation is a concern."""
         from .allgraph_streaming import DenseSource
+
         if not isinstance(source, DenseSource):
             raise TypeError(
                 f"dense_stream(source=...) expects a DenseSource (e.g. MemmapDenseSource over a .npy file); "
-                f"got {type(source).__name__}. See ilmarinen.core.allgraph_streaming.")
+                f"got {type(source).__name__}. See ilmarinen.core.allgraph_streaming."
+            )
         if kind_hint is None:
             raise ValueError(
                 "dense_stream requires an explicit kind_hint in {'sequence','spatial','volumetric','4d'} so "
-                "routing never materializes the source; pass e.g. kind_hint='spatial'.")
+                "routing never materializes the source; pass e.g. kind_hint='spatial'."
+            )
         if kind_hint not in _DENSE_CONTRACTS:
             raise ValueError(
                 f"dense_stream kind_hint must be a dense contract {sorted(_DENSE_CONTRACTS)}; got {kind_hint!r}. "
-                f"For relational data use AllData.graph_stream(...).")
+                f"For relational data use AllData.graph_stream(...)."
+            )
         return cls(kind_hint=kind_hint, dense=source, y=y)
 
     @classmethod
@@ -130,25 +134,29 @@ class AllData:
         auto_epoch. select_size / select='gibbs' / tiebreak / angular_from_data / the priced-* and report_*
         diagnostics are not yet supported under streaming and raise a clear error in :meth:`AllGraph.fit`."""
         from .allgraph_streaming import GraphSource
+
         if not isinstance(source, GraphSource):
             raise TypeError(
                 f"graph_stream(source=...) expects a GraphSource (e.g. InMemoryGraphSource / LazyGraphSource); "
-                f"got {type(source).__name__}. See ilmarinen.core.allgraph_streaming.")
+                f"got {type(source).__name__}. See ilmarinen.core.allgraph_streaming."
+            )
         if kind_hint is None:
             raise ValueError(
                 "graph_stream requires an explicit kind_hint in {'graph','equivariant','set'}; pass e.g. "
-                "kind_hint='graph'.")
+                "kind_hint='graph'."
+            )
         if kind_hint not in _IRREGULAR_CONTRACTS:
             raise ValueError(
                 f"graph_stream kind_hint must be a relational contract {sorted(_IRREGULAR_CONTRACTS)}; got "
-                f"{kind_hint!r}. For dense data use AllData.dense_stream(...).")
+                f"{kind_hint!r}. For dense data use AllData.dense_stream(...)."
+            )
         if kind_hint in ("graph", "equivariant") and not source.has_edges:
             raise ValueError(
                 f"kind_hint={kind_hint!r} needs edges, but the GraphSource reports has_edges=False. Provide a "
-                f"source that yields edge_index per graph, or use kind_hint='set'.")
+                f"source that yields edge_index per graph, or use kind_hint='set'."
+            )
         if kind_hint == "equivariant" and not source.has_pos:
-            raise ValueError(
-                "kind_hint='equivariant' needs 3D positions, but the GraphSource reports has_pos=False.")
+            raise ValueError("kind_hint='equivariant' needs 3D positions, but the GraphSource reports has_pos=False.")
         return cls(kind_hint=kind_hint, node_feats=source, y=y)
 
     @classmethod
@@ -167,10 +175,12 @@ class AllData:
         price_modes (mode-budget selection) and the priced-* / report_* diagnostics re-read the fields and are
         not yet supported under streaming -- they raise a clear error in :meth:`AllGraph.fit`."""
         from .allgraph_streaming import OperatorSource
+
         if not isinstance(source, OperatorSource):
             raise TypeError(
                 f"functions_stream(source=...) expects an OperatorSource (e.g. InMemoryOperatorSource / "
-                f"MemmapOperatorSource); got {type(source).__name__}. See ilmarinen.core.allgraph_streaming.")
+                f"MemmapOperatorSource); got {type(source).__name__}. See ilmarinen.core.allgraph_streaming."
+            )
         if kind_hint != "operator":
             raise ValueError(f"functions_stream kind_hint must be 'operator'; got {kind_hint!r}.")
         obj = cls(kind_hint="operator", dense=source)
@@ -191,16 +201,21 @@ class AllData:
         scanned. Selection (select_size / gibbs / tiebreak / readout_select) is not available here (a forward-only
         source cannot draw a random-access subsample); select must be 'argmax' or 'sparse'."""
         from .allgraph_streaming import IterableDenseSource
+
         if not isinstance(source, IterableDenseSource):
             raise TypeError(
                 f"dense_iter(source=...) expects an IterableDenseSource; got {type(source).__name__}. See "
-                f"ilmarinen.core.allgraph_streaming.")
+                f"ilmarinen.core.allgraph_streaming."
+            )
         if kind_hint is None:
-            raise ValueError("dense_iter requires an explicit kind_hint in "
-                             "{'sequence','spatial','volumetric','4d'}; pass e.g. kind_hint='spatial'.")
+            raise ValueError(
+                "dense_iter requires an explicit kind_hint in "
+                "{'sequence','spatial','volumetric','4d'}; pass e.g. kind_hint='spatial'."
+            )
         if kind_hint not in _DENSE_CONTRACTS:
-            raise ValueError(f"dense_iter kind_hint must be a dense contract {sorted(_DENSE_CONTRACTS)}; got "
-                             f"{kind_hint!r}.")
+            raise ValueError(
+                f"dense_iter kind_hint must be a dense contract {sorted(_DENSE_CONTRACTS)}; got {kind_hint!r}."
+            )
         if n_out is not None:
             source.n_out = int(n_out)
         return cls(kind_hint=kind_hint, dense=source, y=None)
@@ -235,13 +250,13 @@ class AllData:
             # trailing axis that y lacks or that is small (<=4)
             sdims = a.dim() - 1
             if a.dim() == y.dim() and a.dim() >= 3 and a.shape[-1] <= 4 and a.shape[-1] != a.shape[-2]:
-                sdims = a.dim() - 2                       # trailing channel axis
+                sdims = a.dim() - 2  # trailing channel axis
             spatial_dims = max(1, min(3, sdims))
-        grid_shape = a.shape[1:1 + spatial_dims]
+        grid_shape = a.shape[1 : 1 + spatial_dims]
         if grid is None:
             axes = [torch.linspace(0.0, 1.0, int(s)) for s in grid_shape]
             mesh = torch.meshgrid(*axes, indexing="ij")
-            coords = torch.stack(mesh, dim=-1)                       # (*shape, sdims)
+            coords = torch.stack(mesh, dim=-1)  # (*shape, sdims)
             grid = coords.unsqueeze(0).expand(n, *coords.shape).contiguous()
         else:
             grid = grid if isinstance(grid, torch.Tensor) else torch.tensor(np.asarray(grid), dtype=torch.float32)
@@ -253,7 +268,7 @@ class AllData:
 # --------------------------------------------------------------------------- Level-1 type dispatch
 _DENSE_CONTRACTS = {"sequence", "spatial", "volumetric", "4d"}
 _IRREGULAR_CONTRACTS = {"graph", "equivariant", "set"}
-_FUNCTIONAL_CONTRACTS = {"operator"}          # neural-operator contract: function -> function on a grid
+_FUNCTIONAL_CONTRACTS = {"operator"}  # neural-operator contract: function -> function on a grid
 _ALL_CONTRACTS = _DENSE_CONTRACTS | _IRREGULAR_CONTRACTS | _FUNCTIONAL_CONTRACTS
 
 
@@ -269,7 +284,7 @@ def route_type(data: AllData, equivariant_if_positions=True):
         if data.positions is not None and equivariant_if_positions:
             return "equivariant", "has edges + 3D positions -> equivariant graph"
         return "graph", "has edges (relational) -> graph"
-    if data.node_feats is not None:                 # variable-size collection, no edges
+    if data.node_feats is not None:  # variable-size collection, no edges
         if data.positions is not None and equivariant_if_positions:
             return "equivariant", "point set + 3D positions -> equivariant (geometric set)"
         return "set", "unordered point set (no edges) -> set"
@@ -305,13 +320,18 @@ def route_grid_rank(dense: torch.Tensor, verbose=False, price_mu=0.05):
         struct = det["structure"]
         rank_to_mod = {"2d": "spatial", "3d": "volumetric", "4d": "4d"}
         if struct in rank_to_mod:
-            return rank_to_mod[struct], {"shape": det["shape"],
-                                         "why": f"flat vector, MI-detected {struct} grid {det['shape']}"
-                                                + (" (priced)" if price_mu is not None else "")}
+            return rank_to_mod[struct], {
+                "shape": det["shape"],
+                "why": f"flat vector, MI-detected {struct} grid {det['shape']}"
+                + (" (priced)" if price_mu is not None else ""),
+            }
         if struct == "1d":
             return "sequence", {"shape": det["shape"], "why": "flat vector, MI-detected 1D chain"}
-        return "sequence", {"shape": (dense.shape[1],), "why": "flat vector, unstructured -> dense-family sequence",
-                            "unstructured": True}
+        return "sequence", {
+            "shape": (dense.shape[1],),
+            "why": "flat vector, unstructured -> dense-family sequence",
+            "unstructured": True,
+        }
     raise ValueError(f"cannot route a rank-{nd} dense tensor")
 
 
@@ -329,20 +349,26 @@ class _EarlyStopper:
     trains the full budget (the safe fallback)."""
 
     def __init__(self, min_delta=0.01, patience=4, min_epochs=5, warmup_drop=0.05):
-        self.min_delta = float(min_delta); self.patience = int(patience); self.min_epochs = int(min_epochs)
+        self.min_delta = float(min_delta)
+        self.patience = int(patience)
+        self.min_epochs = int(min_epochs)
         self.warmup_drop = float(warmup_drop)
-        self.best = float("inf"); self.bad = 0; self.epoch = 0; self.init = None
+        self.best = float("inf")
+        self.bad = 0
+        self.epoch = 0
+        self.init = None
 
     def step(self, metric):
         self.epoch += 1
         metric = float(metric)
         if self.init is None:
-            self.init = metric                               # baseline loss (after the first epoch's steps)
-        if metric < self.best * (1.0 - self.min_delta):      # a meaningful (>= min_delta relative) reduction
-            self.best = metric; self.bad = 0
+            self.init = metric  # baseline loss (after the first epoch's steps)
+        if metric < self.best * (1.0 - self.min_delta):  # a meaningful (>= min_delta relative) reduction
+            self.best = metric
+            self.bad = 0
         else:
             self.bad += 1
-        left_plateau = metric < self.init * (1.0 - self.warmup_drop)   # has the model begun to fit at all?
+        left_plateau = metric < self.init * (1.0 - self.warmup_drop)  # has the model begun to fit at all?
         return self.epoch >= self.min_epochs and self.bad >= self.patience and left_plateau
 
 
@@ -358,39 +384,84 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
     The router itself is not trained; each contract's OWN alpha/width/depth search runs after dispatch.
     """
 
-    def __init__(self, width=32, depth=2, epochs=30, lr=2e-3, weight_decay=None, train_batch=None, device="cpu", seed=0,
-                 equivariant_if_positions=True, verbose=True, gibbs_beta=8.0, sparsity_mu=0.0,
-                 tensorize_mu=0.05, contract_router="default", symmetry_routing=False,
-                 canonicalize_reuse=False, generated_equivariant_group=None,
-                 discover_equivariant_contract=False,
-                 readout_select=False, readout_mu=0.05, seq_flatten_max_T=64, kernel_from_xi=False, angular_from_data=False, nonlinear_symmetry_fallback=False,
-                 enabled_contracts=None, contract_posterior=False, report_llc=False,
-                 deploy_nonlinear_contract=False, equivariant_realization="emlp", price_equivariance=False,
-                 price_modes=False, mode_mu=None,
-                 price_singular=False, singular_mu=None,
-                 singular_llc_steps=150, singular_llc_chains=3,
-                 developmental_llc=False, developmental_llc_checkpoints=None,
-                 developmental_llc_epochs=None, report_thermo=False, report_response=False,
-                 report_ledger=False, progress=False,
-                 auto_epoch=None, auto_epoch_patience=4, auto_epoch_min_delta=0.01, auto_epoch_min_epochs=5,
-                 stream_subsample_cap=20000, stream_pin_memory=None, stream_prefetch=False,
-                 stream_shuffle_buffer=8192):
-        self.width = width; self.depth = depth; self.epochs = epochs; self.lr = lr
-        self.weight_decay = weight_decay   # None -> per-contract default (_WEIGHT_DECAY / _DENSE_WEIGHT_DECAY); see _wd
-        self.train_batch = train_batch     # None -> per-contract default (_TRAIN_BATCH / _SET_TRAIN_BATCH); see _tb
+    def __init__(
+        self,
+        width=32,
+        depth=2,
+        epochs=30,
+        lr=2e-3,
+        weight_decay=None,
+        train_batch=None,
+        device="cpu",
+        seed=0,
+        equivariant_if_positions=True,
+        verbose=True,
+        gibbs_beta=8.0,
+        sparsity_mu=0.0,
+        tensorize_mu=0.05,
+        contract_router="default",
+        symmetry_routing=False,
+        canonicalize_reuse=False,
+        generated_equivariant_group=None,
+        discover_equivariant_contract=False,
+        readout_select=False,
+        readout_mu=0.05,
+        seq_flatten_max_T=64,
+        kernel_from_xi=False,
+        angular_from_data=False,
+        nonlinear_symmetry_fallback=False,
+        enabled_contracts=None,
+        contract_posterior=False,
+        report_llc=False,
+        deploy_nonlinear_contract=False,
+        equivariant_realization="emlp",
+        price_equivariance=False,
+        price_modes=False,
+        mode_mu=None,
+        price_singular=False,
+        singular_mu=None,
+        singular_llc_steps=150,
+        singular_llc_chains=3,
+        developmental_llc=False,
+        developmental_llc_checkpoints=None,
+        developmental_llc_epochs=None,
+        report_thermo=False,
+        report_response=False,
+        report_ledger=False,
+        progress=False,
+        auto_epoch=None,
+        auto_epoch_patience=4,
+        auto_epoch_min_delta=0.01,
+        auto_epoch_min_epochs=5,
+        stream_subsample_cap=20000,
+        stream_pin_memory=None,
+        stream_prefetch=False,
+        stream_shuffle_buffer=8192,
+    ):
+        self.width = width
+        self.depth = depth
+        self.epochs = epochs
+        self.lr = lr
+        self.weight_decay = weight_decay  # None -> per-contract default (_WEIGHT_DECAY / _DENSE_WEIGHT_DECAY); see _wd
+        self.train_batch = train_batch  # None -> per-contract default (_TRAIN_BATCH / _SET_TRAIN_BATCH); see _tb
         # device may be "cpu" (default, for reproducible validation), "auto" (pick CUDA>MPS>CPU -- uses the
         # Apple-Silicon GPU when present), "cuda"/"mps", or an explicit torch.device. resolve_device turns
         # any of these into a concrete device and falls back to CPU with a warning if the backend is absent.
         from ..device import resolve_device
-        self.device = resolve_device(device); self.seed = seed
-        self._base_device = self.device   # requested device; fit() restores from this so the relational->CPU
-                                          # fallback (below) never leaks into a later, non-relational reuse of this instance
-        self.equivariant_if_positions = equivariant_if_positions; self.verbose = verbose
+
+        self.device = resolve_device(device)
+        self.seed = seed
+        self._base_device = self.device  # requested device; fit() restores from this so the relational->CPU
+        # fallback (below) never leaks into a later, non-relational reuse of this instance
+        self.equivariant_if_positions = equivariant_if_positions
+        self.verbose = verbose
         # gibbs_beta: MDL inverse-temperature for the derived Gibbs-alpha selection. A fixed float (default
         # 8.0, reproducible) OR "auto" -> derived per-fit at the fit-vs-commitment frontier knee from the
         # actual solo energies (see _resolve_gibbs_beta). "auto" changes only the reported alpha confidence
         # (interpretability read-out), never the deployed primitive (which is argmin energy, beta-independent).
-        self.gibbs_beta = gibbs_beta; self.select = "argmax"; self.sparsity_mu = sparsity_mu
+        self.gibbs_beta = gibbs_beta
+        self.select = "argmax"
+        self.sparsity_mu = sparsity_mu
         self.tensorize_mu = tensorize_mu
         # sequence readout selection: try 'flatten' (position-aware, for short "effectively tabular" series)
         # against 'mean', priced by parameter cost. Off by default (preserves prior behaviour); enable with
@@ -406,6 +477,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # pass a ContractRouter instance to supply/persist a corpus.
         if contract_router == "default":
             from ..machinery import default_router
+
             self.contract_router = default_router()
         else:
             self.contract_router = contract_router
@@ -493,8 +565,8 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # back to structural-only pricing for that contract. singular_mu is the price on the functional term
         # (defaults to the contract price mu_c when None). Opt-in; default off leaves selection unchanged.
         self.price_singular = price_singular
-        self.singular_mu = singular_mu       # the report's mu_s (follows the code's <term>_mu price convention,
-                                             # as sparsity_mu/width_mu/depth_mu do); paired with mu_c as mu_s/mu_c
+        self.singular_mu = singular_mu  # the report's mu_s (follows the code's <term>_mu price convention,
+        # as sparsity_mu/width_mu/depth_mu do); paired with mu_c as mu_s/mu_c
         # SGLD budget for the per-contract LLC when price_singular is on (defaults kept modest so the
         # feature is tractable on real datasets; raise for a cleaner, less noisy lambda at more cost).
         self.singular_llc_steps = singular_llc_steps
@@ -548,33 +620,39 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         self.stream_pin_memory = stream_pin_memory
         # stream_prefetch (item 3): overlap the next minibatch's RNG-free fetch with the current batch's compute
         # on a background thread; bit-identical to prefetch off. False/0 -> off; True -> depth 1; int k -> depth k.
-        if not (stream_prefetch is False or stream_prefetch is None
-                or (isinstance(stream_prefetch, bool))
-                or (isinstance(stream_prefetch, int) and stream_prefetch >= 0)):
+        if not (
+            stream_prefetch is False
+            or stream_prefetch is None
+            or (isinstance(stream_prefetch, bool))
+            or (isinstance(stream_prefetch, int) and stream_prefetch >= 0)
+        ):
             raise ValueError(f"stream_prefetch must be False/True or a non-negative int; got {stream_prefetch!r}.")
         self.stream_prefetch = stream_prefetch
         # stream_shuffle_buffer (item 4): windowed shuffle-buffer size for the forward-only iterable regime.
         self.stream_shuffle_buffer = int(stream_shuffle_buffer)
-        self.net = None; self.contract = None; self.route_detail = None
-        self._infer_task = None; self._infer_readout = None   # set by fit(); used by predict()/save()
+        self.net = None
+        self.contract = None
+        self.route_detail = None
+        self._infer_task = None
+        self._infer_readout = None  # set by fit(); used by predict()/save()
 
     # ---- contract restriction (disable an arbitrary subset of the peer schemas) ----
     # canonical peer-contract names (the eight builders _fit_<name>); generated_equivariant is handled
     # separately as an explicit discovered-group path, not an auto-route target.
     _BUILTIN_CONTRACTS = ("sequence", "spatial", "volumetric", "4d", "graph", "equivariant", "set", "operator")
-    _WEIGHT_DECAY = 1e-5          # default L2 weight decay (relational/set/operator contracts + sub-fits)
-    _DENSE_WEIGHT_DECAY = 1e-4    # the dense-grid contracts (sequence/spatial/volumetric/4d) use a higher decay
-    _TRAIN_BATCH = 32            # default SGD minibatch for the training loops (grid/eval chunking is
-                                 # separate, via _run_epochs' batch_size and _fit_grid's eval_bs)
-    _SET_TRAIN_BATCH = 64        # the set contract deploys with a larger minibatch (variable-size collation)
-    _SURROGATE_LR = 5e-3         # lr for the LaLiGAN nonlinear-symmetry surrogate probe net
-    _SKEW_LR_FLOOR = 1e-2        # lr floor for the Sp/SL (skew/volume) EMLP contract fit
-    _SKEW_MIN_GROUPS = 6         # floor on the number of learned soft-groups/frames (Sp/SL contract)
-    _SKEW_ATTN_HIDDEN = 32       # hidden width of the Sp/SL attention-gate MLP
-    _SKEW_READOUT_HIDDEN = 64    # hidden width of the Sp/SL invariant-readout MLP
-    _VOL_MAX_DHW = 16            # cap on the volumetric WORKING grid (the stem downsamples larger volumes to
-                                 # keep the (b,C,D,H,W) conv/dense/attention primitives tractable; a raw 28^3
-                                 # volume ran at full res -> ~8x the activation memory and OOM on MPS)
+    _WEIGHT_DECAY = 1e-5  # default L2 weight decay (relational/set/operator contracts + sub-fits)
+    _DENSE_WEIGHT_DECAY = 1e-4  # the dense-grid contracts (sequence/spatial/volumetric/4d) use a higher decay
+    _TRAIN_BATCH = 32  # default SGD minibatch for the training loops (grid/eval chunking is
+    # separate, via _run_epochs' batch_size and _fit_grid's eval_bs)
+    _SET_TRAIN_BATCH = 64  # the set contract deploys with a larger minibatch (variable-size collation)
+    _SURROGATE_LR = 5e-3  # lr for the LaLiGAN nonlinear-symmetry surrogate probe net
+    _SKEW_LR_FLOOR = 1e-2  # lr floor for the Sp/SL (skew/volume) EMLP contract fit
+    _SKEW_MIN_GROUPS = 6  # floor on the number of learned soft-groups/frames (Sp/SL contract)
+    _SKEW_ATTN_HIDDEN = 32  # hidden width of the Sp/SL attention-gate MLP
+    _SKEW_READOUT_HIDDEN = 64  # hidden width of the Sp/SL invariant-readout MLP
+    _VOL_MAX_DHW = 16  # cap on the volumetric WORKING grid (the stem downsamples larger volumes to
+    # keep the (b,C,D,H,W) conv/dense/attention primitives tractable; a raw 28^3
+    # volume ran at full res -> ~8x the activation memory and OOM on MPS)
 
     @staticmethod
     def _vol_work_dhw(raw, cap=None):
@@ -585,8 +663,8 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         cap = AllGraph._VOL_MAX_DHW if cap is None else cap
         if raw <= cap:
             return raw
-        s = -(-raw // cap)                       # ceil(raw / cap)
-        return (raw - 1) // s + 1                # floor((raw+2*pad-k)/s)+1 with k=3,pad=1
+        s = -(-raw // cap)  # ceil(raw / cap)
+        return (raw - 1) // s + 1  # floor((raw+2*pad-k)/s)+1 with k=3,pad=1
 
     def _wd(self, default=None):
         """Optimizer weight decay: the constructor override (self.weight_decay) when set, else the contract
@@ -628,7 +706,6 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         """True if contract `name` is available under the current restriction (None = all enabled)."""
         return self.enabled_contracts is None or name in self.enabled_contracts
 
-
     def _resolve_enabled_fallback(self, contract, data):
         """If `contract` is disabled, return the nearest ENABLED contract to fall back to; else return it
         unchanged. The fallback order is principled by constructibility and generality: relational contracts
@@ -641,13 +718,13 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # per-contract degradation preference (most specific first, then progressively more general/constructible)
         pref = {
             "equivariant": ["graph", "set", "sequence"],
-            "graph":       ["set", "sequence"],
-            "set":         ["sequence"],
-            "operator":    ["sequence", "spatial", "volumetric"],
-            "4d":          ["volumetric", "spatial", "sequence"],
-            "volumetric":  ["spatial", "sequence"],
-            "spatial":     ["sequence"],
-            "sequence":    ["set"],
+            "graph": ["set", "sequence"],
+            "set": ["sequence"],
+            "operator": ["sequence", "spatial", "volumetric"],
+            "4d": ["volumetric", "spatial", "sequence"],
+            "volumetric": ["spatial", "sequence"],
+            "spatial": ["sequence"],
+            "sequence": ["set"],
         }.get(contract, ["sequence", "set"])
         has_edges = getattr(data, "edges", None) is not None
         has_pos = getattr(data, "positions", None) is not None
@@ -658,7 +735,9 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             # constructibility guards mirroring the admissibility rule used elsewhere in fit()
             if cand in ("graph", "equivariant") and not has_edges:
                 continue
-            if cand in ("set", "graph", "equivariant") and not (has_pos or getattr(data, "node_feats", None) is not None):
+            if cand in ("set", "graph", "equivariant") and not (
+                has_pos or getattr(data, "node_feats", None) is not None
+            ):
                 continue
             if cand in ("sequence", "spatial", "volumetric", "4d", "operator") and not has_dense:
                 continue
@@ -673,7 +752,8 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                 return cand
         raise ValueError(
             f"contract '{contract}' is disabled and no enabled contract in {sorted(self.enabled_contracts)} "
-            f"can represent this data (edges={has_edges}, positions={has_pos}, dense={has_dense}).")
+            f"can represent this data (edges={has_edges}, positions={has_pos}, dense={has_dense})."
+        )
 
     # ---- routing only (no training): useful for inspection / the meta-router's decision ----
     def route(self, data: AllData):
@@ -690,7 +770,8 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             raise ValueError(
                 "a streaming/iterable source on AllData.dense requires an explicit kind_hint in "
                 f"{sorted(_DENSE_CONTRACTS)} so routing never materializes the source; build the input with "
-                f"AllData.{ctor}(source, kind_hint=...).")
+                f"AllData.{ctor}(source, kind_hint=...)."
+            )
         contract, gdetail = route_grid_rank(data.dense, verbose=self.verbose, price_mu=self.tensorize_mu)
         return contract, {"level1": reason, "level2": gdetail}
 
@@ -708,14 +789,14 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             cands = [c for c in cands if self._contract_enabled(c)]
             return cands if len(cands) > 1 else None
         if data.kind_hint is not None:
-            return None                                  # explicit override -> no bake-off
+            return None  # explicit override -> no bake-off
         if data.positions is None:
-            return None                                  # no geometry -> rule-based route is decisive
-        cands = ["set"]                                  # atoms as a bare point set: always constructible
+            return None  # no geometry -> rule-based route is decisive
+        cands = ["set"]  # atoms as a bare point set: always constructible
         if data.node_feats is not None:
-            cands.append("equivariant")                  # positions used geometrically (edges from cutoff)
+            cands.append("equivariant")  # positions used geometrically (edges from cutoff)
             if data.edges is not None:
-                cands.append("graph")                    # topology only (edges, positions folded/ignored)
+                cands.append("graph")  # topology only (edges, positions folded/ignored)
         # honor the contract restriction: the bake-off may only consider ENABLED contracts
         cands = [c for c in cands if self._contract_enabled(c)]
         return cands if len(cands) > 1 else None
@@ -734,6 +815,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         if not self.symmetry_routing or not cands:
             return None
         from .symmetry_contract import contract_from_symmetry
+
         try:
             sc, sconf, sdetail = contract_from_symmetry(data)
         except Exception as e:
@@ -743,23 +825,45 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             # Phase-1 reuse: rotation-invariant target -> canonicalize the coordinates and route to the
             # cheaper SET contract (then effectively E(3)-invariant). Stash the canonicalized positions.
             from .canonicalization import canonicalize_data
+
             cdata, cdetail = canonicalize_data(data)
             if cdetail.get("applied"):
                 self._canonicalized_positions = cdata.positions
-                self._log(f"[AllGraph] symmetry+canonicalize -> set  "
-                          f"[rotation-invariant target canonicalized; {cdetail.get('note','')}]")
-                return "set", {"note": "symmetry canonicalization reuse (rotation-invariant -> canonicalize "
-                               "-> set contract)", "predicted": "set", "confidence": sconf,
-                               "symmetry": sdetail, "canonicalization": cdetail}
+                self._log(
+                    f"[AllGraph] symmetry+canonicalize -> set  "
+                    f"[rotation-invariant target canonicalized; {cdetail.get('note', '')}]"
+                )
+                return "set", {
+                    "note": "symmetry canonicalization reuse (rotation-invariant -> canonicalize -> set contract)",
+                    "predicted": "set",
+                    "confidence": sconf,
+                    "symmetry": sdetail,
+                    "canonicalization": cdetail,
+                }
         if sc in cands and sconf > 0.0:
-            self._log(f"[AllGraph] symmetry -> {sc}  confidence={sconf:.2f} [{sdetail.get('reason','')}]")
-            return sc, {"note": "symmetry-discovered contract (arch(G))", "predicted": sc,
-                        "confidence": sconf, "symmetry": sdetail}
+            self._log(f"[AllGraph] symmetry -> {sc}  confidence={sconf:.2f} [{sdetail.get('reason', '')}]")
+            return sc, {
+                "note": "symmetry-discovered contract (arch(G))",
+                "predicted": sc,
+                "confidence": sconf,
+                "symmetry": sdetail,
+            }
         return None
 
-    def tiebreak(self, data: AllData, task="classification", candidates=None, val_frac=0.25,
-                 tiebreak_epochs=None, edge_cutoff=None, noise_margin=0.02, n_out=None, mu_c=0.05,
-                 record=True, trust_budget=10):
+    def tiebreak(
+        self,
+        data: AllData,
+        task="classification",
+        candidates=None,
+        val_frac=0.25,
+        tiebreak_epochs=None,
+        edge_cutoff=None,
+        noise_margin=0.02,
+        n_out=None,
+        mu_c=0.05,
+        record=True,
+        trust_budget=10,
+    ):
         """Learned Level-1 tie-break (clean-solo, one level up). For geometric data (positions present),
         the best CONTRACT -- equivariant vs graph vs set -- is data-dependent, so we train each candidate
         contract briefly from scratch on a shared held-out split and pick the best by the MDL objective
@@ -774,6 +878,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         than mu_c times its added structural code length. mu_c is the contract price (0 -> pure best-fit).
         """
         from ..machinery import clean_solo_select, dataset_omega_struct, marginal_value_contract, select_contract_mdl
+
         # under streaming, run the whole contract bake-off on the bounded resident subsample (drawn once); the
         # winning contract then deploy-trains on the FULL stream. _tiebreak_candidates reads the source metadata.
         cands = candidates or self._tiebreak_candidates(data)
@@ -806,15 +911,27 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             #     cheap contract via the Omega charge), PREFER the router's prediction. The router is
             #     seeded from FULL-BUDGET outcomes, so its label is more reliable than a tiny bake-off.
             if pred in cands and (conf >= self.contract_router.min_confidence or ep_planned < trust_budget):
-                why = "confident" if conf >= self.contract_router.min_confidence else \
-                      f"bake-off budget {ep_planned} < {trust_budget} is untrustworthy; trusting full-budget-seeded router"
+                why = (
+                    "confident"
+                    if conf >= self.contract_router.min_confidence
+                    else f"bake-off budget {ep_planned} < {trust_budget} is untrustworthy; trusting full-budget-seeded router"
+                )
                 self._log(f"[AllGraph] tiebreak (learned) -> {pred}  confidence={conf:.2f} ({why})")
-                return pred, {pred: float("nan")}, {"note": f"learned contract router ({why}); bake-off skipped",
-                                                    "predicted": pred, "confidence": conf, "router": pdetail,
-                                                    "descriptor": list(descriptor)}
+                return (
+                    pred,
+                    {pred: float("nan")},
+                    {
+                        "note": f"learned contract router ({why}); bake-off skipped",
+                        "predicted": pred,
+                        "confidence": conf,
+                        "router": pdetail,
+                        "descriptor": list(descriptor),
+                    },
+                )
         n = len(data.node_feats)
         rng = np.random.RandomState(self.seed)
-        perm = rng.permutation(n); nval = max(1, int(val_frac * n))
+        perm = rng.permutation(n)
+        nval = max(1, int(val_frac * n))
         va, tr = perm[:nval], perm[nval:]
         ep = tiebreak_epochs if tiebreak_epochs is not None else self._search_ep(max(5, self.epochs // 3))
         n_out = self._infer_nout(data.y, task, n_out)
@@ -845,6 +962,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         singular_detail = {}
         if getattr(self, "price_singular", False) and singular_nets:
             from ..machinery.singular_mdl import singular_complexity_of
+
             s_mu = self.singular_mu if self.singular_mu is not None else mu_c
             # SGLD budget for the per-contract LLC: default is modest so price_singular stays tractable
             # on real datasets; raise via singular_llc_steps/singular_llc_chains for a cleaner lambda.
@@ -852,9 +970,16 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             _llc_chains = getattr(self, "singular_llc_chains", 3)
             for c, (net, closure, n_tr) in singular_nets.items():
                 try:
-                    sc = singular_complexity_of(net, closure, n_tr, chains=_llc_chains,
-                                                steps=_llc_steps, burn=max(30, _llc_steps // 4),
-                                                eps=2e-5, seed=self.seed)
+                    sc = singular_complexity_of(
+                        net,
+                        closure,
+                        n_tr,
+                        chains=_llc_chains,
+                        steps=_llc_steps,
+                        burn=max(30, _llc_steps // 4),
+                        eps=2e-5,
+                        seed=self.seed,
+                    )
                 except Exception as e:
                     singular_detail[c] = {"error": f"{type(e).__name__}: {e}", "applied": False}
                     continue
@@ -863,22 +988,40 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                     # (s_mu/mu_c)*omega_func as extra Omega (guarding mu_c==0 -> just add omega_func).
                     extra = (s_mu / mu_c) * sc["omega_func"] if mu_c > 0 else sc["omega_func"]
                     omegas[c] = omegas[c] + extra
-                    singular_detail[c] = {"lambda": sc["lambda"], "omega_func": sc["omega_func"],
-                                          "priced_extra_omega": extra, "valid": True, "applied": True}
+                    singular_detail[c] = {
+                        "lambda": sc["lambda"],
+                        "omega_func": sc["omega_func"],
+                        "priced_extra_omega": extra,
+                        "valid": True,
+                        "applied": True,
+                    }
                 else:
-                    singular_detail[c] = {"lambda": sc["lambda"], "valid": False, "applied": False,
-                                          "note": "non-converged candidate; structural-only pricing"}
-            self._log(f"[AllGraph] D1 singular pricing applied to contracts: "
-                      f"{ {c: round(d.get('omega_func', float('nan')), 2) for c, d in singular_detail.items()} }")
+                    singular_detail[c] = {
+                        "lambda": sc["lambda"],
+                        "valid": False,
+                        "applied": False,
+                        "note": "non-converged candidate; structural-only pricing",
+                    }
+            self._log(
+                f"[AllGraph] D1 singular pricing applied to contracts: "
+                f"{ {c: round(d.get('omega_func', float('nan')), 2) for c, d in singular_detail.items()} }"
+            )
         # PRIMARY selection: global J = R + mu_c * Omega_struct (min total description length). Robust to
         # non-monotone fit profiles (unlike the greedy marginal-value rule); the structural charge breaks
         # only genuine near-ties, exactly where the old ordinal kappa did.
         mdl_winner, mdl_detail = select_contract_mdl(scores, omegas, mu_c=mu_c)
         # marginal-value CERTIFICATE (diagnostic reading: does climbing the lattice pay?)
         _, mv_detail = marginal_value_contract(scores, omegas, mu_c=mu_c)
-        detail = {"scores": scores, "margin": margin, "epochs": ep, "val_frac": val_frac,
-                  "omega_struct": omegas, "mdl": mdl_detail, "marginal_value": mv_detail,
-                  "best_fit": winner}
+        detail = {
+            "scores": scores,
+            "margin": margin,
+            "epochs": ep,
+            "val_frac": val_frac,
+            "omega_struct": omegas,
+            "mdl": mdl_detail,
+            "marginal_value": mv_detail,
+            "best_fit": winner,
+        }
         if singular_detail:
             detail["singular_pricing"] = singular_detail
         # OPT-IN Bayesian reading (direction B1): report an approximate posterior over contracts. The fit
@@ -887,19 +1030,23 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # a REPORTED uncertainty layer, not a different selection.
         if getattr(self, "contract_posterior", False):
             from ..machinery.contract_evidence import contract_evidence
+
             n_ct = len(data.node_feats) if getattr(data, "node_feats", None) is not None else len(sizes)
             n_classes = self._infer_nout(data.y, task, n_out) if task == "classification" else 2
             # scores are R2/accuracy (scale-invariant); use the standardized-y NLL scale (y_std=1). Any
             # log(y_std) offset is common to all contracts and cancels in the posterior, so this is exact
             # for the COMPARISON while keeping the fit term on a clean per-datum nats scale.
-            ev = contract_evidence(scores, omegas, n=n_ct, task=task, n_classes=n_classes,
-                                   y_std=1.0, mu_c=1.0)
+            ev = contract_evidence(scores, omegas, n=n_ct, task=task, n_classes=n_classes, y_std=1.0, mu_c=1.0)
             detail["posterior"] = ev
-            self._log(f"[AllGraph] contract posterior -> {ev['map']} "
-                      f"(P={ev['posterior'][ev['map']]:.3f}, entropy={ev['posterior_entropy']:.2f} nats)")
+            self._log(
+                f"[AllGraph] contract posterior -> {ev['map']} "
+                f"(P={ev['posterior'][ev['map']]:.3f}, entropy={ev['posterior_entropy']:.2f} nats)"
+            )
         if mdl_winner != winner:
-            detail["note"] = (f"'{winner}' best fit ({ranked[0][1]:.3f}) but J = R + mu_c*Omega_struct "
-                              f"selects '{mdl_winner}' (derived structural Occam over the contract lattice)")
+            detail["note"] = (
+                f"'{winner}' best fit ({ranked[0][1]:.3f}) but J = R + mu_c*Omega_struct "
+                f"selects '{mdl_winner}' (derived structural Occam over the contract lattice)"
+            )
         winner = mdl_winner
         # RECORD the bake-off outcome to improve the router -- but ONLY if recording is enabled AND the
         # bake-off ran at a trustworthy budget. Reduced-budget bake-offs give budget-artifact labels (the
@@ -908,8 +1055,10 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         if self.contract_router is not None and descriptor is not None and record and ep >= trust_budget:
             self.contract_router.add(descriptor, winner)
             detail["router_updated"] = True
-        self._log(f"[AllGraph] tiebreak -> {winner}  scores={ {k: round(v,4) for k,v in scores.items()} }"
-                  f"  Omega_struct={ {k: round(v,1) for k,v in omegas.items()} }  mu_c={mu_c}")
+        self._log(
+            f"[AllGraph] tiebreak -> {winner}  scores={ {k: round(v, 4) for k, v in scores.items()} }"
+            f"  Omega_struct={ {k: round(v, 1) for k, v in omegas.items()} }  mu_c={mu_c}"
+        )
         return winner, scores, detail
 
     def _dataset_descriptor(self, data, edge_cutoff=None):
@@ -917,6 +1066,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         AllData container: per-datum positions, node features, dense adjacency (from edges if present,
         else a distance-cutoff graph on positions), and the target y."""
         from ..machinery import dataset_descriptor
+
         positions = list(data.positions) if data.positions is not None else [None] * len(data.node_feats)
         node_feats = list(data.node_feats)
         adjacencies = []
@@ -927,7 +1077,8 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                 e = np.asarray(data.edges[i])
                 A = np.zeros((N, N))
                 if e.size:
-                    A[e[0], e[1]] = 1.0; A[e[1], e[0]] = 1.0
+                    A[e[0], e[1]] = 1.0
+                    A[e[1], e[0]] = 1.0
             elif data.positions is not None:
                 P = np.asarray(data.positions[i])
                 D = np.linalg.norm(P[:, None, :] - P[None, :, :], axis=-1)
@@ -950,8 +1101,9 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         elif data.positions is not None:
             edge_counts = []
             for p in data.positions:
-                p = np.asarray(p); D = np.linalg.norm(p[:, None, :] - p[None, :, :], axis=-1)
-                E = int(((D < self._edge_cut(D, edge_cutoff)).sum() - len(p)) // 2)   # undirected, excluding self
+                p = np.asarray(p)
+                D = np.linalg.norm(p[:, None, :] - p[None, :, :], axis=-1)
+                E = int(((D < self._edge_cut(D, edge_cutoff)).sum() - len(p)) // 2)  # undirected, excluding self
                 edge_counts.append(E)
         else:
             edge_counts = [0] * len(sizes)
@@ -966,12 +1118,16 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         try:
             from ..models.approximate_equivariance import ApproxEquivariantModel, select_relaxation
             from ..models.latent_equivariant_contract import build_latent_equivariant_contract
+
             ld = res.get("latent_dim", latent_dim)
             realization = getattr(self, "equivariant_realization", "emlp")
             lf = nn.CrossEntropyLoss() if task == "classification" else nn.MSELoss()
             # train/val split for the priced selection
-            n = len(X); rng = np.random.RandomState(self.seed); perm = rng.permutation(n)
-            ntr = int(0.75 * n); tr_idx, va_idx = perm[:ntr], perm[ntr:]
+            n = len(X)
+            rng = np.random.RandomState(self.seed)
+            perm = rng.permutation(n)
+            ntr = int(0.75 * n)
+            tr_idx, va_idx = perm[:ntr], perm[ntr:]
             yt = torch.as_tensor(y)
 
             def score(out, idx):
@@ -979,15 +1135,16 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                     if task == "classification":
                         pred = out.argmax(-1).cpu().numpy()
                         return float((pred == y[idx]).mean())
-                    p = out.squeeze(-1).cpu().numpy(); t = y[idx]
+                    p = out.squeeze(-1).cpu().numpy()
+                    t = y[idx]
                     return float(1 - ((p - t) ** 2).sum() / (((t - t.mean()) ** 2).sum() + 1e-9))
 
             class _Wrap(ApproxEquivariantModel):
                 # equiv head consumes the latent chart output; free head consumes the same latent (encoder out)
                 def forward(m, x, x_equiv=None):
-                    out = m.equiv(x)                      # x is the raw input; equiv is the full contract
+                    out = m.equiv(x)  # x is the raw input; equiv is the full contract
                     if m.relax > 0:
-                        z = m.equiv.latent(x)             # frozen-encoder latent for the free pathway
+                        z = m.equiv.latent(x)  # frozen-encoder latent for the free pathway
                         out = out + m.relax * m.free(z)
                     return out
 
@@ -996,27 +1153,33 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                         eq = m.equiv(x)
                         z = m.equiv.latent(x)
                         full = eq + (m.relax * m.free(z) if m.relax > 0 else 0.0)
-                        return float(((full - eq) ** 2).mean()) / (float((full ** 2).mean()) + 1e-9)
+                        return float(((full - eq) ** 2).mean()) / (float((full**2).mean()) + 1e-9)
 
             built = {}
 
             def build_and_train(relax):
                 torch.manual_seed(self.seed)
-                contract = build_latent_equivariant_contract(enc, gens, latent_dim=ld, n_out=n_out,
-                                                             depth=self.depth, realization=realization).to(self.device)
+                contract = build_latent_equivariant_contract(
+                    enc, gens, latent_dim=ld, n_out=n_out, depth=self.depth, realization=realization
+                ).to(self.device)
                 net = _Wrap(contract, free_in_dim=ld, n_out=n_out, relax=relax).to(self.device)
-                opt = torch.optim.Adam([p for p in net.parameters() if p.requires_grad], lr=self.lr,
-                                       weight_decay=self._wd())
+                opt = torch.optim.Adam(
+                    [p for p in net.parameters() if p.requires_grad], lr=self.lr, weight_decay=self._wd()
+                )
                 idx = np.array(tr_idx)
                 for _ in range(max(self.epochs, 60)):
                     np.random.shuffle(idx)
                     for j in range(0, len(idx), 64):
-                        b = idx[j:j + 64]
+                        b = idx[j : j + 64]
                         opt.zero_grad()
                         out = net(Xt[b])
-                        tgt = (yt[b].long().to(self.device) if task == "classification"
-                               else yt[b].float().unsqueeze(1).to(self.device))
-                        lf(out, tgt).backward(); opt.step()
+                        tgt = (
+                            yt[b].long().to(self.device)
+                            if task == "classification"
+                            else yt[b].float().unsqueeze(1).to(self.device)
+                        )
+                        lf(out, tgt).backward()
+                        opt.step()
                 built[relax] = net
                 with torch.no_grad():
                     out_va = net(Xt[va_idx])
@@ -1024,24 +1187,36 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                 om = net.breaking_power(Xt[va_idx])
                 return vr, om
 
-            best, detail = select_relaxation(build_and_train, relax_ladder=(0.0, 0.1, 0.3, 1.0),
-                                             mu_c=float(self.mu) if hasattr(self, "mu") else 0.3)
+            best, detail = select_relaxation(
+                build_and_train, relax_ladder=(0.0, 0.1, 0.3, 1.0), mu_c=float(self.mu) if hasattr(self, "mu") else 0.3
+            )
             net = built[best]
             self.contract = "latent_equivariant"
             self.net = net
             with torch.no_grad():
                 out = net(Xt).cpu()
             metric, value = self._metric(out, y, task)
-            self.route_detail = {**(self.route_detail or {}),
-                                 "nonlinear_contract": f"CONFIRMED latent {res.get('latent_group')} symmetry; "
-                                 f"priced approximate equivariance selected relax={best} "
-                                 f"(exact equivariance if 0)",
-                                 "approx_equivariance": detail}
-            self._log(f"[AllGraph] approx-equivariant contract DEPLOYED: latent {res.get('latent_group')}, "
-                      f"selected relax={best}, {metric}={value:.3f}")
-            return {"contract": "latent_equivariant", "architecture": ["encoder", "latent_EMLP", "free_residual"],
-                    "metric": metric, "value": float(value), "selected_relax": float(best),
-                    "latent_group": res.get("latent_group"), "latent_dim": ld, "route_detail": self.route_detail}
+            self.route_detail = {
+                **(self.route_detail or {}),
+                "nonlinear_contract": f"CONFIRMED latent {res.get('latent_group')} symmetry; "
+                f"priced approximate equivariance selected relax={best} "
+                f"(exact equivariance if 0)",
+                "approx_equivariance": detail,
+            }
+            self._log(
+                f"[AllGraph] approx-equivariant contract DEPLOYED: latent {res.get('latent_group')}, "
+                f"selected relax={best}, {metric}={value:.3f}"
+            )
+            return {
+                "contract": "latent_equivariant",
+                "architecture": ["encoder", "latent_EMLP", "free_residual"],
+                "metric": metric,
+                "value": float(value),
+                "selected_relax": float(best),
+                "latent_group": res.get("latent_group"),
+                "latent_dim": ld,
+                "route_detail": self.route_detail,
+            }
         except Exception as e:
             self._log(f"[AllGraph] approx-equivariant deploy skipped ({str(e)[:70]})")
             return None
@@ -1056,48 +1231,59 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
 
             from ..models.latent_equivariant_contract import build_latent_equivariant_contract
             from .nonlinear_symmetry import discover_nonlinear_symmetries_joint
+
             if data.positions is None:
                 return None
             clouds = [np.asarray(p, dtype=np.float32).ravel() for p in data.positions]
             if len(clouds) < 30:
                 return None
             d = min(len(c) for c in clouds)
-            self._latent_input_dim = int(d)          # flatten-truncation length; predict() replays it on new data
+            self._latent_input_dim = int(d)  # flatten-truncation length; predict() replays it on new data
             X = np.stack([c[:d] for c in clouds]).astype(np.float32)
-            y = np.asarray(data.y, dtype=np.float32).ravel()[:len(X)]
+            y = np.asarray(data.y, dtype=np.float32).ravel()[: len(X)]
             Xt = torch.tensor(X).to(self.device)
             latent_dim = min(max(2, d // 4), 6)
             # surrogate task model so the discovery has an f whose latent invariance to test
             yt = torch.tensor((y - y.mean()) / (y.std() + 1e-8)).to(self.device)
-            surrogate = torch.nn.Sequential(torch.nn.Linear(d, 32), torch.nn.Tanh(),
-                                            torch.nn.Linear(32, 1)).to(self.device)
+            surrogate = torch.nn.Sequential(torch.nn.Linear(d, 32), torch.nn.Tanh(), torch.nn.Linear(32, 1)).to(
+                self.device
+            )
             opt = torch.optim.Adam(surrogate.parameters(), lr=self._SURROGATE_LR)
             for _ in range(200):
-                opt.zero_grad(); ((surrogate(Xt).squeeze(-1) - yt) ** 2).mean().backward(); opt.step()
-            res = discover_nonlinear_symmetries_joint(surrogate, Xt.cpu(), latent_dim=latent_dim,
-                                                      epochs=600, sym_weight=30.0, seed=self.seed)
+                opt.zero_grad()
+                ((surrogate(Xt).squeeze(-1) - yt) ** 2).mean().backward()
+                opt.step()
+            res = discover_nonlinear_symmetries_joint(
+                surrogate, Xt.cpu(), latent_dim=latent_dim, epochs=600, sym_weight=30.0, seed=self.seed
+            )
             # CONFIRMATION GATE: require the null-baseline guard AND a non-degenerate, classifiable signal.
             # confirmed_by_null already encodes "learned generator is >=null_ratio quieter than random", the
             # scale-free criterion (absolute violations can be tiny when the surrogate fits well yet the RATIO
             # is decisive). We additionally require that the null violation is not utterly negligible relative
             # to the surrogate's own loss scale (guards the pathological case where g is constant in the whole
             # latent, making every direction vacuously "invariant"), and that a latent generator is available.
-            sviol = float(res.get("sym_violation", 0.0)); nviol = float(res.get("null_violation", 0.0))
+            sviol = float(res.get("sym_violation", 0.0))
+            nviol = float(res.get("null_violation", 0.0))
             confirmed = res.get("confirmed_by_null", False)
-            quieter = nviol / (sviol + 1e-12)                 # how many x quieter the learned gen is
+            quieter = nviol / (sviol + 1e-12)  # how many x quieter the learned gen is
             # relative-scale non-degeneracy: null violation must be an appreciable fraction of a reference
             # perturbation of g (here, the surrogate output std ~ O(1) after standardization); use a small
             # relative floor so a genuinely-quiet-but-well-fit symmetry (large `quieter`) still passes.
             nondegenerate = (quieter >= res.get("_null_ratio", 1.5)) or (nviol > 1e-3)
             gens_available = bool(res.get("generators_latent")) or (res.get("learned_generator") is not None)
             if not (confirmed and nondegenerate and gens_available):
-                reason = ("learned generator not decisively quieter than random "
-                          f"({quieter:.1f}x)" if not nondegenerate
-                          else "no latent generator available" if not gens_available
-                          else f"null guard failed (sym={sviol:.4f} vs null={nviol:.4f})")
-                self.route_detail = {**(self.route_detail or {}),
-                                     "nonlinear_contract": f"discovery did NOT confirm a deployable latent "
-                                     f"symmetry ({reason}); falling back to the normal route"}
+                reason = (
+                    f"learned generator not decisively quieter than random ({quieter:.1f}x)"
+                    if not nondegenerate
+                    else "no latent generator available"
+                    if not gens_available
+                    else f"null guard failed (sym={sviol:.4f} vs null={nviol:.4f})"
+                )
+                self.route_detail = {
+                    **(self.route_detail or {}),
+                    "nonlinear_contract": f"discovery did NOT confirm a deployable latent "
+                    f"symmetry ({reason}); falling back to the normal route",
+                }
                 return None
             # confirmed: build the contract from the AE encoder + the (confirmed) latent generators
             enc = res["ae"].enc.to(self.device)
@@ -1112,39 +1298,58 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                 relax_res = self._deploy_approx_equivariant(enc, gens, res, latent_dim, X, y, Xt, task, n_out)
                 if relax_res is not None:
                     return relax_res
-            net = build_latent_equivariant_contract(enc, gens, latent_dim=res.get("latent_dim", latent_dim),
-                                                    n_out=n_out, depth=self.depth,
-                                                    realization=getattr(self, "equivariant_realization", "emlp")).to(self.device)
+            net = build_latent_equivariant_contract(
+                enc,
+                gens,
+                latent_dim=res.get("latent_dim", latent_dim),
+                n_out=n_out,
+                depth=self.depth,
+                realization=getattr(self, "equivariant_realization", "emlp"),
+            ).to(self.device)
             # train the EMLP head (encoder frozen) on the FULL data
-            optn = torch.optim.Adam([p for p in net.parameters() if p.requires_grad], lr=self.lr,
-                                    weight_decay=self._wd())
+            optn = torch.optim.Adam(
+                [p for p in net.parameters() if p.requires_grad], lr=self.lr, weight_decay=self._wd()
+            )
             lf = nn.CrossEntropyLoss() if task == "classification" else nn.MSELoss()
             yt2 = torch.as_tensor(y)
             idx = np.arange(len(X))
-            for _ in range(max(self.epochs, 60)):        # give the head enough to converge
+            for _ in range(max(self.epochs, 60)):  # give the head enough to converge
                 np.random.shuffle(idx)
                 for j in range(0, len(idx), 64):
-                    b = idx[j:j + 64]
+                    b = idx[j : j + 64]
                     optn.zero_grad()
                     out = net(Xt[b])
-                    tgt = (yt2[b].long().to(self.device) if task == "classification"
-                           else yt2[b].float().unsqueeze(1).to(self.device))
-                    lf(out, tgt).backward(); optn.step()
+                    tgt = (
+                        yt2[b].long().to(self.device)
+                        if task == "classification"
+                        else yt2[b].float().unsqueeze(1).to(self.device)
+                    )
+                    lf(out, tgt).backward()
+                    optn.step()
             self.contract = "latent_equivariant"
             self.net = net
             with torch.no_grad():
                 out = net(Xt).cpu()
             metric, value = self._metric(out, y, task)
-            self.route_detail = {**(self.route_detail or {}),
-                                 "nonlinear_contract": f"CONFIRMED latent {res.get('latent_group')} symmetry "
-                                 f"(sym_viol={res.get('sym_violation'):.4f} << null={res.get('null_violation'):.4f}); "
-                                 f"deployed latent-equivariant contract (latent_dim={res.get('latent_dim', latent_dim)})"}
-            self._log(f"[AllGraph] nonlinear contract DEPLOYED: latent {res.get('latent_group')} symmetry, "
-                      f"{metric}={value:.3f}")
-            return {"contract": "latent_equivariant", "architecture": ["encoder", "latent_EMLP"],
-                    "metric": metric, "value": float(value),
-                    "latent_group": res.get("latent_group"), "latent_dim": res.get("latent_dim", latent_dim),
-                    "route_detail": self.route_detail}
+            self.route_detail = {
+                **(self.route_detail or {}),
+                "nonlinear_contract": f"CONFIRMED latent {res.get('latent_group')} symmetry "
+                f"(sym_viol={res.get('sym_violation'):.4f} << null={res.get('null_violation'):.4f}); "
+                f"deployed latent-equivariant contract (latent_dim={res.get('latent_dim', latent_dim)})",
+            }
+            self._log(
+                f"[AllGraph] nonlinear contract DEPLOYED: latent {res.get('latent_group')} symmetry, "
+                f"{metric}={value:.3f}"
+            )
+            return {
+                "contract": "latent_equivariant",
+                "architecture": ["encoder", "latent_EMLP"],
+                "metric": metric,
+                "value": float(value),
+                "latent_group": res.get("latent_group"),
+                "latent_dim": res.get("latent_dim", latent_dim),
+                "route_detail": self.route_detail,
+            }
         except Exception as e:
             self._log(f"[AllGraph] nonlinear contract skipped ({str(e)[:70]})")
             return None
@@ -1159,29 +1364,34 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             import torch
 
             from .nonlinear_symmetry import discover_nonlinear_symmetries
+
             # assemble a matrix of flattened clouds as the coordinate space X (n, d)
             clouds = []
-            for p in (data.positions if data.positions is not None else []):
+            for p in data.positions if data.positions is not None else []:
                 a = np.asarray(p, dtype=np.float32).ravel()
                 clouds.append(a)
             if len(clouds) < 30:
                 return None
             d = min(len(c) for c in clouds)
             X = np.stack([c[:d] for c in clouds]).astype(np.float32)
-            y = np.asarray(data.y, dtype=np.float32).ravel()[:len(X)]
+            y = np.asarray(data.y, dtype=np.float32).ravel()[: len(X)]
             # a tiny surrogate task model y ~ g(X), so the detector has an f to test invariance of
-            Xt = torch.tensor(X); yt = torch.tensor((y - y.mean()) / (y.std() + 1e-8))
-            surrogate = torch.nn.Sequential(torch.nn.Linear(X.shape[1], 32), torch.nn.Tanh(),
-                                            torch.nn.Linear(32, 1))
+            Xt = torch.tensor(X)
+            yt = torch.tensor((y - y.mean()) / (y.std() + 1e-8))
+            surrogate = torch.nn.Sequential(torch.nn.Linear(X.shape[1], 32), torch.nn.Tanh(), torch.nn.Linear(32, 1))
             opt = torch.optim.Adam(surrogate.parameters(), lr=self._SURROGATE_LR)
             for _ in range(150):
-                opt.zero_grad(); ((surrogate(Xt).squeeze(-1) - yt) ** 2).mean().backward(); opt.step()
+                opt.zero_grad()
+                ((surrogate(Xt).squeeze(-1) - yt) ** 2).mean().backward()
+                opt.step()
             res = discover_nonlinear_symmetries(surrogate, Xt, ae_epochs=200)
-            return {"n_symmetries": int(res.get("n_symmetries", 0)),
-                    "gap_ratio": round(float(res.get("gap_ratio", 0.0)), 3),
-                    "latent_group": res.get("latent_group", "none"),
-                    "ae_recon": round(float(res.get("ae_recon", 0.0)), 5),
-                    "note": res.get("note", "")}
+            return {
+                "n_symmetries": int(res.get("n_symmetries", 0)),
+                "gap_ratio": round(float(res.get("gap_ratio", 0.0)), 3),
+                "latent_group": res.get("latent_group", "none"),
+                "ae_recon": round(float(res.get("ae_recon", 0.0)), 5),
+                "note": res.get("note", ""),
+            }
         except Exception as e:
             self._log(f"[AllGraph] nonlinear_symmetry_fallback skipped ({str(e)[:60]})")
             return None
@@ -1196,6 +1406,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         a measured quantity rather than fixed by module choice. Returns (keep_vectors: bool, detail)."""
         try:
             from .angular_resolution import select_max_l
+
             graphs = []
             for i in range(len(data.node_feats)):
                 pos = np.asarray(data.positions[i], dtype=np.float32)
@@ -1206,11 +1417,15 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                 y = y.astype(np.float64)
             res = select_max_l(graphs, y, mu=mu, max_l=2)
             keep = int(res["max_l"]) >= 1
-            detail = {"selected_max_l": int(res["max_l"]),
-                      "marginals": {int(k): round(float(v), 4) for k, v in res["marginals"].items()},
-                      "keep_vectors": bool(keep)}
-            self._log(f"[AllGraph] angular_from_data -> max_l={res['max_l']} "
-                      f"({'keep' if keep else 'drop'} l=1 vector channels)")
+            detail = {
+                "selected_max_l": int(res["max_l"]),
+                "marginals": {int(k): round(float(v), 4) for k, v in res["marginals"].items()},
+                "keep_vectors": bool(keep),
+            }
+            self._log(
+                f"[AllGraph] angular_from_data -> max_l={res['max_l']} "
+                f"({'keep' if keep else 'drop'} l=1 vector channels)"
+            )
             return keep, detail
         except Exception as e:
             self._log(f"[AllGraph] angular_from_data skipped ({str(e)[:60]})")
@@ -1227,11 +1442,12 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         actually are, never the selection itself."""
         if isinstance(self.gibbs_beta, str) and self.gibbs_beta.lower() == "auto":
             from ..machinery.gibbs_alpha import select_beta_by_elbow
+
             energies = np.array([scores[p] for p in prims], dtype=float)
             if len(energies) >= 2 and np.ptp(energies) > 1e-9:
                 bstar, _ = select_beta_by_elbow(energies)
                 return float(bstar)
-            return 8.0            # degenerate (all-equal) energies -> fall back to the fixed default
+            return 8.0  # degenerate (all-equal) energies -> fall back to the fixed default
         return float(self.gibbs_beta)
 
     def apply_canonicalization(self, data):
@@ -1246,12 +1462,14 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         import copy
 
         from .canonicalization import canonicalize_data
+
         cdata, _ = canonicalize_data(data)
         out = copy.copy(data)
         cpos = cdata.positions if cdata.positions is not None else data.positions
-        out.node_feats = [np.concatenate([np.asarray(nf, np.float32),
-                                          np.asarray(cpos[i], np.float32)], axis=1)
-                          for i, nf in enumerate(data.node_feats)]
+        out.node_feats = [
+            np.concatenate([np.asarray(nf, np.float32), np.asarray(cpos[i], np.float32)], axis=1)
+            for i, nf in enumerate(data.node_feats)
+        ]
         out.positions = cpos
         return out
 
@@ -1263,6 +1481,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         formatted text block if as_text=True."""
         from .interpretability import explain as _explain
         from .interpretability import format_report
+
         R = _explain(self, result=result, **kwargs)
         return format_report(R) if as_text else R
 
@@ -1285,23 +1504,45 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         the plain float-returning contract used by the size/primitive sweeps."""
         data, contract, tr, va, task, n_out, epochs, edge_cutoff = ctx
         from ..models import build_equivariant_graph_schema, build_graph_schema, build_set_schema
+
         torch.manual_seed(self.seed)
         n_in = data.node_feats[0].shape[1]
-        y = np.asarray(data.y); yt = torch.as_tensor(y)
+        y = np.asarray(data.y)
+        yt = torch.as_tensor(y)
         # build a lightweight net for the contract
         if contract == "graph":
-            net = build_graph_schema(n_in=n_in, width=self.width, depth=self.depth,
-                                                 n_out=n_out, primitives=("gcn", "gin", "pna", "norm"), readout="mean")
-            with_pos = False; use_edges = True
+            net = build_graph_schema(
+                n_in=n_in,
+                width=self.width,
+                depth=self.depth,
+                n_out=n_out,
+                primitives=("gcn", "gin", "pna", "norm"),
+                readout="mean",
+            )
+            with_pos = False
+            use_edges = True
         elif contract == "equivariant":
-            net = build_equivariant_graph_schema(n_in=n_in, c0=self.width, c1=max(self.width // 2, 2),
-                                                             depth=self.depth, n_out=n_out,
-                                                             primitives=("e_tp", "e_kan", "e_painn", "e_gate", "e_norm"))
-            with_pos = True; use_edges = True
+            net = build_equivariant_graph_schema(
+                n_in=n_in,
+                c0=self.width,
+                c1=max(self.width // 2, 2),
+                depth=self.depth,
+                n_out=n_out,
+                primitives=("e_tp", "e_kan", "e_painn", "e_gate", "e_norm"),
+            )
+            with_pos = True
+            use_edges = True
         else:  # set
-            net = build_set_schema(n_in=n_in, width=self.width, depth=self.depth, n_out=n_out,
-                                               primitives=("deepsets", "element_mlp", "norm"), readout="mean")
-            with_pos = False; use_edges = False
+            net = build_set_schema(
+                n_in=n_in,
+                width=self.width,
+                depth=self.depth,
+                n_out=n_out,
+                primitives=("deepsets", "element_mlp", "norm"),
+                readout="mean",
+            )
+            with_pos = False
+            use_edges = False
         net = net.to(self.device)
         opt = torch.optim.Adam(net.parameters(), lr=self.lr, weight_decay=self._wd())
         lf = nn.CrossEntropyLoss() if task == "classification" else nn.MSELoss()
@@ -1313,17 +1554,23 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         for _ in range(epochs):
             np.random.shuffle(tr)
             for j in range(0, len(tr), self._tb()):
-                ids = tr[j:j + self._tb()]
+                ids = tr[j : j + self._tb()]
                 opt.zero_grad()
                 out = fwd(ids)
-                target = yt[ids].long().to(self.device) if task == "classification" else yt[ids].float().unsqueeze(1).to(self.device)
-                lf(out, target).backward(); opt.step()
+                target = (
+                    yt[ids].long().to(self.device)
+                    if task == "classification"
+                    else yt[ids].float().unsqueeze(1).to(self.device)
+                )
+                lf(out, target).backward()
+                opt.step()
         # validation score
         outs = []
         va = np.asarray(va)
         for j in range(0, len(va), 64):
-            ids = va[j:j + 64]
-            with torch.no_grad(): outs.append(fwd(ids).cpu())
+            ids = va[j : j + 64]
+            with torch.no_grad():
+                outs.append(fwd(ids).cpu())
         out = torch.cat(outs)
         _, value = self._metric(out, y[va], task)
         if return_net:
@@ -1333,10 +1580,13 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             def loss_closure():
                 total, cnt = 0.0, 0
                 for j in range(0, len(tr_arr), 64):
-                    ids = tr_arr[j:j + 64]
+                    ids = tr_arr[j : j + 64]
                     o = fwd(ids)
-                    tgt = (yt[ids].long().to(self.device) if task == "classification"
-                           else yt[ids].float().unsqueeze(1).to(self.device))
+                    tgt = (
+                        yt[ids].long().to(self.device)
+                        if task == "classification"
+                        else yt[ids].float().unsqueeze(1).to(self.device)
+                    )
                     b = len(ids)
                     total = total + lf(o, tgt) * b
                     cnt += b
@@ -1356,8 +1606,8 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         n = D.shape[0]
         if n < 2:
             return 0.0
-        Dm = D + np.eye(n) * (float(D.max()) + 1.0)      # mask self-distances (the diagonal zeros)
-        return _EDGE_NN_FACTOR * float(np.median(Dm.min(axis=1)))   # NN-factor x median nearest-neighbor dist
+        Dm = D + np.eye(n) * (float(D.max()) + 1.0)  # mask self-distances (the diagonal zeros)
+        return _EDGE_NN_FACTOR * float(np.median(Dm.min(axis=1)))  # NN-factor x median nearest-neighbor dist
 
     def _forward_contract(self, net, data, ids, contract, with_pos, use_edges, edge_cutoff):
         """Forward one batch under a candidate contract. Builds edges from a distance cutoff if the
@@ -1375,13 +1625,15 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         def node_t(i):
             t = ncache.get(i)
             if t is None:
-                t = torch.as_tensor(data.node_feats[i], dtype=torch.float32); ncache[i] = t
+                t = torch.as_tensor(data.node_feats[i], dtype=torch.float32)
+                ncache[i] = t
             return t
 
         def pos_t(i):
             t = pcache.get(i)
             if t is None:
-                t = torch.as_tensor(data.positions[i], dtype=torch.float32); pcache[i] = t
+                t = torch.as_tensor(data.positions[i], dtype=torch.float32)
+                pcache[i] = t
             return t
 
         def edge_t(i):
@@ -1390,8 +1642,9 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             if t is None:
                 if data.edges is not None:
                     t = torch.as_tensor(data.edges[i], dtype=torch.long)
-                else:                                    # build from distance cutoff on positions ONCE
-                    P = np.asarray(data.positions[i]); D = np.linalg.norm(P[:, None] - P[None], axis=-1)
+                else:  # build from distance cutoff on positions ONCE
+                    P = np.asarray(data.positions[i])
+                    D = np.linalg.norm(P[:, None] - P[None], axis=-1)
                     src, dst = np.where((D < self._edge_cut(D, edge_cutoff)) & (D > 0))
                     if len(src) == 0:
                         src, dst = np.arange(P.shape[0]), np.arange(P.shape[0])
@@ -1399,8 +1652,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                 ecache[key] = t
             return t
 
-        x, ei, p, b, ng = self._assemble_batch(
-            ids, node_t, edge_t if use_edges else None, pos_t if with_pos else None)
+        x, ei, p, b, ng = self._assemble_batch(ids, node_t, edge_t if use_edges else None, pos_t if with_pos else None)
         if contract == "set":
             return net(x, b, ng)
         if with_pos:
@@ -1424,6 +1676,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         tensors and every forward re-moves to self.device; only the sub-fit's throwaway candidate lives on CPU.
         The DEPLOYED model is untouched."""
         from ..device import prefer_cpu_on_mps
+
         if active and prefer_cpu_on_mps(contract, getattr(self, "device", "cpu")):
             orig = self.device
             self.device = torch.device("cpu")
@@ -1458,8 +1711,11 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         the final per-model loops -- never the fixed-budget search sub-fits."""
         if not getattr(self, "auto_epoch", None):
             return None
-        return _EarlyStopper(min_delta=self.auto_epoch_min_delta, patience=self.auto_epoch_patience,
-                             min_epochs=min(self.auto_epoch_min_epochs, self.epochs))
+        return _EarlyStopper(
+            min_delta=self.auto_epoch_min_delta,
+            patience=self.auto_epoch_patience,
+            min_epochs=min(self.auto_epoch_min_epochs, self.epochs),
+        )
 
     #: auto_epoch=='val' holds out max(15%, _AUTO_VAL_MIN) samples as the monitor, but only if that still
     #: leaves enough to train on (val <= _AUTO_VAL_MAXFRAC of the data). Below that the held-out set is too
@@ -1477,9 +1733,11 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         if getattr(self, "auto_epoch", None) != "val":
             return np.arange(n), None
         k = max(int(0.15 * n), self._AUTO_VAL_MIN)
-        if k > int(self._AUTO_VAL_MAXFRAC * n):          # can't hold out a reliable monitor without gutting training
-            self._log(f"[AllGraph] auto_epoch=val: n={n} too small for a reliable held-out monitor "
-                      f"(needs >= {self._AUTO_VAL_MIN} val samples); monitoring TRAIN loss instead")
+        if k > int(self._AUTO_VAL_MAXFRAC * n):  # can't hold out a reliable monitor without gutting training
+            self._log(
+                f"[AllGraph] auto_epoch=val: n={n} too small for a reliable held-out monitor "
+                f"(needs >= {self._AUTO_VAL_MIN} val samples); monitoring TRAIN loss instead"
+            )
             return np.arange(n), None
         rng = np.random.RandomState(self.seed + 7)
         perm = rng.permutation(n)
@@ -1488,10 +1746,12 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
     def _auto_val_loss(self, net, va_idx, batch_loss, batch=64):
         """Mean loss over the held-out val indices in EVAL mode (batchnorm/dropout off). batch_loss(idx_array)
         returns the scalar loss tensor for those indices; the net is restored to train mode afterward."""
-        net.eval(); tot, nb = 0.0, 0
+        net.eval()
+        tot, nb = 0.0, 0
         with torch.no_grad():
             for j in range(0, len(va_idx), batch):
-                tot += float(batch_loss(va_idx[j:j + batch])); nb += 1
+                tot += float(batch_loss(va_idx[j : j + batch]))
+                nb += 1
         net.train()
         return tot / max(nb, 1)
 
@@ -1511,8 +1771,17 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         label = f"{desc} [{self.contract}]" if (desc and self.contract) else (desc or self.contract or "model")
         return tqdm(rng, desc=f"  training {label}", leave=False, unit="ep", dynamic_ncols=True)
 
-    def fit(self, data: AllData, task="classification", n_out=None, primitives=None, tiebreak=False,
-            select="argmax", select_size=False, stream=None):
+    def fit(
+        self,
+        data: AllData,
+        task="classification",
+        n_out=None,
+        primitives=None,
+        tiebreak=False,
+        select="argmax",
+        select_size=False,
+        stream=None,
+    ):
         """Route the data to its schema, build it, train, and report. task in {classification,
         regression}. Returns a result dict. The heavy lifting (primitive/width/depth search) is the
         chosen schema's own machinery; AllGraph only dispatches and drives training.
@@ -1543,18 +1812,19 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
              price mu. The deployed net is the resulting COMPACT MIXTURE (not collapsed to one primitive):
              the frontier keeps a mixture only where a single primitive cannot do the job. The result
              dict gains 'ipr' (effective #primitives) and 'sparsity_mu'."""
-        torch.manual_seed(self.seed); np.random.seed(self.seed)
+        torch.manual_seed(self.seed)
+        np.random.seed(self.seed)
         self.select = select
-        self._fc_cache = {"node": {}, "pos": {}, "edge": {}}   # fresh per-fit (static-per-graph tensor cache)
-        self._subsample_cache = None            # the per-fit resident selection subsample (streaming; drawn once)
+        self._fc_cache = {"node": {}, "pos": {}, "edge": {}}  # fresh per-fit (static-per-graph tensor cache)
+        self._subsample_cache = None  # the per-fit resident selection subsample (streaming; drawn once)
         # Restore the requested device and clear canonicalization state so a REUSED AllGraph instance starts
         # each fit clean: the relational->CPU fallback below must not persist onto a later dense fit, and a
         # prior fit's canonicalized-positions / applied-flag must not bleed into evaluation of new data.
         self.device = self._base_device
         self._canonicalized_positions = None
         self._canonicalization_applied = False
-        self._geq_forward = None                # a prior discovered-group fit must not score this one's data
-        self._latent_input_dim = None           # ditto for a prior nonlinear latent-contract fit
+        self._geq_forward = None  # a prior discovered-group fit must not score this one's data
+        self._latent_input_dim = None  # ditto for a prior nonlinear latent-contract fit
         # Apple-Silicon device policy: the relational contracts (graph/equivariant/set) are dominated by
         # scatter/index_add_ aggregation, which on MPS is markedly slower than CPU (~4x end-to-end on a full
         # ESOL fit, ~15x on the scatter op itself) with no offsetting speedup. When the data is relational
@@ -1562,8 +1832,10 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # subsequent test eval, which reads self.device. This generalizes the per-sub-fit CPU routing to every
         # graph-type dataset, not just the max-preset search sub-fits.
         if getattr(data, "node_feats", None) is not None and str(self.device).startswith("mps"):
-            self._log("[AllGraph] relational contract (graph/equivariant/set) requested on MPS -> running on CPU "
-                      "(scatter/index_add_ bound; CPU is faster on Apple Silicon)")
+            self._log(
+                "[AllGraph] relational contract (graph/equivariant/set) requested on MPS -> running on CPU "
+                "(scatter/index_add_ bound; CPU is faster on Apple Silicon)"
+            )
             self.device = torch.device("cpu")
         # STAGE 1 -- KINEMATICS: resolve the contract (discovery / tiebreak / route / admissibility) and
         # apply any canonicalization quotient to the data.
@@ -1582,9 +1854,12 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # upstream of size-selection + deploy so every sub-fit and the final train inherit CPU. See
         # ilmarinen.device.prefer_cpu_on_mps.
         from ..device import prefer_cpu_on_mps
+
         if prefer_cpu_on_mps(self.contract, self._base_device) and not str(self.device).startswith("cpu"):
-            self._log(f"[AllGraph] {self.contract} contract on MPS -> running on CPU "
-                      f"(launch/sync-bound; CPU is faster on Apple Silicon)")
+            self._log(
+                f"[AllGraph] {self.contract} contract on MPS -> running on CPU "
+                f"(launch/sync-bound; CPU is faster on Apple Silicon)"
+            )
             self.device = torch.device("cpu")
         # STAGE 2 -- DEGREES OF FREEDOM: priced width/depth selection in-line before training.
         self._apply_size_selection(data, task, n_out, select_size)
@@ -1631,14 +1906,18 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # discover the symmetry group -> generate the equivariant contract for it. When
         # discover_equivariant_contract="extended" the FULL dispatcher (metric O(p,q), U(n), Sp, SL,
         # conformal) is used; the default True uses the SO/Sim/Lorentz stability detector.
-        if not (self.discover_equivariant_contract and self.generated_equivariant_group is None
-                and getattr(data, "positions", None) is not None):
+        if not (
+            self.discover_equivariant_contract
+            and self.generated_equivariant_group is None
+            and getattr(data, "positions", None) is not None
+        ):
             return
         try:
             if self.discover_equivariant_contract == "extended":
                 from .emlp_layer import special_linear_generators, symplectic_generators
                 from .extended_groups import discover_group
                 from .metric_discovery import generators_for_metric
+
                 spec, ddetail = discover_group(data)
                 # the dispatcher's routes emit a group name but often no explicit generators; synthesize
                 # them so the EMLP contract can be built. Metric/unitary -> so(g); Sp -> sp(2n); SL ->
@@ -1646,26 +1925,34 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                 if spec is not None and spec.get("gens") is None:
                     nm = spec["name"]
                     if nm.startswith(("O(", "U(", "SO(")) and spec.get("metric") is not None:
-                        spec = dict(spec); spec["gens"] = generators_for_metric(spec["metric"])
+                        spec = dict(spec)
+                        spec["gens"] = generators_for_metric(spec["metric"])
                     elif nm.startswith("Sp("):
-                        D = spec["vec_dim"]; spec = dict(spec)
+                        D = spec["vec_dim"]
+                        spec = dict(spec)
                         spec["gens"], _ = symplectic_generators(D // 2)
                     elif nm.startswith("SL("):
-                        spec = dict(spec); spec["gens"] = special_linear_generators(spec["vec_dim"])
+                        spec = dict(spec)
+                        spec["gens"] = special_linear_generators(spec["vec_dim"])
                     else:
                         ddetail = {**ddetail, "reason": "group %s has no EMLP contract yet" % nm}
                         spec = None
             else:
                 from .symmetry_contract import detect_symmetry_group
+
                 spec, ddetail = detect_symmetry_group(data)
             self.discovered_group_detail = ddetail
             if spec is not None:
                 self.generated_equivariant_group = spec
-                self._log(f"[AllGraph] autonomous detection -> group {spec['name']} "
-                          f"({len(spec['gens'])} generators); generating its equivariant contract")
+                self._log(
+                    f"[AllGraph] autonomous detection -> group {spec['name']} "
+                    f"({len(spec['gens'])} generators); generating its equivariant contract"
+                )
             else:
-                self._log(f"[AllGraph] autonomous detection: no group found "
-                          f"({ddetail.get('reason','')}); using standard routing")
+                self._log(
+                    f"[AllGraph] autonomous detection: no group found "
+                    f"({ddetail.get('reason', '')}); using standard routing"
+                )
                 # OPT-IN nonlinear (LaLiGAN) fallback: when the LINEAR menu finds nothing and the user
                 # requested it, attempt nonlinear symmetry discovery (a symmetry linear only after a
                 # learned coordinate change). This is expensive (trains an autoencoder) and conservative
@@ -1698,10 +1985,12 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # defines a bespoke equivariant architecture that the eight built-ins may not cover.
         if self.generated_equivariant_group is not None and getattr(data, "positions", None) is not None:
             self.contract = "generated_equivariant"
-            self.route_detail = {"level1": "generated equivariant contract (EMLP from group generators)",
-                                 "n_generators": len(self.generated_equivariant_group["gens"])}
+            self.route_detail = {
+                "level1": "generated equivariant contract (EMLP from group generators)",
+                "n_generators": len(self.generated_equivariant_group["gens"]),
+            }
         elif getattr(self, "_autonomous_forced_set", False):
-            pass   # autonomous detection found no group -> already routed to set above
+            pass  # autonomous detection found no group -> already routed to set above
         elif tiebreak and self._tiebreak_candidates(data) is not None:
             winner, scores, tb_detail = self.tiebreak(data, task=task, n_out=n_out)
             self.contract = winner
@@ -1727,8 +2016,10 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # admissible for graph/equivariant -- exclude it from the edgeless fallback.
         _stream_has_edges = self._is_streaming_graph(data) and getattr(data.node_feats, "has_edges", False)
         if self.contract in ("graph", "equivariant") and getattr(data, "edges", None) is None and not _stream_has_edges:
-            self.route_detail = {**(self.route_detail or {}),
-                                 "admissibility": f"'{self.contract}' inadmissible (no edges) -> set"}
+            self.route_detail = {
+                **(self.route_detail or {}),
+                "admissibility": f"'{self.contract}' inadmissible (no edges) -> set",
+            }
             self.contract = "set"
         # CONTRACT RESTRICTION: if the resolved contract is disabled via enabled_contracts, fall back to the
         # nearest enabled, constructible contract. Applied uniformly after every routing path (rule-based,
@@ -1737,9 +2028,11 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         if self.contract != "generated_equivariant" and not self._contract_enabled(self.contract):
             _restricted_from = self.contract
             self.contract = self._resolve_enabled_fallback(self.contract, data)
-            self.route_detail = {**(self.route_detail or {}),
-                                 "contract_restriction": f"'{_restricted_from}' disabled -> '{self.contract}' "
-                                 f"(enabled={sorted(self.enabled_contracts)})"}
+            self.route_detail = {
+                **(self.route_detail or {}),
+                "contract_restriction": f"'{_restricted_from}' disabled -> '{self.contract}' "
+                f"(enabled={sorted(self.enabled_contracts)})",
+            }
         self._log(f"[AllGraph] routed -> {self.contract}  ({self.route_detail})")
         # if Phase-1 canonicalization was applied in tiebreak, feed the canonicalized coordinates to the
         # (plain, non-equivariant) set contract as extra node features. The set net then sees geometry that
@@ -1750,13 +2043,15 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # feature layout, not the pre-canonicalization one.
         if self._canonicalized_positions is not None:
             import copy
+
             data = copy.copy(data)
             cpos = self._canonicalized_positions
-            data.node_feats = [np.concatenate([np.asarray(nf, np.float32),
-                                               np.asarray(cpos[i], np.float32)], axis=1)
-                               for i, nf in enumerate(data.node_feats)]
+            data.node_feats = [
+                np.concatenate([np.asarray(nf, np.float32), np.asarray(cpos[i], np.float32)], axis=1)
+                for i, nf in enumerate(data.node_feats)
+            ]
             data.positions = cpos
-            self._canonicalization_applied = True    # so evaluation applies the SAME quotient to new data
+            self._canonicalization_applied = True  # so evaluation applies the SAME quotient to new data
         return data, tb_detail
 
     def _apply_size_selection(self, data, task, n_out, select_size):
@@ -1811,10 +2106,12 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         if self.select != "sparse" or self.sparsity_mu <= 0 or not hasattr(net, "cells"):
             return torch.zeros((), device=self.device)
         from ..machinery import sparsity_price
+
         return self.sparsity_mu * sum(sparsity_price(torch.softmax(c.alpha, 0)) for c in net.cells)
 
     def _cell_ipr(self, cell):
         from ..machinery import participation
+
         return participation(torch.softmax(cell.alpha, 0))
 
     def _break_alpha_symmetry(self, net):
@@ -1828,7 +2125,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         price then jointly settle the compact mixture (DARTS-style alpha init noise). No-op unless sparse."""
         if self.select != "sparse":
             return
-        g = torch.Generator().manual_seed(int(self.seed) + 101)   # CPU generator -> deterministic, MPS-safe
+        g = torch.Generator().manual_seed(int(self.seed) + 101)  # CPU generator -> deterministic, MPS-safe
         with torch.no_grad():
             for c in getattr(net, "cells", []):
                 if hasattr(c, "alpha"):
@@ -1845,7 +2142,8 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # so route them to CPU when deploying on MPS (see _subfit_device).
         with self._subfit_device(self.contract):
             for p in prims:
-                torch.manual_seed(self.seed + 11); np.random.seed(self.seed + 11)
+                torch.manual_seed(self.seed + 11)
+                np.random.seed(self.seed + 11)
                 scores[p] = float(self._train_score_solo_primitive(data, task, n_out, p))
         return scores
 
@@ -1854,15 +2152,31 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         the gibbs solo-score and solo-deploy paths so the operator contract is handled like the others (its config
         -- Fourier-mode budget, input channels, spatial dims -- mirrors _fit_operator)."""
         from ..models import build_operator_schema
-        a = data.dense if isinstance(data.dense, torch.Tensor) else torch.tensor(np.asarray(data.dense), dtype=torch.float32)
-        xg = data.grid if isinstance(data.grid, torch.Tensor) else torch.tensor(np.asarray(data.grid), dtype=torch.float32)
+
+        a = (
+            data.dense
+            if isinstance(data.dense, torch.Tensor)
+            else torch.tensor(np.asarray(data.dense), dtype=torch.float32)
+        )
+        xg = (
+            data.grid
+            if isinstance(data.grid, torch.Tensor)
+            else torch.tensor(np.asarray(data.grid), dtype=torch.float32)
+        )
         u = torch.as_tensor(np.asarray(data.y), dtype=torch.float32)
         sdims = getattr(data, "spatial_dims", 1)
         in_ch = a.shape[-1] if a.dim() == 2 + sdims else 1
-        grid_min = min(int(s) for s in a.shape[1:1 + sdims]); modes = max(2, min(12, grid_min // 2))
-        net = build_operator_schema(width=self.width, depth=self.depth, n_out=1,
-                                                primitives=(primitive,), modes=modes, in_channels=in_ch,
-                                                spatial_dims=sdims).to(self.device)
+        grid_min = min(int(s) for s in a.shape[1 : 1 + sdims])
+        modes = max(2, min(12, grid_min // 2))
+        net = build_operator_schema(
+            width=self.width,
+            depth=self.depth,
+            n_out=1,
+            primitives=(primitive,),
+            modes=modes,
+            in_channels=in_ch,
+            spatial_dims=sdims,
+        ).to(self.device)
         return net, a.to(self.device), xg.to(self.device), u.to(self.device)
 
     def _train_score_solo_primitive(self, data, task, n_out, primitive):
@@ -1877,47 +2191,81 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             build_spatial_schema,
             build_volumetric_schema,
         )
+
         mod = self.contract
         # split
         n = len(data.node_feats) if data.node_feats is not None else len(data.dense)
         rng = np.random.RandomState(self.seed)
-        perm = rng.permutation(n); nval = max(1, int(0.25 * n)); va, tr = perm[:nval], perm[nval:]
-        ep = self._search_ep(max(5, self.epochs // 2))          # ranking budget, capped (see _search_ep)
+        perm = rng.permutation(n)
+        nval = max(1, int(0.25 * n))
+        va, tr = perm[:nval], perm[nval:]
+        ep = self._search_ep(max(5, self.epochs // 2))  # ranking budget, capped (see _search_ep)
         lf = nn.CrossEntropyLoss() if task == "classification" else nn.MSELoss()
         yt = torch.as_tensor(np.asarray(data.y))
 
         if mod in ("sequence", "spatial", "volumetric", "4d"):
             X = data.dense
-            if mod == "sequence" and X.dim() == 2: X = X.unsqueeze(-1)
+            if mod == "sequence" and X.dim() == 2:
+                X = X.unsqueeze(-1)
             # each dense contract's builder takes its OWN size argument (spatial hw, volumetric dhw, 4d
             # grid_shape); build_grid4d_schema has no grid_shape default, so a generic call breaks 4d.
             if mod == "sequence":
-                net = build_schema(n_in=X.shape[-1], width=self.width, depth=self.depth,
-                                               n_out=n_out, primitives=(primitive,)).to(self.device)
+                net = build_schema(
+                    n_in=X.shape[-1], width=self.width, depth=self.depth, n_out=n_out, primitives=(primitive,)
+                ).to(self.device)
             elif mod == "spatial":
-                net = build_spatial_schema(n_in=X.shape[1], width=self.width, hw=X.shape[-1],
-                                                       depth=self.depth, n_out=n_out, primitives=(primitive,)).to(self.device)
+                net = build_spatial_schema(
+                    n_in=X.shape[1],
+                    width=self.width,
+                    hw=X.shape[-1],
+                    depth=self.depth,
+                    n_out=n_out,
+                    primitives=(primitive,),
+                ).to(self.device)
             elif mod == "volumetric":
-                net = build_volumetric_schema(n_in=X.shape[1], width=self.width, dhw=self._vol_work_dhw(X.shape[-1]), vol_size=X.shape[-1],
-                                                          depth=self.depth, n_out=n_out, primitives=(primitive,)).to(self.device)
+                net = build_volumetric_schema(
+                    n_in=X.shape[1],
+                    width=self.width,
+                    dhw=self._vol_work_dhw(X.shape[-1]),
+                    vol_size=X.shape[-1],
+                    depth=self.depth,
+                    n_out=n_out,
+                    primitives=(primitive,),
+                ).to(self.device)
             else:  # 4d
-                net = build_grid4d_schema(n_in=X.shape[1], grid_shape=tuple(X.shape[2:]), width=self.width,
-                                                  depth=self.depth, n_out=n_out, primitives=(primitive,)).to(self.device)
-            fwd = (lambda ids: net.forward_seq_readout(X[ids].to(self.device), 1).squeeze(1)) if mod == "sequence" \
-                  else (lambda ids: net(X[ids].to(self.device)))
+                net = build_grid4d_schema(
+                    n_in=X.shape[1],
+                    grid_shape=tuple(X.shape[2:]),
+                    width=self.width,
+                    depth=self.depth,
+                    n_out=n_out,
+                    primitives=(primitive,),
+                ).to(self.device)
+            fwd = (
+                (lambda ids: net.forward_seq_readout(X[ids].to(self.device), 1).squeeze(1))
+                if mod == "sequence"
+                else (lambda ids: net(X[ids].to(self.device)))
+            )
             opt = torch.optim.Adam(net.parameters(), lr=self.lr, weight_decay=self._wd(self._DENSE_WEIGHT_DECAY))
             tr = np.asarray(tr)
             for _ in range(ep):
                 np.random.shuffle(tr)
                 for j in range(0, len(tr), self._tb()):
-                    ids = tr[j:j + self._tb()]; opt.zero_grad()
+                    ids = tr[j : j + self._tb()]
+                    opt.zero_grad()
                     out = fwd(ids)
-                    target = yt[ids].long().to(self.device) if task == "classification" else yt[ids].float().unsqueeze(1).to(self.device)
-                    lf(out, target).backward(); opt.step()
+                    target = (
+                        yt[ids].long().to(self.device)
+                        if task == "classification"
+                        else yt[ids].float().unsqueeze(1).to(self.device)
+                    )
+                    lf(out, target).backward()
+                    opt.step()
             outs = []
             for j in range(0, len(va), 64):
-                ids = np.asarray(va[j:j + 64])
-                with torch.no_grad(): outs.append(fwd(ids).cpu())
+                ids = np.asarray(va[j : j + 64])
+                with torch.no_grad():
+                    outs.append(fwd(ids).cpu())
             out = torch.cat(outs)
             return self._score(out, np.asarray(data.y)[va], task)
 
@@ -1930,8 +2278,10 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             for _ in range(ep):
                 np.random.shuffle(tr)
                 for j in range(0, len(tr), self._tb()):
-                    ids = tr[j:j + self._tb()]; opt.zero_grad()
-                    ((net(a_d[ids], x_d[ids]) - u_d[ids]) ** 2).mean().backward(); opt.step()
+                    ids = tr[j : j + self._tb()]
+                    opt.zero_grad()
+                    ((net(a_d[ids], x_d[ids]) - u_d[ids]) ** 2).mean().backward()
+                    opt.step()
             va = np.asarray(va)
             with torch.no_grad():
                 pred = net(a_d[va], x_d[va]).cpu().numpy()
@@ -1941,16 +2291,24 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # relational (graph / equivariant / set): reuse the candidate-contract machinery at primitive level
         n_in = data.node_feats[0].shape[1]
         if mod == "graph":
-            net = build_graph_schema(n_in=n_in, width=self.width, depth=self.depth,
-                                                 n_out=n_out, primitives=(primitive,), readout="mean")
+            net = build_graph_schema(
+                n_in=n_in, width=self.width, depth=self.depth, n_out=n_out, primitives=(primitive,), readout="mean"
+            )
             with_pos, use_edges = False, True
         elif mod == "equivariant":
-            net = build_equivariant_graph_schema(n_in=n_in, c0=self.width, c1=max(self.width // 2, 2),
-                                                             depth=self.depth, n_out=n_out, primitives=(primitive,))
+            net = build_equivariant_graph_schema(
+                n_in=n_in,
+                c0=self.width,
+                c1=max(self.width // 2, 2),
+                depth=self.depth,
+                n_out=n_out,
+                primitives=(primitive,),
+            )
             with_pos, use_edges = True, True
         else:
-            net = build_set_schema(n_in=n_in, width=self.width, depth=self.depth, n_out=n_out,
-                                               primitives=(primitive,), readout="mean")
+            net = build_set_schema(
+                n_in=n_in, width=self.width, depth=self.depth, n_out=n_out, primitives=(primitive,), readout="mean"
+            )
             with_pos, use_edges = False, False
         net = net.to(self.device)
         opt = torch.optim.Adam(net.parameters(), lr=self.lr, weight_decay=self._wd())
@@ -1958,14 +2316,21 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         for _ in range(ep):
             np.random.shuffle(tr)
             for j in range(0, len(tr), self._tb()):
-                ids = tr[j:j + self._tb()]; opt.zero_grad()
+                ids = tr[j : j + self._tb()]
+                opt.zero_grad()
                 out = self._forward_contract(net, data, ids, mod, with_pos, use_edges, 3.0)
-                target = yt[ids].long().to(self.device) if task == "classification" else yt[ids].float().unsqueeze(1).to(self.device)
-                lf(out, target).backward(); opt.step()
+                target = (
+                    yt[ids].long().to(self.device)
+                    if task == "classification"
+                    else yt[ids].float().unsqueeze(1).to(self.device)
+                )
+                lf(out, target).backward()
+                opt.step()
         outs = []
         for j in range(0, len(va), 64):
-            ids = np.asarray(va[j:j + 64])
-            with torch.no_grad(): outs.append(self._forward_contract(net, data, ids, mod, with_pos, use_edges, 3.0).cpu())
+            ids = np.asarray(va[j : j + 64])
+            with torch.no_grad():
+                outs.append(self._forward_contract(net, data, ids, mod, with_pos, use_edges, 3.0).cpu())
         out = torch.cat(outs)
         return self._score(out, np.asarray(data.y)[va], task)
 
@@ -1992,6 +2357,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         are held-out (each primitive scored on the internal 25% val split), so the selection is honest even
         though the reported value is in-sample."""
         from ..machinery import gibbs_alpha_select
+
         net = self.net
         if not hasattr(net, "cells"):
             return result
@@ -2009,7 +2375,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # the Gibbs mixture WEIGHTS w = softmax(alpha) (report: w_p ~ e^{-beta*Psi_p}); named _weights, not
         # _alpha, because these are the normalized weights, not the logits alpha the docs reserve that symbol for.
         result["gibbs_weights"] = gsel["alpha"]
-        result["gibbs_alpha"] = result["gibbs_weights"]   # deprecated alias (holds w, not the logits)
+        result["gibbs_alpha"] = result["gibbs_weights"]  # deprecated alias (holds w, not the logits)
         result["gibbs_energies"] = gsel["energies"]
         result["selected_primitive"] = best
         result["architecture"] = result["architecture_gibbs"]
@@ -2019,7 +2385,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # (a normalization primitive), whose solo net scores R2~0 while the conv4d-bearing argmax mixture
         # reaches R2~0.88 -- so deploying it turns a good fit into a negative-R2 one. Keep whichever net scores
         # better (same in-sample metric, higher=better for both R2 and accuracy).
-        argmax_net = self.net                       # the trained argmax mixture, kept as the fallback
+        argmax_net = self.net  # the trained argmax mixture, kept as the fallback
         argmax_val = result.get("value")
         deploy = self._train_deploy_solo(data, task, n_out, best)
         if deploy is not None:
@@ -2029,22 +2395,27 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             # CATASTROPHIC drop: a degenerate primitive that cannot fit the task at all (e.g. 'norm' on the 4d
             # PDE -> R2~0 vs the conv4d mixture ~0.88). 0.25 in R2/accuracy units is far larger than any
             # honest in-sample fit-vs-robustness trade.
-            catastrophic = (argmax_val is not None and val < argmax_val - self._GIBBS_REVERT_MARGIN)
+            catastrophic = argmax_val is not None and val < argmax_val - self._GIBBS_REVERT_MARGIN
             if not catastrophic:
-                self.net = deploy                   # keep the derived (gibbs) net
+                self.net = deploy  # keep the derived (gibbs) net
                 result["value_argmax"] = argmax_val
                 result["value"] = float(val)
                 result["n_params"] = sum(p.numel() for p in deploy.parameters())
             else:
-                self.net = argmax_net               # degenerate solo -> keep the argmax mixture
+                self.net = argmax_net  # degenerate solo -> keep the argmax mixture
                 result["architecture"] = result.get("architecture_argmax")
                 result["value_gibbs_deploy"] = float(val)
                 result["gibbs_reverted"] = True
         reverted = result.get("gibbs_reverted", False)
-        self._log(f"[AllGraph] gibbs reselect -> {best}  (argmax was {result['architecture_argmax']}); "
-                  f"deployed value={result.get('value'):.4f}"
-                  + (f"  [REVERTED to argmax: solo {result.get('value_gibbs_deploy'):.4f} < "
-                     f"{argmax_val:.4f}]" if reverted else ""))
+        self._log(
+            f"[AllGraph] gibbs reselect -> {best}  (argmax was {result['architecture_argmax']}); "
+            f"deployed value={result.get('value'):.4f}"
+            + (
+                f"  [REVERTED to argmax: solo {result.get('value_gibbs_deploy'):.4f} < {argmax_val:.4f}]"
+                if reverted
+                else ""
+            )
+        )
         return result
 
     def _train_deploy_solo(self, data, task, n_out, primitive):
@@ -2060,9 +2431,11 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             build_spatial_schema,
             build_volumetric_schema,
         )
+
         n_out = self._infer_nout(data.y, task, n_out)
         mod = self.contract
-        torch.manual_seed(self.seed + 3); np.random.seed(self.seed + 3)
+        torch.manual_seed(self.seed + 3)
+        np.random.seed(self.seed + 3)
         if mod in ("sequence", "spatial", "volumetric", "4d"):
             X = data.dense
             if self._is_streaming(X):
@@ -2074,21 +2447,42 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             elif mod == "sequence" and X.dim() == 2:
                 X = X.unsqueeze(-1)
             if mod == "sequence":
-                net = build_schema(n_in=X.shape[-1], width=self.width, depth=self.depth,
-                                               n_out=n_out, primitives=(primitive,)).to(self.device)
-                net = self._train_dense(net, X, data.y, task,
-                                        forward=lambda xb: net.forward_seq_readout(xb, 1).squeeze(1))
+                net = build_schema(
+                    n_in=X.shape[-1], width=self.width, depth=self.depth, n_out=n_out, primitives=(primitive,)
+                ).to(self.device)
+                net = self._train_dense(
+                    net, X, data.y, task, forward=lambda xb: net.forward_seq_readout(xb, 1).squeeze(1)
+                )
             elif mod == "spatial":
-                net = build_spatial_schema(n_in=X.shape[1], width=self.width, hw=X.shape[-1],
-                                                       depth=self.depth, n_out=n_out, primitives=(primitive,)).to(self.device)
+                net = build_spatial_schema(
+                    n_in=X.shape[1],
+                    width=self.width,
+                    hw=X.shape[-1],
+                    depth=self.depth,
+                    n_out=n_out,
+                    primitives=(primitive,),
+                ).to(self.device)
                 net = self._train_dense(net, X, data.y, task)
             elif mod == "volumetric":
-                net = build_volumetric_schema(n_in=X.shape[1], width=self.width, dhw=self._vol_work_dhw(X.shape[-1]), vol_size=X.shape[-1],
-                                                          depth=self.depth, n_out=n_out, primitives=(primitive,)).to(self.device)
+                net = build_volumetric_schema(
+                    n_in=X.shape[1],
+                    width=self.width,
+                    dhw=self._vol_work_dhw(X.shape[-1]),
+                    vol_size=X.shape[-1],
+                    depth=self.depth,
+                    n_out=n_out,
+                    primitives=(primitive,),
+                ).to(self.device)
                 net = self._train_dense(net, X, data.y, task)
             else:
-                net = build_grid4d_schema(n_in=X.shape[1], grid_shape=tuple(X.shape[2:]), width=self.width,
-                                                  depth=self.depth, n_out=n_out, primitives=(primitive,)).to(self.device)
+                net = build_grid4d_schema(
+                    n_in=X.shape[1],
+                    grid_shape=tuple(X.shape[2:]),
+                    width=self.width,
+                    depth=self.depth,
+                    n_out=n_out,
+                    primitives=(primitive,),
+                ).to(self.device)
                 net = self._train_dense(net, X, data.y, task)
             return net
         if mod == "operator":
@@ -2097,50 +2491,78 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                 src = data.dense
                 net = self._operator_solo_net(src.a_shape, src.spatial_dims, primitive)
                 opt = torch.optim.Adam(net.parameters(), lr=self.lr, weight_decay=self._wd())
-                n = len(src); idx = np.arange(n)
+                n = len(src)
+                idx = np.arange(n)
                 for _ in range(self.epochs):
                     np.random.shuffle(idx)
                     for j in range(0, n, self._tb()):
-                        ids = idx[j:j + self._tb()]; opt.zero_grad()
-                        ab, xb, ub = src.a(ids).to(self.device), src.grid(ids).to(self.device), src.u(ids).to(self.device)
-                        ((net(ab, xb) - ub) ** 2).mean().backward(); opt.step()
+                        ids = idx[j : j + self._tb()]
+                        opt.zero_grad()
+                        ab, xb, ub = (
+                            src.a(ids).to(self.device),
+                            src.grid(ids).to(self.device),
+                            src.u(ids).to(self.device),
+                        )
+                        ((net(ab, xb) - ub) ** 2).mean().backward()
+                        opt.step()
                 return net
             net, a_d, x_d, u_d = self._operator_solo_setup(data, primitive)
             opt = torch.optim.Adam(net.parameters(), lr=self.lr, weight_decay=self._wd())
-            n = a_d.shape[0]; idx = np.arange(n)
+            n = a_d.shape[0]
+            idx = np.arange(n)
             for _ in range(self.epochs):
                 np.random.shuffle(idx)
                 for j in range(0, n, self._tb()):
-                    ids = idx[j:j + self._tb()]; opt.zero_grad()
-                    ((net(a_d[ids], x_d[ids]) - u_d[ids]) ** 2).mean().backward(); opt.step()
+                    ids = idx[j : j + self._tb()]
+                    opt.zero_grad()
+                    ((net(a_d[ids], x_d[ids]) - u_d[ids]) ** 2).mean().backward()
+                    opt.step()
             return net
         # relational
         streaming_graph = self._is_streaming_graph(data)
         n_in = data.node_feats.n_in if streaming_graph else data.node_feats[0].shape[1]
         if mod == "graph":
-            net = build_graph_schema(n_in=n_in, width=self.width, depth=self.depth,
-                                                 n_out=n_out, primitives=(primitive,), readout="mean").to(self.device)
+            net = build_graph_schema(
+                n_in=n_in, width=self.width, depth=self.depth, n_out=n_out, primitives=(primitive,), readout="mean"
+            ).to(self.device)
             with_pos, use_edges = False, True
         elif mod == "equivariant":
-            net = build_equivariant_graph_schema(n_in=n_in, c0=self.width, c1=max(self.width // 2, 2),
-                                                             depth=self.depth, n_out=n_out, primitives=(primitive,)).to(self.device)
+            net = build_equivariant_graph_schema(
+                n_in=n_in,
+                c0=self.width,
+                c1=max(self.width // 2, 2),
+                depth=self.depth,
+                n_out=n_out,
+                primitives=(primitive,),
+            ).to(self.device)
             with_pos, use_edges = True, True
         else:
-            net = build_set_schema(n_in=n_in, width=self.width, depth=self.depth, n_out=n_out,
-                                               primitives=(primitive,), readout="mean").to(self.device)
+            net = build_set_schema(
+                n_in=n_in, width=self.width, depth=self.depth, n_out=n_out, primitives=(primitive,), readout="mean"
+            ).to(self.device)
             with_pos, use_edges = False, False
         opt = torch.optim.Adam(net.parameters(), lr=self.lr, weight_decay=self._wd())
         lf = nn.CrossEntropyLoss() if task == "classification" else nn.MSELoss()
         yt = torch.as_tensor(np.asarray(data.y))
-        n = len(data.node_feats); idx = np.arange(n)
+        n = len(data.node_feats)
+        idx = np.arange(n)
         for _ in range(self.epochs):
             np.random.shuffle(idx)
             for j in range(0, n, self._tb()):
-                ids = idx[j:j + self._tb()]; opt.zero_grad()
-                out = (self._stream_relational_out(net, data, ids, mod) if streaming_graph
-                       else self._forward_contract(net, data, ids, mod, with_pos, use_edges, 3.0))
-                target = yt[ids].long().to(self.device) if task == "classification" else yt[ids].float().unsqueeze(1).to(self.device)
-                lf(out, target).backward(); opt.step()
+                ids = idx[j : j + self._tb()]
+                opt.zero_grad()
+                out = (
+                    self._stream_relational_out(net, data, ids, mod)
+                    if streaming_graph
+                    else self._forward_contract(net, data, ids, mod, with_pos, use_edges, 3.0)
+                )
+                target = (
+                    yt[ids].long().to(self.device)
+                    if task == "classification"
+                    else yt[ids].float().unsqueeze(1).to(self.device)
+                )
+                lf(out, target).backward()
+                opt.step()
         return net
 
     def _operator_solo_net(self, a_shape, sdims, primitive):
@@ -2148,10 +2570,19 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         Fourier-mode budget), so a streaming gibbs solo-deploy net is the SAME size as the resident/subsample
         one (which _operator_solo_setup builds from the materialized tensor)."""
         from ..models import build_operator_schema
+
         in_ch = a_shape[-1] if len(a_shape) == 2 + sdims else 1
-        grid_min = min(int(s) for s in a_shape[1:1 + sdims]); modes = max(2, min(12, grid_min // 2))
-        return build_operator_schema(width=self.width, depth=self.depth, n_out=1, primitives=(primitive,),
-                                     modes=modes, in_channels=in_ch, spatial_dims=sdims).to(self.device)
+        grid_min = min(int(s) for s in a_shape[1 : 1 + sdims])
+        modes = max(2, min(12, grid_min // 2))
+        return build_operator_schema(
+            width=self.width,
+            depth=self.depth,
+            n_out=1,
+            primitives=(primitive,),
+            modes=modes,
+            in_channels=in_ch,
+            spatial_dims=sdims,
+        ).to(self.device)
 
     def _stream_relational_out(self, net, data, ids, mod):
         """Streaming relational forward for the gibbs deploy/score path: collate the minibatch from the
@@ -2174,6 +2605,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         verified by premise-check (the rebuilt net returns to an untrained loss ~ ln(#classes))."""
         import copy
         import math
+
         net = self.net
         if net is None or not hasattr(net, "parameters") or isinstance(net, dict):
             return None
@@ -2206,11 +2638,19 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         'value' field; the runner re-evaluates on the held-out TEST split separately)."""
         mod = self.contract
         if mod == "operator":
-            if self._is_streaming_operator(data):        # streamed two-pass field-R2 (returns the scalar)
+            if self._is_streaming_operator(data):  # streamed two-pass field-R2 (returns the scalar)
                 return float(self._stream_operator_eval(net, data.dense, 32))
             # field a(x) -> u(x): score the in-sample field R2, matching _fit_operator's metric.
-            a = data.dense if isinstance(data.dense, torch.Tensor) else torch.tensor(np.asarray(data.dense), dtype=torch.float32)
-            xg = data.grid if isinstance(data.grid, torch.Tensor) else torch.tensor(np.asarray(data.grid), dtype=torch.float32)
+            a = (
+                data.dense
+                if isinstance(data.dense, torch.Tensor)
+                else torch.tensor(np.asarray(data.dense), dtype=torch.float32)
+            )
+            xg = (
+                data.grid
+                if isinstance(data.grid, torch.Tensor)
+                else torch.tensor(np.asarray(data.grid), dtype=torch.float32)
+            )
             with torch.no_grad():
                 pred = net(a.to(self.device), xg.to(self.device)).cpu().numpy()
             uy = np.asarray(data.y, dtype=np.float32)
@@ -2222,29 +2662,35 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             if self._is_streaming(X):
                 # chunked accumulated score (no _report side effect on self.net -- this scores a candidate).
                 from .allgraph_streaming import _StreamMetric
+
                 _rank = {"spatial": 4, "volumetric": 5}.get(mod)
                 src = self._as_grid(X, _rank) if _rank is not None else X
-                acc = _StreamMetric(task, y); n = len(src)
+                acc = _StreamMetric(task, y)
+                n = len(src)
                 for j in range(0, n, 128):
                     ids = np.arange(j, min(j + 128, n))
                     with torch.no_grad():
                         out = (fwd or (lambda xb: net(xb)))(src.get(ids).to(self.device)).cpu()
                     acc.update(out, y[ids])
                 return acc.result()[1]
-            if mod == "sequence" and X.dim() == 2: X = X.unsqueeze(-1)
+            if mod == "sequence" and X.dim() == 2:
+                X = X.unsqueeze(-1)
             out = self._deploy_grid_eval(net, X, 128, forward=fwd)
         elif self._is_streaming_graph(data):
-            outs = []; n = len(data.node_feats)
+            outs = []
+            n = len(data.node_feats)
             for j in range(0, n, 64):
                 ids = np.arange(j, min(j + 64, n))
                 with torch.no_grad():
                     outs.append(self._stream_relational_out(net, data, ids, mod).cpu())
             out = torch.cat(outs)
         else:
-            with_pos = (mod == "equivariant"); use_edges = mod in ("graph", "equivariant")
-            outs = []; n = len(data.node_feats)
+            with_pos = mod == "equivariant"
+            use_edges = mod in ("graph", "equivariant")
+            outs = []
+            n = len(data.node_feats)
             for j in range(0, n, 64):
-                ids = np.arange(j, min(j+64, n))
+                ids = np.arange(j, min(j + 64, n))
                 with torch.no_grad():
                     outs.append(self._forward_contract(net, data, ids, mod, with_pos, use_edges, 3.0).cpu())
             out = torch.cat(outs)
@@ -2281,13 +2727,14 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         unblocks, observes stop, and exits, so join() always completes (no hang, no leaked thread)."""
         import queue as _queue
         import threading as _threading
-        slices = [pm[j:j + batch_size] for j in range(0, len(pm), batch_size)]
+
+        slices = [pm[j : j + batch_size] for j in range(0, len(pm), batch_size)]
         q = _queue.Queue(maxsize=max(1, depth))
         box = {}
         stop = _threading.Event()
         _SENTINEL = object()
 
-        def _put(item):                                  # blocking put that yields to a stop request
+        def _put(item):  # blocking put that yields to a stop request
             while not stop.is_set():
                 try:
                     q.put(item, timeout=0.2)
@@ -2301,7 +2748,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                     if stop.is_set():
                         return
                     _put((ids, fetch(ids)))
-            except BaseException as e:                    # surface on the main thread, don't die silently
+            except BaseException as e:  # surface on the main thread, don't die silently
                 box["err"] = e
             finally:
                 if not stop.is_set():
@@ -2318,16 +2765,17 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             if "err" in box:
                 raise box["err"]
         finally:
-            stop.set()                                   # tell the producer to stop
-            try:                                         # unblock a producer parked on a full queue
+            stop.set()  # tell the producer to stop
+            try:  # unblock a producer parked on a full queue
                 while True:
                     q.get_nowait()
             except _queue.Empty:
                 pass
             t.join()
 
-    def _run_epochs(self, net, opt, tr_idx, va_idx, stopper, batch_loss, batch_size, permute, show_progress=True,
-                    prefetch=None):
+    def _run_epochs(
+        self, net, opt, tr_idx, va_idx, stopper, batch_loss, batch_size, permute, show_progress=True, prefetch=None
+    ):
         """Shared minibatch training loop for every contract's deploy fit. `batch_loss(ids)` -> scalar loss (the
         contract-specific forward + target); `permute(idx)` -> one epoch's permuted index sequence (each contract
         keeps its own RNG -- torch for dense, numpy for the rest -- so determinism is preserved). Handles the
@@ -2342,13 +2790,13 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         track = stopper is not None and va_idx is None
         depth = self._prefetch_depth() if prefetch is not None else 0
         for _ in self._epoch_iter(show_progress):
-            pm = permute(tr_idx)                          # RNG draw on the MAIN thread, BEFORE any fetch
+            pm = permute(tr_idx)  # RNG draw on the MAIN thread, BEFORE any fetch
             run, nb = None, 0
             if depth > 0:
                 fetch, compute = prefetch
                 batches = self._prefetch_batches(pm, batch_size, fetch, depth)
             else:
-                batches = ((pm[j:j + batch_size], None) for j in range(0, len(pm), batch_size))
+                batches = ((pm[j : j + batch_size], None) for j in range(0, len(pm), batch_size))
             for ids, payload in batches:
                 opt.zero_grad()
                 loss = (compute(ids, payload) if depth > 0 else batch_loss(ids)) + self._alpha_penalty(net)
@@ -2359,7 +2807,8 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                 if self._grads_finite(net):
                     opt.step()
                 if track:
-                    run = loss.detach() if run is None else run + loss.detach(); nb += 1
+                    run = loss.detach() if run is None else run + loss.detach()
+                    nb += 1
             if stopper is not None:
                 m = self._auto_val_loss(net, va_idx, batch_loss) if va_idx is not None else float(run / max(nb, 1))
                 if stopper.step(m):
@@ -2373,9 +2822,9 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         opt = torch.optim.Adam(net.parameters(), lr=self.lr, weight_decay=self._wd(self._DENSE_WEIGHT_DECAY))
         lf = nn.CrossEntropyLoss() if task == "classification" else nn.MSELoss()
         tr_idx, va_idx = self._auto_val_split(len(X)) if show_progress else (np.arange(len(X)), None)
-        stopper = self._make_stopper() if show_progress else None   # early-stop only the deployed fit
+        stopper = self._make_stopper() if show_progress else None  # early-stop only the deployed fit
         if show_progress:
-            self._break_alpha_symmetry(net)     # sparse: seed the mixture off uniform (deployed fit only)
+            self._break_alpha_symmetry(net)  # sparse: seed the mixture off uniform (deployed fit only)
         yt = torch.as_tensor(y)
         yt_dev = (yt.long() if task == "classification" else yt.float().unsqueeze(1)).to(self.device)
         if not self._is_streaming(X):
@@ -2386,10 +2835,12 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                 X = torch.as_tensor(np.asarray(X), dtype=torch.float32)
             Xd = X.to(self.device)
             tr_idx_dev = torch.as_tensor(np.asarray(tr_idx), device=self.device)
+
             def _dloss(b):
-                if not torch.is_tensor(b):                   # val path passes numpy index slices
+                if not torch.is_tensor(b):  # val path passes numpy index slices
                     b = torch.as_tensor(np.asarray(b), device=self.device)
                 return lf(fwd(Xd[b]), yt_dev[b])
+
             # dense permutes on-device via the CPU torch RNG (identical stream to the pre-refactor loop)
             permute = lambda idx: idx[torch.randperm(len(idx)).to(self.device)]
             return self._run_epochs(net, opt, tr_idx_dev, va_idx, stopper, _dloss, self._tb(), permute, show_progress)
@@ -2399,23 +2850,27 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # permutation index (a device move consumes no RNG), so torch.randperm draws from the identical global
         # CPU RNG state at the identical call site -> identical batch membership per step -> identical grads.
         pin = self._resolve_pin()
-        tr_idx = torch.as_tensor(np.asarray(tr_idx))         # CPU int64 (NOT moved to device)
+        tr_idx = torch.as_tensor(np.asarray(tr_idx))  # CPU int64 (NOT moved to device)
+
         # split fetch (RNG-free CPU read, prefetch-safe) from compute (device move + forward + loss, main thread)
         def _dfetch(b):
-            ids = b if torch.is_tensor(b) else torch.as_tensor(np.asarray(b))   # val path passes numpy slices
-            Xb = X.get(ids)                                  # (len(ids), *sample_shape) CPU float32; RNG-free
+            ids = b if torch.is_tensor(b) else torch.as_tensor(np.asarray(b))  # val path passes numpy slices
+            Xb = X.get(ids)  # (len(ids), *sample_shape) CPU float32; RNG-free
             if pin:
                 Xb = Xb.pin_memory()
             return ids, Xb
+
         def _dcompute(b, payload):
             ids, Xb = payload
             Xb = Xb.to(self.device, non_blocking=pin)
             return lf(fwd(Xb), yt_dev[ids.to(self.device)])
-        _dloss = lambda b: _dcompute(b, _dfetch(b))          # fused: val path + non-prefetch (byte-identical)
+
+        _dloss = lambda b: _dcompute(b, _dfetch(b))  # fused: val path + non-prefetch (byte-identical)
         permute = lambda idx: idx[torch.randperm(len(idx))]  # SAME draw+site as resident; ONLY .to(device) dropped
         prefetch = (_dfetch, _dcompute) if self._prefetch_depth() > 0 else None
-        return self._run_epochs(net, opt, tr_idx, va_idx, stopper, _dloss, self._tb(), permute, show_progress,
-                                prefetch=prefetch)
+        return self._run_epochs(
+            net, opt, tr_idx, va_idx, stopper, _dloss, self._tb(), permute, show_progress, prefetch=prefetch
+        )
 
     def _train_dense_iter(self, net, source, task, n_out, forward=None, show_progress=False):
         """Training loop for the FORWARD-ONLY iterable regime (dense contracts). Self-contained -- it does NOT
@@ -2424,6 +2879,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         hash-of-id split (via _iter_val_member) replaces the seeded index val split. Deterministic given the
         seed; NOT bit-identical to the map-style / resident fit."""
         from .allgraph_streaming import _ITER_SHUFFLE_SEED
+
         fwd = forward if forward is not None else (lambda xb: net(xb))
         opt = torch.optim.Adam(net.parameters(), lr=self.lr, weight_decay=self._wd(self._DENSE_WEIGHT_DECAY))
         lf = nn.CrossEntropyLoss() if task == "classification" else nn.MSELoss()
@@ -2453,25 +2909,32 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         for epoch in self._epoch_iter(show_progress):
             rng = np.random.RandomState(self.seed + _ITER_SHUFFLE_SEED + (epoch if isinstance(epoch, int) else 0))
             buf, pending, state = [], [], {"run": None, "nb": 0}
+
             def _emit(sample, pending=pending, state=state):  # bind this epoch's buffer/state
                 pending.append(sample)
                 if len(pending) >= bs:
-                    _step(pending, state); pending.clear()
+                    _step(pending, state)
+                    pending.clear()
+
             for sid, x, y in source:
                 if use_val and self._iter_val_member(sid):
-                    continue                             # val samples never train
+                    continue  # val samples never train
                 if len(buf) < B:
                     buf.append((x, y))
                 else:
-                    j = int(rng.randint(len(buf)))       # emit a random buffered sample, replace with the new one
-                    _emit(buf[j]); buf[j] = (x, y)
-            for j in rng.permutation(len(buf)):          # drain the buffer in seeded order
+                    j = int(rng.randint(len(buf)))  # emit a random buffered sample, replace with the new one
+                    _emit(buf[j])
+                    buf[j] = (x, y)
+            for j in rng.permutation(len(buf)):  # drain the buffer in seeded order
                 _emit(buf[int(j)])
             if pending:
-                _step(pending, state)                    # flush the last partial batch
+                _step(pending, state)  # flush the last partial batch
             if stopper is not None:
-                m = self._iter_val_loss(net, source, lf, fwd, task) if use_val \
+                m = (
+                    self._iter_val_loss(net, source, lf, fwd, task)
+                    if use_val
                     else float(state["run"] / max(state["nb"], 1))
+                )
                 if stopper.step(m):
                     break
         return net
@@ -2487,7 +2950,8 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             xb = torch.stack([b[0] for b in pending]).to(self.device)
             yy = np.asarray([b[1] for b in pending])
             yt = torch.as_tensor(yy).long() if task == "classification" else torch.as_tensor(yy).float().unsqueeze(1)
-            tot += float(lf(fwd(xb), yt.to(self.device))); nb += 1
+            tot += float(lf(fwd(xb), yt.to(self.device)))
+            nb += 1
             pending.clear()
 
         with torch.no_grad():
@@ -2507,6 +2971,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         incrementally via _IterMetric (target streams by, so ss_tot is single-pass). Net left in TRAIN mode like
         the other grid evals. Returns the result dict via _report."""
         from .allgraph_streaming import _IterMetric
+
         fwd = forward if forward is not None else (lambda xb: net(xb))
         acc = _IterMetric(task)
         pending = []
@@ -2528,12 +2993,18 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         return self._report(net, value, metric)
 
     def _report(self, net, value, metric, extra=None):
-        self.net = net                                   # keep the trained net for inspection / test eval
+        self.net = net  # keep the trained net for inspection / test eval
         sel = net.cells[0].primitives[int(net.cells[0].alpha.argmax())] if hasattr(net, "cells") else None
         arch = [c.primitives[int(c.alpha.argmax())] for c in net.cells] if hasattr(net, "cells") else None
-        r = {"contract": self.contract, "selected_primitive": sel, "architecture": arch,
-             "n_params": sum(p.numel() for p in net.parameters()),
-             "metric": metric, "value": float(value), "route": self.route_detail}
+        r = {
+            "contract": self.contract,
+            "selected_primitive": sel,
+            "architecture": arch,
+            "n_params": sum(p.numel() for p in net.parameters()),
+            "metric": metric,
+            "value": float(value),
+            "route": self.route_detail,
+        }
         if extra:
             r.update(extra)
         self._log(f"[AllGraph] {self.contract}: {metric}={value:.4f}  arch={arch}")
@@ -2547,7 +3018,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         outs = []
         for j in range(0, len(X), bs):
             with torch.no_grad():
-                outs.append(fwd(X[j:j + bs].to(self.device)).cpu())
+                outs.append(fwd(X[j : j + bs].to(self.device)).cpu())
         return torch.cat(outs)
 
     # --------------------------------------------------------------------- opt-in dataset streaming
@@ -2556,6 +3027,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         predicate gates every dense streaming branch; when it is False the resident code path is textually
         unchanged, so resident behaviour and performance are provably identical (one isinstance per fit)."""
         from .allgraph_streaming import DenseSource
+
         return isinstance(X, DenseSource)
 
     def _is_streaming_graph(self, data):
@@ -2563,24 +3035,28 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         node_feats). Gates every relational streaming branch; False leaves the resident relational path
         textually unchanged."""
         from .allgraph_streaming import GraphSource
+
         return isinstance(getattr(data, "node_feats", None), GraphSource)
 
     def _is_streaming_operator(self, data):
         """True iff `data` carries a streaming OperatorSource (opt-in via AllData.functions_stream, stored as
         dense). Gates the operator streaming branch; False leaves the resident operator path unchanged."""
         from .allgraph_streaming import OperatorSource
+
         return isinstance(getattr(data, "dense", None), OperatorSource)
 
     def _is_iterable(self, X):
         """True iff X is a forward-only IterableDenseSource (opt-in via AllData.dense_iter). Gates the separate
         iterable training regime; False leaves every map-style / resident branch unchanged."""
         from .allgraph_streaming import IterableDenseSource
+
         return isinstance(X, IterableDenseSource)
 
     def _iter_val_member(self, sample_id):
         """Whether a sample id falls in the iterable regime's held-out val bucket (a seed-keyed blake2b hash),
         used both to SKIP val samples during training and to KEEP them in the val-loss pass."""
         from .allgraph_streaming import _ITER_VAL_PERMILLE, _iter_val_key
+
         return _iter_val_key(sample_id, self.seed) % 1000 < _ITER_VAL_PERMILLE
 
     def _resolve_pin(self):
@@ -2600,6 +3076,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         bit-identical to the resident score and a multi-chunk eval matches to fp tolerance. Returns the same
         result dict as `_eval` (via `_report`)."""
         from .allgraph_streaming import _StreamMetric
+
         fwd = forward if forward is not None else (lambda xb: net(xb))
         yy = np.asarray(y)
         acc = _StreamMetric(task, yy)
@@ -2650,6 +3127,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         global RNG stream, so the deploy fit's RNG (and its weights) are unperturbed. Dispatches on source
         family: dense (DenseSource), relational (GraphSource), or operator (OperatorSource)."""
         from .allgraph_streaming import _reservoir_ids
+
         cap = self.stream_subsample_cap if cap is None else cap
         if self._is_streaming_graph(data):
             return self._resident_subsample_graph(data, cap)
@@ -2662,7 +3140,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # already. This keeps the selection sub-fits (which read sub.dense directly) shape-consistent with deploy.
         _rank = {"spatial": 4, "volumetric": 5}.get(self.contract)
         grid_src = self._as_grid(src, _rank) if _rank is not None else src
-        X = grid_src.get(ids)                                # (S, *deploy_sample_shape) resident float32 CPU
+        X = grid_src.get(ids)  # (S, *deploy_sample_shape) resident float32 CPU
         y = np.asarray(data.y)[ids] if data.y is not None else None
         return AllData.dense_tensor(X, y=y, kind_hint=data.kind_hint)
 
@@ -2671,6 +3149,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         the reservoir ids' node/edge/pos materialized and y sliced. kind_hint is left None so the resident
         tiebreak-candidate / forward logic reads the materialized positions/edges directly."""
         from .allgraph_streaming import _reservoir_ids
+
         src = data.node_feats
         ids = _reservoir_ids(len(src), cap, self.seed + 23)
         nf = [src.node(int(i)) for i in ids]
@@ -2684,6 +3163,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         """Bounded resident subsample of a streaming OperatorSource -> an in-RAM AllData.functions. The operator
         target is the field src.u(ids) (streaming operator data.y is None)."""
         from .allgraph_streaming import _reservoir_ids
+
         src = data.dense
         ids = _reservoir_ids(len(src), cap, self.seed + 23)
         return AllData.functions(src.a(ids), src.u(ids), grid=src.grid(ids), spatial_dims=src.spatial_dims)
@@ -2693,8 +3173,11 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         input (so callers fall back to `data`), else draws the subsample at most ONCE per fit (self._subsample_
         cache, reset at the top of fit()). Every SELECTION site does `sel = self._streaming_subsample(data) or
         data` so it runs on the bounded subsample under streaming and on the full data otherwise."""
-        streaming = (self._is_streaming(getattr(data, "dense", None)) or self._is_streaming_graph(data)
-                     or self._is_streaming_operator(data))
+        streaming = (
+            self._is_streaming(getattr(data, "dense", None))
+            or self._is_streaming_graph(data)
+            or self._is_streaming_operator(data)
+        )
         if not streaming:
             return None
         if getattr(self, "_subsample_cache", None) is None:
@@ -2716,12 +3199,16 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         iter_stream = self._is_iterable(getattr(data, "dense", None))
         streaming = dense_stream or graph_stream or op_stream or iter_stream
         if stream is True and not streaming:
-            raise ValueError("fit(stream=True) but the input is not streaming; build it with "
-                             "AllData.dense_stream(...) / .graph_stream(...) / .functions_stream(...) / "
-                             ".dense_iter(...) to stream.")
+            raise ValueError(
+                "fit(stream=True) but the input is not streaming; build it with "
+                "AllData.dense_stream(...) / .graph_stream(...) / .functions_stream(...) / "
+                ".dense_iter(...) to stream."
+            )
         if stream is False and streaming:
-            raise ValueError("fit(stream=False) but the input is a streaming source; build a resident input "
-                             "(AllData.dense_tensor / .graphs / .point_sets / .functions) to train in memory.")
+            raise ValueError(
+                "fit(stream=False) but the input is a streaming source; build a resident input "
+                "(AllData.dense_tensor / .graphs / .point_sets / .functions) to train in memory."
+            )
         if not streaming:
             return
         if iter_stream:
@@ -2730,7 +3217,8 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             if self.contract not in _DENSE_CONTRACTS:
                 raise NotImplementedError(
                     f"an IterableDenseSource resolved to contract {self.contract!r}; the forward-only iterable "
-                    f"regime covers the dense contracts {sorted(_DENSE_CONTRACTS)}.")
+                    f"regime covers the dense contracts {sorted(_DENSE_CONTRACTS)}."
+                )
             blk = []
             if select_size:
                 blk.append("select_size")
@@ -2740,40 +3228,68 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                 blk.append("tiebreak=True")
             if select not in ("argmax", "sparse"):
                 blk.append(f"select={select!r}")
-            for flag in ("readout_select", "kernel_from_xi", "angular_from_data", "price_singular", "price_modes",
-                         "price_equivariance", "report_llc", "developmental_llc", "report_thermo",
-                         "report_response", "report_ledger", "symmetry_routing", "canonicalize_reuse"):
+            for flag in (
+                "readout_select",
+                "kernel_from_xi",
+                "angular_from_data",
+                "price_singular",
+                "price_modes",
+                "price_equivariance",
+                "report_llc",
+                "developmental_llc",
+                "report_thermo",
+                "report_response",
+                "report_ledger",
+                "symmetry_routing",
+                "canonicalize_reuse",
+            ):
                 if getattr(self, flag, False):
                     blk.append(flag)
             if blk:
                 raise NotImplementedError(
                     "the forward-only iterable regime (AllData.dense_iter) cannot random-access the data, so it "
                     f"does not support: {', '.join(blk)}. Use AllData.dense_stream (map-style) for those, or "
-                    "disable them. Supported: select in {'argmax','sparse'}, auto_epoch.")
+                    "disable them. Supported: select in {'argmax','sparse'}, auto_epoch."
+                )
             if task == "classification" and n_out is None and getattr(data.dense, "n_out", None) is None:
-                raise ValueError("iterable classification needs an explicit n_out (the targets stream by and "
-                                 "cannot be scanned); pass n_out to fit() or AllData.dense_iter(..., n_out=...).")
+                raise ValueError(
+                    "iterable classification needs an explicit n_out (the targets stream by and "
+                    "cannot be scanned); pass n_out to fit() or AllData.dense_iter(..., n_out=...)."
+                )
             return
         if dense_stream and self.contract not in _DENSE_CONTRACTS:
             raise NotImplementedError(
                 f"a dense DenseSource resolved to contract {self.contract!r}; dense streaming covers "
-                f"{sorted(_DENSE_CONTRACTS)}.")
+                f"{sorted(_DENSE_CONTRACTS)}."
+            )
         if graph_stream and self.contract not in _IRREGULAR_CONTRACTS:
             raise NotImplementedError(
                 f"a relational GraphSource resolved to contract {self.contract!r}; relational streaming covers "
-                f"{sorted(_IRREGULAR_CONTRACTS)}.")
+                f"{sorted(_IRREGULAR_CONTRACTS)}."
+            )
         if op_stream and self.contract != "operator":
             raise NotImplementedError(
-                f"an OperatorSource resolved to contract {self.contract!r}; operator streaming covers 'operator'.")
+                f"an OperatorSource resolved to contract {self.contract!r}; operator streaming covers 'operator'."
+            )
         # select_size / select='gibbs' / tiebreak / angular_from_data are SUPPORTED under streaming: they run on
         # a bounded resident subsample (drawn once, isolated RNG) while the winner deploy-trains on the full
         # stream. The options below still re-read the FULL dataset and are not yet wired, so they stay blocked.
         # symmetry_routing / canonicalize_reuse read data.positions (None under a GraphSource) and would crash,
         # so they are blocked too until routed through the subsample.
         blocked = []
-        for flag in ("kernel_from_xi", "price_singular", "price_modes", "price_equivariance",
-                     "report_llc", "developmental_llc", "report_thermo", "report_response", "report_ledger",
-                     "symmetry_routing", "canonicalize_reuse"):
+        for flag in (
+            "kernel_from_xi",
+            "price_singular",
+            "price_modes",
+            "price_equivariance",
+            "report_llc",
+            "developmental_llc",
+            "report_thermo",
+            "report_response",
+            "report_ledger",
+            "symmetry_routing",
+            "canonicalize_reuse",
+        ):
             if getattr(self, flag, False):
                 blocked.append(flag)
         if blocked:
@@ -2783,5 +3299,5 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                 "dataset streaming does not support these options because they re-read the full dataset many "
                 f"times: {', '.join(blocked)}. Train on a resident AllData.{fam}, or disable them. Supported "
                 f"under streaming: select in {{'argmax','sparse','gibbs'}}, select_size, tiebreak, "
-                f"angular_from_data, auto_epoch{extra}.")
-
+                f"angular_from_data, auto_epoch{extra}."
+            )

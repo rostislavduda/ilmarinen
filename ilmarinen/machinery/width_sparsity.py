@@ -10,6 +10,7 @@ This is the best-conditioned piece of the framework: exact for the two-layer
 scalar problem, single-run, monotone. Returns the integer neuron count K and
 the full certificate trajectory.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -25,12 +26,13 @@ class InsertionResult:
     test_acc: float
     final_max_corr: float
     trajectory: list = field(default_factory=list)  # (step, max_corr, train_acc, test_acc)
-    neurons: list = field(default_factory=list)      # (w, b)
+    neurons: list = field(default_factory=list)  # (w, b)
     amplitudes: np.ndarray | None = None
 
 
-def greedy_insertion(X, y, Xt, yt, lam: float = 0.05, max_neurons: int = 200,
-                     n_candidates: int = 400, seed: int = 0) -> InsertionResult:
+def greedy_insertion(
+    X, y, Xt, yt, lam: float = 0.05, max_neurons: int = 200, n_candidates: int = 400, seed: int = 0
+) -> InsertionResult:
     rng = np.random.default_rng(seed)
     n, d = X.shape
     r = y.astype(np.float64).copy()
@@ -43,7 +45,7 @@ def greedy_insertion(X, y, Xt, yt, lam: float = 0.05, max_neurons: int = 200,
         # data-informed candidate neurons (better argmax oracle than pure random)
         W = rng.standard_normal((d, n_candidates)) * (1.0 / np.sqrt(d))
         idx = rng.integers(0, n, n_candidates // 2)
-        W[:, :n_candidates // 2] = (X[idx].T / (np.linalg.norm(X[idx], axis=1) + 1e-6))
+        W[:, : n_candidates // 2] = X[idx].T / (np.linalg.norm(X[idx], axis=1) + 1e-6)
         B = rng.standard_normal(n_candidates) * 0.5
         F = np.tanh(X @ W + B)
         Fc = F - F.mean(0, keepdims=True)
@@ -51,7 +53,7 @@ def greedy_insertion(X, y, Xt, yt, lam: float = 0.05, max_neurons: int = 200,
         j = int(np.argmax(np.abs(corr)))
         max_corr = float(np.abs(corr[j]))
 
-        if max_corr < lam:                       # certificate feasible -> stop
+        if max_corr < lam:  # certificate feasible -> stop
             traj.append((step, max_corr, np.nan, np.nan))
             break
 
@@ -68,9 +70,12 @@ def greedy_insertion(X, y, Xt, yt, lam: float = 0.05, max_neurons: int = 200,
 
     last = [t for t in traj if not np.isnan(t[2])]
     return InsertionResult(
-        K=len(neurons), lam=lam,
+        K=len(neurons),
+        lam=lam,
         train_acc=last[-1][2] if last else float("nan"),
         test_acc=last[-1][3] if last else float("nan"),
         final_max_corr=traj[-1][1] if traj else float("nan"),
-        trajectory=traj, neurons=neurons, amplitudes=A,
+        trajectory=traj,
+        neurons=neurons,
+        amplitudes=A,
     )

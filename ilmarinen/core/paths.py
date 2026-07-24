@@ -22,9 +22,7 @@ import tempfile
 
 def data_dir() -> str:
     """Base cache directory for anything the loaders download. Created on demand."""
-    d = os.environ.get("ILMARINEN_DATA_DIR") or os.path.join(
-        tempfile.gettempdir(), "ilmarinen_data"
-    )
+    d = os.environ.get("ILMARINEN_DATA_DIR") or os.path.join(tempfile.gettempdir(), "ilmarinen_data")
     os.makedirs(d, exist_ok=True)
     return d
 

@@ -7,16 +7,21 @@ primary interface is AllGraph; these `validate_*` helpers load on first access, 
 """
 
 _LAZY = {
-    "validate_width_sparsity", "validate_criticality", "validate_priced_depth",
-    "validate_sequential_baseline", "validate_supergraph_copy",
+    "validate_width_sparsity",
+    "validate_criticality",
+    "validate_priced_depth",
+    "validate_sequential_baseline",
+    "validate_supergraph_copy",
 }
 
 
-def __getattr__(name):          # PEP 562: defer the heavy pipeline import until a helper is actually used
+def __getattr__(name):  # PEP 562: defer the heavy pipeline import until a helper is actually used
     if name in _LAZY:
         from .._deprecation import warn_legacy
+
         warn_legacy(name, "ilmarinen.legacy.pipelines")
         from ..legacy import pipelines  # pipelines moved to the quarantined legacy island
+
         return getattr(pipelines, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

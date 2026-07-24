@@ -72,8 +72,8 @@ minibatch at a time instead of materializing the dataset:
 ```python
 from ilmarinen import AllGraph, AllData, MemmapDenseSource
 
-source = MemmapDenseSource("images.npy")           # memory-mapped; never fully loaded
-data   = AllData.dense_stream(source, y=labels, kind_hint="spatial")
+source = MemmapDenseSource("images.npy")  # memory-mapped; never fully loaded
+data = AllData.dense_stream(source, y=labels, kind_hint="spatial")
 AllGraph(width=32, depth=2, epochs=30).fit(data, task="classification", n_out=10)
 ```
 

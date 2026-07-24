@@ -31,6 +31,7 @@ with generators -- rotations, scalings, boosts, translations. DISCRETE groups (p
 have no generator and are out of scope for the Lie-derivative detector (they need a separate discrete
 test).
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -46,10 +47,10 @@ def classify_generator(L, tol=0.05):
     sym_frac = np.linalg.norm(Ls) / tot
     antisym_frac = np.linalg.norm(La) / tot
     trace = abs(np.trace(L)) / tot
-    if antisym_frac > 1 - tol:                      # purely antisymmetric -> rotation generator
+    if antisym_frac > 1 - tol:  # purely antisymmetric -> rotation generator
         return "rotation"
-    if sym_frac > 1 - tol:                          # purely symmetric
-        return "scaling" if trace > 0.2 else "boost"   # trace -> dilation; traceless -> boost
+    if sym_frac > 1 - tol:  # purely symmetric
+        return "scaling" if trace > 0.2 else "boost"  # trace -> dilation; traceless -> boost
     return "other"
 
 
@@ -75,22 +76,42 @@ def identify_group(generators, tol=0.05):
         group = f"SO(n)-partial(n_rot={n_rot},n={n})"
     else:
         group = "other-continuous"
-    return {"group": group, "labels": labels, "n_rotation": n_rot,
-            "n_scaling": n_scale, "n_boost": n_boost, "dim": len(generators)}
+    return {
+        "group": group,
+        "labels": labels,
+        "n_rotation": n_rot,
+        "n_scaling": n_scale,
+        "n_boost": n_boost,
+        "dim": len(generators),
+    }
 
 
 # group -> equivariant instantiation route
 _GROUP_ROUTE = {
-    "SO(3)": ("equivariant_graph", "SO(3)-equivariant graph contract (l<=1 or l<=2); "
-              "build_equivariant_graph_schema[_l2]. Keeps the rotation group INSIDE via steerable irreps."),
-    "SO(2)": ("steerable_2d", "2D rotation subgroup: conv gives translation equivariance; rotation "
-              "equivariance needs a steerable/2D-rotation route (not the plain conv schema)."),
-    "Lorentz-like": ("lorentz", "Indefinite-metric (boost) symmetry: needs a Lorentz-equivariant "
-                     "representation (e.g. 4-vector features); not a grid contract."),
-    "scaling": ("scale", "Dilation symmetry: reparametrize to log-coordinates or use a scale-"
-                "equivariant layer; not a grid contract."),
-    "translation": ("conv_grid", "Translation on a grid: the spatial/volumetric CONV schema -- "
-                    "weight-sharing IS translation equivariance (the conv primitive already realizes it)."),
+    "SO(3)": (
+        "equivariant_graph",
+        "SO(3)-equivariant graph contract (l<=1 or l<=2); "
+        "build_equivariant_graph_schema[_l2]. Keeps the rotation group INSIDE via steerable irreps.",
+    ),
+    "SO(2)": (
+        "steerable_2d",
+        "2D rotation subgroup: conv gives translation equivariance; rotation "
+        "equivariance needs a steerable/2D-rotation route (not the plain conv schema).",
+    ),
+    "Lorentz-like": (
+        "lorentz",
+        "Indefinite-metric (boost) symmetry: needs a Lorentz-equivariant "
+        "representation (e.g. 4-vector features); not a grid contract.",
+    ),
+    "scaling": (
+        "scale",
+        "Dilation symmetry: reparametrize to log-coordinates or use a scale-equivariant layer; not a grid contract.",
+    ),
+    "translation": (
+        "conv_grid",
+        "Translation on a grid: the spatial/volumetric CONV schema -- "
+        "weight-sharing IS translation equivariance (the conv primitive already realizes it).",
+    ),
 }
 
 
@@ -100,13 +121,17 @@ def route_equivariance(group_info):
     group = group_info["group"] if isinstance(group_info, dict) else group_info
     route, rec = _GROUP_ROUTE.get(group, (None, None))
     if route is None and group.startswith("SO(n)-partial"):
-        route, rec = ("equivariant_graph_partial",
-                      "Partial rotation symmetry discovered: a rotation-equivariant route is warranted; "
-                      "use the equivariant graph schema if the data is a 3D point set/graph.")
+        route, rec = (
+            "equivariant_graph_partial",
+            "Partial rotation symmetry discovered: a rotation-equivariant route is warranted; "
+            "use the equivariant graph schema if the data is a 3D point set/graph.",
+        )
     if route is None:
         route, rec = ("none", f"No equivariant route registered for group '{group}'.")
-    builder = {"SO(3)": "build_equivariant_graph_schema_l2",
-               "translation": "build_spatial_schema / build_volumetric_schema"}.get(group)
+    builder = {
+        "SO(3)": "build_equivariant_graph_schema_l2",
+        "translation": "build_spatial_schema / build_volumetric_schema",
+    }.get(group)
     return {"group": group, "route": route, "recommendation": rec, "builder_hint": builder}
 
 
@@ -115,14 +140,21 @@ def discover_and_route(net, X, output_index=None, tol_ratio=1.8, tol_class=0.05)
     route to the matching equivariant instantiation. Wraps symmetry_discovery.discover_symmetries.
     Returns dict(n_symmetries, group, labels, route, recommendation, generators)."""
     from ilmarinen.core.symmetry_discovery import discover_symmetries
+
     disc = discover_symmetries(net, X, output_index=output_index, tol_ratio=tol_ratio)
     gens = disc["generators"] if disc["n_symmetries"] > 0 else []
     ginfo = identify_group(gens, tol=tol_class)
     route = route_equivariance(ginfo)
-    return {"n_symmetries": disc["n_symmetries"], "gap_ratio": disc["gap_ratio"],
-            "group": ginfo["group"], "labels": ginfo["labels"], "route": route["route"],
-            "recommendation": route["recommendation"], "builder_hint": route["builder_hint"],
-            "generators": gens}
+    return {
+        "n_symmetries": disc["n_symmetries"],
+        "gap_ratio": disc["gap_ratio"],
+        "group": ginfo["group"],
+        "labels": ginfo["labels"],
+        "route": route["route"],
+        "recommendation": route["recommendation"],
+        "builder_hint": route["builder_hint"],
+        "generators": gens,
+    }
 
 
 # ==================================================================================================
@@ -143,15 +175,26 @@ def discover_and_route(net, X, output_index=None, tol_ratio=1.8, tol_class=0.05)
 # full runs this cascade (via symmetry_pipeline when available).
 
 _DISCRETE_ROUTE = {
-    "permutation": ("deepsets_or_graph", "Permutation symmetry S_n: use a permutation-invariant "
-                    "readout (mean/sum pooling = DeepSets; the GRAPH schema's mean/sum readout is "
-                    "already S_n-invariant). build_permutation_invariant_features realizes it explicitly."),
-    "reflection": ("sign_invariant", "Z_2 reflection/parity: use sign-invariant features (|x|, x^2) "
-                   "along the reflected axes. build_z2_invariant_features realizes it."),
-    "cyclic": ("cyclic_equivariant", "C_n point group: a cyclic-group-equivariant (steerable-CNN-style) "
-               "layer in the symmetric plane; discrete rotation equivariance."),
-    "dihedral": ("dihedral_equivariant", "D_n point group: cyclic C_n plus a reflection -- a dihedral-"
-                 "equivariant layer in the symmetric plane."),
+    "permutation": (
+        "deepsets_or_graph",
+        "Permutation symmetry S_n: use a permutation-invariant "
+        "readout (mean/sum pooling = DeepSets; the GRAPH schema's mean/sum readout is "
+        "already S_n-invariant). build_permutation_invariant_features realizes it explicitly.",
+    ),
+    "reflection": (
+        "sign_invariant",
+        "Z_2 reflection/parity: use sign-invariant features (|x|, x^2) "
+        "along the reflected axes. build_z2_invariant_features realizes it.",
+    ),
+    "cyclic": (
+        "cyclic_equivariant",
+        "C_n point group: a cyclic-group-equivariant (steerable-CNN-style) "
+        "layer in the symmetric plane; discrete rotation equivariance.",
+    ),
+    "dihedral": (
+        "dihedral_equivariant",
+        "D_n point group: cyclic C_n plus a reflection -- a dihedral-equivariant layer in the symmetric plane.",
+    ),
 }
 
 
@@ -163,20 +206,28 @@ def classify_discrete(z2=None, perm=None, cyclic_dihedral=None):
     if perm and perm.get("blocks"):
         nontrivial = [b for b in perm["blocks"] if len(b) >= 2]
         if nontrivial:
-            found.append({"family": "permutation",
-                          "group": "x".join(f"S_{len(b)}" for b in nontrivial),
-                          "detail": {"blocks": nontrivial}})
+            found.append(
+                {
+                    "family": "permutation",
+                    "group": "x".join(f"S_{len(b)}" for b in nontrivial),
+                    "detail": {"blocks": nontrivial},
+                }
+            )
     if cyclic_dihedral and cyclic_dihedral.get("cyclic_order"):
         n = cyclic_dihedral["cyclic_order"]
         is_d = bool(cyclic_dihedral.get("dihedral"))
-        found.append({"family": "dihedral" if is_d else "cyclic",
-                      "group": f"{'D' if is_d else 'C'}_{n}", "detail": {"order": n, "dihedral": is_d}})
+        found.append(
+            {
+                "family": "dihedral" if is_d else "cyclic",
+                "group": f"{'D' if is_d else 'C'}_{n}",
+                "detail": {"order": n, "dihedral": is_d},
+            }
+        )
     if z2 and z2.get("symmetries"):
         # keep genuine reflections/parity; swaps are the S_n building blocks (reported via perm above)
         refl = [n for n, _ in z2["symmetries"] if not n.startswith("swap")]
         if refl:
-            found.append({"family": "reflection", "group": "Z_2",
-                          "detail": {"reflections": refl}})
+            found.append({"family": "reflection", "group": "Z_2", "detail": {"reflections": refl}})
     return found
 
 
@@ -188,9 +239,19 @@ def route_discrete(discrete_info):
     return {"family": fam, "group": discrete_info["group"], "route": route, "recommendation": rec}
 
 
-def discover_and_route_robust(X, y, *, coordinate_structure="unknown", n_refits=3,
-                              consensus_frac=0.67, min_gap=1.8, tol_discrete=0.10,
-                              null_test=True, scale_aware=True, verbose=False):
+def discover_and_route_robust(
+    X,
+    y,
+    *,
+    coordinate_structure="unknown",
+    n_refits=3,
+    consensus_frac=0.67,
+    min_gap=1.8,
+    tol_discrete=0.10,
+    null_test=True,
+    scale_aware=True,
+    verbose=False,
+):
     """ROBUST detector+router for REAL DATA. Unlike discover_and_route_full (which calls the raw
     detectors), this routes through symmetry_pipeline.discover_and_reduce, inheriting ALL false-
     positive guards -- refit consensus (G1), spectral-gap/margin (G2), divisor consistency (G3),
@@ -205,9 +266,19 @@ def discover_and_route_robust(X, y, *, coordinate_structure="unknown", n_refits=
     Takes (X, y) rather than a net, because the guards refit reference models internally. Returns
     dict(continuous, discrete, reduce_fn, summary, guards_applied)."""
     from ilmarinen.core.symmetry_pipeline import discover_and_reduce
-    res = discover_and_reduce(X, y, n_refits=n_refits, consensus_frac=consensus_frac, min_gap=min_gap,
-                              tol_discrete=tol_discrete, coordinate_structure=coordinate_structure,
-                              null_test=null_test, scale_aware=scale_aware, verbose=verbose)
+
+    res = discover_and_reduce(
+        X,
+        y,
+        n_refits=n_refits,
+        consensus_frac=consensus_frac,
+        min_gap=min_gap,
+        tol_discrete=tol_discrete,
+        coordinate_structure=coordinate_structure,
+        null_test=null_test,
+        scale_aware=scale_aware,
+        verbose=verbose,
+    )
     # classify + route the ACCEPTED continuous generators
     cont_gens = [c for _, c in res["continuous"]] if res.get("continuous") else []
     cont_gens = [g["L"] if isinstance(g, dict) and "L" in g else g for g in cont_gens]
@@ -217,26 +288,31 @@ def discover_and_route_robust(X, y, *, coordinate_structure="unknown", n_refits=
     perm_blocks = res["permutation"]["blocks"] if res.get("permutation") else []
     z2 = {"symmetries": [(n, 0.0) for n in res["z2"]]} if res.get("z2") else None
     cd = res.get("cyclic")
-    disc_found = classify_discrete(z2=z2,
-                                   perm={"blocks": perm_blocks} if perm_blocks else None,
-                                   cyclic_dihedral=cd)
+    disc_found = classify_discrete(z2=z2, perm={"blocks": perm_blocks} if perm_blocks else None, cyclic_dihedral=cd)
     disc_found = [d for d in disc_found if d["group"] not in ("C_1", "D_1")]
     disc_routes = [route_discrete(d) for d in disc_found]
     return {
-        "continuous": {"group": ginfo["group"], "route": cont_route["route"],
-                       "builder_hint": cont_route.get("builder_hint")},
+        "continuous": {
+            "group": ginfo["group"],
+            "route": cont_route["route"],
+            "builder_hint": cont_route.get("builder_hint"),
+        },
         "discrete": disc_routes,
         "reduce_fn": res.get("reduce_fn"),
-        "guards_applied": {"refit_consensus": n_refits, "min_gap": min_gap,
-                           "coordinate_structure": coordinate_structure, "null_test": null_test,
-                           "scale_aware": scale_aware},
-        "summary": _summarize({"group": ginfo["group"], "route": cont_route["route"],
-                               "n_symmetries": len(cont_gens)}, disc_routes),
+        "guards_applied": {
+            "refit_consensus": n_refits,
+            "min_gap": min_gap,
+            "coordinate_structure": coordinate_structure,
+            "null_test": null_test,
+            "scale_aware": scale_aware,
+        },
+        "summary": _summarize(
+            {"group": ginfo["group"], "route": cont_route["route"], "n_symmetries": len(cont_gens)}, disc_routes
+        ),
     }
 
 
-def discover_and_route_full(net, X, output_index=None, tol_ratio=1.8, tol_class=0.05,
-                            discrete_tol=0.15, max_order=8):
+def discover_and_route_full(net, X, output_index=None, tol_ratio=1.8, tol_class=0.05, discrete_tol=0.15, max_order=8):
     """Unified detector+router: CONTINUOUS first (Lie generators -> group -> route), then DISCRETE on
     the residual (equivariance testing -> group -> route), in the semidirect-product order. Returns a
     dict with both the continuous route and a list of discrete routes.
@@ -251,8 +327,7 @@ def discover_and_route_full(net, X, output_index=None, tol_ratio=1.8, tol_class=
     from ilmarinen.core.discrete_symmetry import discover_cyclic_dihedral, discover_permutation_subgroup, discover_z2
 
     # --- continuous ---
-    cont = discover_and_route(net, X, output_index=output_index, tol_ratio=tol_ratio,
-                              tol_class=tol_class)
+    cont = discover_and_route(net, X, output_index=output_index, tol_ratio=tol_ratio, tol_class=tol_class)
 
     # --- discrete on the residual ---
     # If a continuous group was found, test discrete symmetries on continuous-INVARIANT features so we
@@ -266,9 +341,9 @@ def discover_and_route_full(net, X, output_index=None, tol_ratio=1.8, tol_class=
     if cont["n_symmetries"] > 0 and cont["generators"]:
         try:
             from ilmarinen.core.symmetry_pipeline import continuous_invariant_features
+
             feats, kept = continuous_invariant_features(X, cont["generators"])
-            feats = feats if isinstance(feats, torch.Tensor) else torch.tensor(np.asarray(feats),
-                                                                               dtype=torch.float32)
+            feats = feats if isinstance(feats, torch.Tensor) else torch.tensor(np.asarray(feats), dtype=torch.float32)
             # Only test discrete structure if the residual still has >= 2 coordinates to act on;
             # otherwise the continuous group absorbed everything (no residual discrete symmetry).
             if feats.shape[1] >= 2:
@@ -280,13 +355,16 @@ def discover_and_route_full(net, X, output_index=None, tol_ratio=1.8, tol_class=
             else:
                 # continuous group fully explains the data: no residual discrete symmetry to find
                 return {
-                    "continuous": {"group": cont["group"], "route": cont["route"],
-                                   "n_symmetries": cont["n_symmetries"],
-                                   "builder_hint": cont["builder_hint"]},
+                    "continuous": {
+                        "group": cont["group"],
+                        "route": cont["route"],
+                        "n_symmetries": cont["n_symmetries"],
+                        "builder_hint": cont["builder_hint"],
+                    },
                     "discrete": [],
                     "summary": _summarize(cont, []),
                     "note": "continuous group absorbs the acted-on coordinates; no residual discrete "
-                            "structure (discrete shadows of the continuous group suppressed).",
+                    "structure (discrete shadows of the continuous group suppressed).",
                 }
         except Exception:
             Xd = X
@@ -307,8 +385,12 @@ def discover_and_route_full(net, X, output_index=None, tol_ratio=1.8, tol_class=
     discrete_routes = [route_discrete(d) for d in discrete_found]
 
     return {
-        "continuous": {"group": cont["group"], "route": cont["route"],
-                       "n_symmetries": cont["n_symmetries"], "builder_hint": cont["builder_hint"]},
+        "continuous": {
+            "group": cont["group"],
+            "route": cont["route"],
+            "n_symmetries": cont["n_symmetries"],
+            "builder_hint": cont["builder_hint"],
+        },
         "discrete": discrete_routes,
         "summary": _summarize(cont, discrete_routes),
     }
@@ -341,17 +423,23 @@ def dispatch_symmetry_treatment(group_info, task_type="invariant", symmetry_exac
     TARGET of the discovery pipeline, not a legacy feature."""
     group = group_info["group"] if isinstance(group_info, dict) else group_info
     if task_type == "equivariant":
-        return {"treatment": "equivariant_construction",
-                "module": "equivariant_graph_schema[_l2]",
-                "rationale": "output must transform with the group (e.g. forces F->RF); a quotient "
-                             "removes the symmetry and cannot produce a covariant output."}
+        return {
+            "treatment": "equivariant_construction",
+            "module": "equivariant_graph_schema[_l2]",
+            "rationale": "output must transform with the group (e.g. forces F->RF); a quotient "
+            "removes the symmetry and cannot produce a covariant output.",
+        }
     if not symmetry_exact:
-        return {"treatment": "hybrid_alpha_selection",
-                "module": "equivariant_supergraph (invariant vs unconstrained branch)",
-                "rationale": "approximate symmetry: let the metaoptimizer select how much to impose via "
-                             "alpha, rather than hard-quotienting (may discard signal) or hard-enforcing."}
-    return {"treatment": "quotient_preprocessing",
-            "module": "symmetry_pipeline.discover_and_reduce -> reduce_fn",
-            "rationale": f"exact invariant task under {group}: quotient the orbit LOSSLESSLY (invariant "
-                         "features) -- cheapest, model-agnostic, most sample-efficient; the equivariant "
-                         "schema would be overkill and can underfit relative to invariant features."}
+        return {
+            "treatment": "hybrid_alpha_selection",
+            "module": "equivariant_supergraph (invariant vs unconstrained branch)",
+            "rationale": "approximate symmetry: let the metaoptimizer select how much to impose via "
+            "alpha, rather than hard-quotienting (may discard signal) or hard-enforcing.",
+        }
+    return {
+        "treatment": "quotient_preprocessing",
+        "module": "symmetry_pipeline.discover_and_reduce -> reduce_fn",
+        "rationale": f"exact invariant task under {group}: quotient the orbit LOSSLESSLY (invariant "
+        "features) -- cheapest, model-agnostic, most sample-efficient; the equivariant "
+        "schema would be overkill and can underfit relative to invariant features.",
+    }

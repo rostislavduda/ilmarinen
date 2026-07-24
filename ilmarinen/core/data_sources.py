@@ -60,9 +60,9 @@ def _requests_get_to_file(url, dst, timeout=300):
     behind Cloudflare) reject urllib's client signature with HTTP 403 but serve `requests`/browsers fine, so
     downloads from those hosts go through here."""
     import requests  # standard, ships with the scientific stack; declared in requirements
+
     tmp = dst + ".part"
-    with requests.get(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh)"},
-                      stream=True, timeout=timeout) as r:
+    with requests.get(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh)"}, stream=True, timeout=timeout) as r:
         r.raise_for_status()
         with open(tmp, "wb") as f:
             for chunk in r.iter_content(chunk_size=1 << 20):
@@ -83,6 +83,7 @@ def medmnist_arrays(flag, size=28):
     try:
         import medmnist
         from medmnist import INFO
+
         cls = getattr(medmnist, INFO[flag]["python_class"])
         out = {}
         for split in ("train", "val", "test"):
@@ -103,20 +104,23 @@ def medmnist_arrays(flag, size=28):
             d = np.load(cand)
             _log(f"{flag}: loaded uploaded fallback {cand}")
             return {k: d[k] for k in d.files}
-    raise RuntimeError(f"{flag}: could not fetch via medmnist and no uploaded {flag}.npz found. Install "
-                       f"medmnist with network access, or place {flag}.npz in {UPLOADS}.")
+    raise RuntimeError(
+        f"{flag}: could not fetch via medmnist and no uploaded {flag}.npz found. Install "
+        f"medmnist with network access, or place {flag}.npz in {UPLOADS}."
+    )
 
 
 # --------------------------------------------------------------------------- rMD17 molecules
 # The Revised MD17 figshare record now publishes per-molecule .npz files directly (alongside the ~1 GB
 # rmd17.tar.bz2 archive), so each molecule is fetched on its own without pulling the whole dataset.
-_RMD17_FIGSHARE_ARTICLE = 12672038      # figshare doi:10.6084/m9.figshare.12672038 (Revised MD17)
+_RMD17_FIGSHARE_ARTICLE = 12672038  # figshare doi:10.6084/m9.figshare.12672038 (Revised MD17)
 
 
 def _figshare_rmd17_url(molecule):
     """Resolve the direct download URL for rmd17_<molecule>.npz from the figshare article metadata (so we
     never hard-code file ids, which figshare rotates when files are revised)."""
     import json
+
     fname = f"rmd17_{molecule}.npz"
     meta = json.loads(_http_get(f"https://api.figshare.com/v2/articles/{_RMD17_FIGSHARE_ARTICLE}", timeout=60))
     for f in meta.get("files", []):
@@ -146,9 +150,11 @@ def rmd17_npz(molecule):
         _http_get_to_file(url, dst, timeout=300)
         return np.load(dst)
     except Exception as e:
-        raise RuntimeError(f"rMD17 {molecule}: no {fname} found and figshare download failed ({str(e)[:60]}). "
-                           f"Download rMD17 (doi:10.6084/m9.figshare.{_RMD17_FIGSHARE_ARTICLE}) and set "
-                           f"RMD17_DIR, or place {fname} in {UPLOADS}.")
+        raise RuntimeError(
+            f"rMD17 {molecule}: no {fname} found and figshare download failed ({str(e)[:60]}). "
+            f"Download rMD17 (doi:10.6084/m9.figshare.{_RMD17_FIGSHARE_ARTICLE}) and set "
+            f"RMD17_DIR, or place {fname} in {UPLOADS}."
+        )
 
 
 # --------------------------------------------------------------------------- QM7
@@ -159,8 +165,7 @@ def qm7_mat_path():
     if os.path.exists(cached):
         return cached
     # 1) public URL
-    for url in ("http://quantum-machine.org/data/qm7.mat",
-                "https://ndownloader.figshare.com/files/24895834"):
+    for url in ("http://quantum-machine.org/data/qm7.mat", "https://ndownloader.figshare.com/files/24895834"):
         try:
             data = _http_get(url, timeout=60)
             with open(cached, "wb") as f:
@@ -202,12 +207,13 @@ def qm9_xyz_dir(n_files):
         return _extract_from_zip(up)
     # 2) public tarball (figshare) -- large; only used if no upload
     try:
-        url = "https://ndownloader.figshare.com/files/3195389"    # dsgdb9nsd.xyz.tar.bz2
+        url = "https://ndownloader.figshare.com/files/3195389"  # dsgdb9nsd.xyz.tar.bz2
         data = _http_get(url, timeout=180)
         tarpath = os.path.join(CACHE, "qm9.tar.bz2")
         with open(tarpath, "wb") as f:
             f.write(data)
         import tarfile
+
         os.makedirs(os.path.join(CACHE, "qm9"), exist_ok=True)
         with tarfile.open(tarpath, "r:bz2") as t:
             members = [m for m in t.getmembers() if m.name.endswith(".xyz")][:n_files]
@@ -215,8 +221,10 @@ def qm9_xyz_dir(n_files):
         _log("qm9: downloaded+extracted subset from figshare")
         return inner if os.path.isdir(inner) else os.path.join(CACHE, "qm9")
     except Exception as e:
-        raise RuntimeError(f"QM9 not available: no uploaded qm9.zip and figshare fetch failed ({str(e)[:40]}). "
-                           f"Place qm9.zip in {UPLOADS} or ensure network access to figshare.")
+        raise RuntimeError(
+            f"QM9 not available: no uploaded qm9.zip and figshare fetch failed ({str(e)[:40]}). "
+            f"Place qm9.zip in {UPLOADS} or ensure network access to figshare."
+        )
 
 
 # --------------------------------------------------------------------------- superconductivity (UCI)
@@ -226,6 +234,7 @@ def superconductivity_arrays():
     # 1) ucimlrepo package
     try:
         from ucimlrepo import fetch_ucirepo
+
         ds = fetch_ucirepo(id=464)
         X = ds.data.features.to_numpy(dtype=np.float32)
         y = ds.data.targets.to_numpy(dtype=np.float32).ravel()
@@ -236,6 +245,7 @@ def superconductivity_arrays():
 
     # 2) public UCI zip URL, then uploaded fallback
     import csv
+
     zbytes = None
     try:
         zbytes = _http_get("https://archive.ics.uci.edu/static/public/464/superconductivty+data.zip", timeout=90)
@@ -291,6 +301,7 @@ def ecg5000_dir():
                     with z.open(nm) as src, open(os.path.join(out, os.path.basename(nm)), "wb") as dst:
                         dst.write(src.read())
         return out
+
     # uploaded zip first (present in the sandbox)
     up = os.path.join(UPLOADS, "ECG5000.zip")
     if os.path.exists(up):
@@ -306,7 +317,7 @@ def ecg5000_dir():
 
 
 # --------------------------------------------------------------------------- JetNet (Zenodo)
-_JETNET_ZENODO_RECORD = "6975118"       # JetNet, 30 particles/jet, classes g/q/t/w/z (Kansal et al. 2021)
+_JETNET_ZENODO_RECORD = "6975118"  # JetNet, 30 particles/jet, classes g/q/t/w/z (Kansal et al. 2021)
 
 
 def jetnet_hdf5_dir(classes=("g", "q", "t", "w", "z")):
@@ -330,8 +341,10 @@ def jetnet_hdf5_dir(classes=("g", "q", "t", "w", "z")):
         try:
             _requests_get_to_file(url, dst, timeout=600)
         except Exception as e:
-            raise RuntimeError(f"JetNet {c}.hdf5: Zenodo download failed ({str(e)[:60]}) and no complete "
-                               f"uploaded copy in {UPLOADS}. Place g/q/t/w/z.hdf5 there for offline use.")
+            raise RuntimeError(
+                f"JetNet {c}.hdf5: Zenodo download failed ({str(e)[:60]}) and no complete "
+                f"uploaded copy in {UPLOADS}. Place g/q/t/w/z.hdf5 there for offline use."
+            )
     return out
 
 
@@ -339,11 +352,11 @@ def pyg_temporal_json(name):
     """Return the parsed JSON for a PyTorch-Geometric-Temporal dataset (e.g. 'chickenpox', 'england_covid').
     Fetched from the public GitHub mirror (works in the sandbox); cached locally."""
     import json
+
     cached = os.path.join(CACHE, f"{name}.json")
     if os.path.exists(cached):
         return json.load(open(cached))
-    url = (f"https://raw.githubusercontent.com/benedekrozemberczki/"
-           f"pytorch_geometric_temporal/master/dataset/{name}.json")
+    url = f"https://raw.githubusercontent.com/benedekrozemberczki/pytorch_geometric_temporal/master/dataset/{name}.json"
     data = _http_get(url, timeout=40)
     with open(cached, "wb") as f:
         f.write(data)
@@ -363,7 +376,7 @@ def tudataset_dir(name):
     os.makedirs(os.path.join(CACHE, "tudataset"), exist_ok=True)
 
     def _extract(zpath):
-        with zipfile.ZipFile(zpath) as z:                 # TU zips extract to a top-level <name>/ folder
+        with zipfile.ZipFile(zpath) as z:  # TU zips extract to a top-level <name>/ folder
             z.extractall(os.path.join(CACHE, "tudataset"))
         if not os.path.exists(os.path.join(inner, f"{name}_A.txt")):
             raise FileNotFoundError(f"TUDataset {name}: archive did not contain {name}_A.txt")
@@ -378,8 +391,10 @@ def tudataset_dir(name):
         _log(f"tudataset {name}: downloaded from TU Dortmund repository")
         return _extract(dst)
     except Exception as e:
-        raise FileNotFoundError(f"TUDataset {name}: no cached/uploaded copy and download failed "
-                                f"({str(e)[:60]}). Place {name}.zip in {UPLOADS}.")
+        raise FileNotFoundError(
+            f"TUDataset {name}: no cached/uploaded copy and download failed "
+            f"({str(e)[:60]}). Place {name}.zip in {UPLOADS}."
+        )
 
 
 # --------------------------------------------------------------------------- ModelNet10 (Princeton 3DShapeNets)
@@ -389,7 +404,7 @@ def modelnet10_dir():
     subdirectories. Raises FileNotFoundError (so the runner skips) if unavailable and the download fails."""
     inner = os.path.join(CACHE, "ModelNet10")
 
-    def _resolve(base):                                   # some archives nest ModelNet10/ModelNet10/<class>
+    def _resolve(base):  # some archives nest ModelNet10/ModelNet10/<class>
         for cand in (base, os.path.join(base, "ModelNet10")):
             if os.path.isdir(os.path.join(cand, "chair")):
                 return cand
@@ -412,13 +427,14 @@ def modelnet10_dir():
         return _extract(up)
     dst = os.path.join(CACHE, "ModelNet10.zip")
     try:
-        _http_get_to_file("http://3dvision.princeton.edu/projects/2014/3DShapeNets/ModelNet10.zip",
-                          dst, timeout=600)
+        _http_get_to_file("http://3dvision.princeton.edu/projects/2014/3DShapeNets/ModelNet10.zip", dst, timeout=600)
         _log("ModelNet10: downloaded from Princeton 3DShapeNets")
         return _extract(dst)
     except Exception as e:
-        raise FileNotFoundError(f"ModelNet10: no cached/uploaded copy and download failed ({str(e)[:60]}). "
-                                f"Place ModelNet10.zip in {UPLOADS}.")
+        raise FileNotFoundError(
+            f"ModelNet10: no cached/uploaded copy and download failed ({str(e)[:60]}). "
+            f"Place ModelNet10.zip in {UPLOADS}."
+        )
 
 
 # --------------------------------------------------------------------------- Top Quark Tagging (Zenodo 2603256)
@@ -439,5 +455,7 @@ def top_tagging_h5():
         _log("top_tagging: downloaded test.h5 from Zenodo")
         return dst
     except Exception as e:
-        raise FileNotFoundError(f"Top Quark Tagging: no uploaded/cached HDF5 and Zenodo download failed "
-                                f"({str(e)[:60]}). Place test.h5 (or top_tagging.h5) in {UPLOADS}.")
+        raise FileNotFoundError(
+            f"Top Quark Tagging: no uploaded/cached HDF5 and Zenodo download failed "
+            f"({str(e)[:60]}). Place test.h5 (or top_tagging.h5) in {UPLOADS}."
+        )

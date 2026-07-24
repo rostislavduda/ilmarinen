@@ -13,6 +13,7 @@ preactivation distribution. Provides:
 This is the corrected diagnostic: phase is decided by chi_1 and c* directly,
 never by a decay-rate fit (which conflates 'approaching 1' with 'fleeing 1').
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -31,8 +32,7 @@ def _E_gauss(f, q: float) -> float:
 # ---- built-in activations with their derivatives (extend as needed) ----
 ACTIVATIONS = {
     "tanh": (np.tanh, lambda z: 1.0 - np.tanh(z) ** 2),
-    "erf":  (lambda z: np.vectorize(__import__("math").erf)(z),
-             lambda z: 2.0 / np.sqrt(np.pi) * np.exp(-z ** 2)),
+    "erf": (lambda z: np.vectorize(__import__("math").erf)(z), lambda z: 2.0 / np.sqrt(np.pi) * np.exp(-(z**2))),
     "relu": (lambda z: np.maximum(z, 0.0), lambda z: (z > 0).astype(float)),
 }
 
@@ -100,8 +100,7 @@ class MeanFieldTheory:
             phase = "chaotic"
         return PhaseResult(sigma_w2, sigma_b2, x1, q, cstar, xi, phase)
 
-    def critical_sigma_w2(self, sigma_b2: float = 0.05, lo: float = 0.5, hi: float = 5.0,
-                          iters: int = 40) -> float:
+    def critical_sigma_w2(self, sigma_b2: float = 0.05, lo: float = 0.5, hi: float = 5.0, iters: int = 40) -> float:
         """Locate sigma_w^2 such that chi_1 = 1 by bisection."""
         for _ in range(iters):
             mid = 0.5 * (lo + hi)

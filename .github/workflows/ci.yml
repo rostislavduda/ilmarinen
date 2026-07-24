@@ -116,7 +116,9 @@ jobs:
       - name: Install ruff
         run: pip install ruff==0.16.0
 
-      # Enforced: the tree is clean under the rule set configured in pyproject.toml.
-      # `ruff format` is intentionally NOT enforced (whole-repo reformat deferred).
+      # Enforced: the tree is clean and consistently formatted under pyproject.toml.
       - name: Ruff lint
         run: ruff check --output-format=github .
+
+      - name: Ruff format check
+        run: ruff format --check .

@@ -24,6 +24,7 @@ The discovered generators connect back to primitive (4) (weight-sharing under a 
 a discovered symmetry L on a layer W means constraining W to the COMMUTANT [W, L] = 0 -- the
 quantum-mechanical statement that W is conserved under the symmetry.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -55,13 +56,13 @@ def lie_derivative_matrix(net, X, output_index=None, basis=None):
         g = torch.autograd.grad(out[:, oi].sum(), X, retain_graph=True)[0]  # (b, n)
         # condition grad^T (L x) = sum_{i,j} g_i L_ij x_j = 0
         # row entries for vec(L) (row-major L_ij): coefficient of L_ij is g_i * x_j
-        gi = g.unsqueeze(2)            # (b, n, 1)
-        xj = X.unsqueeze(1)           # (b, 1, n)
-        coeff = (gi * xj).reshape(X.shape[0], n * n)   # (b, n^2)
+        gi = g.unsqueeze(2)  # (b, n, 1)
+        xj = X.unsqueeze(1)  # (b, 1, n)
+        coeff = (gi * xj).reshape(X.shape[0], n * n)  # (b, n^2)
         rows.append(coeff.detach().cpu().numpy())
     M = np.concatenate(rows, axis=0)
     if basis is not None:
-        B = np.stack([b.reshape(-1) for b in basis], axis=1)   # (n^2, K)
+        B = np.stack([b.reshape(-1) for b in basis], axis=1)  # (n^2, K)
         M = M @ B
     return M
 
@@ -134,9 +135,9 @@ def affine_lie_matrix(net, X, output_index=None):
     rows = []
     idxs = [output_index] if output_index is not None else list(range(out.shape[1]))
     for oi in idxs:
-        g = torch.autograd.grad(out[:, oi].sum(), X, retain_graph=True)[0]   # (b, n)
+        g = torch.autograd.grad(out[:, oi].sum(), X, retain_graph=True)[0]  # (b, n)
         coeffL = (g.unsqueeze(2) * X.unsqueeze(1)).reshape(X.shape[0], n * n)  # L_ij -> g_i x_j
-        coeffc = g                                                            # c_i  -> g_i
+        coeffc = g  # c_i  -> g_i
         rows.append(torch.cat([coeffL, coeffc], dim=1).detach().cpu().numpy())
     return np.concatenate(rows, axis=0), n
 
@@ -167,8 +168,8 @@ def discover_affine_symmetries(net, X, output_index=None, tol_ratio=1.8):
     gens = []
     for k in range(max(n_sym, 1)):
         v = V_asc[k]
-        L = v[:n * n].reshape(n, n)
-        c = v[n * n:]
+        L = v[: n * n].reshape(n, n)
+        c = v[n * n :]
         lnorm, cnorm = np.linalg.norm(L), np.linalg.norm(c)
         if cnorm > 3 * lnorm:
             kind = "translation"
@@ -177,11 +178,15 @@ def discover_affine_symmetries(net, X, output_index=None, tol_ratio=1.8):
         else:
             kind = "mixed"
         scale = max(np.max(np.abs(L)), np.max(np.abs(c))) + 1e-12
-        gens.append({"L": L / scale, "c": c / scale, "kind": kind,
-                     "c_dir": (c / (cnorm + 1e-12)) if cnorm > 1e-6 else c})
-    return {"singular_values": S_asc, "n_symmetries": n_sym,
-            "gap_ratio": float(S_asc[1] / (S_asc[0] + 1e-12)) if len(S_asc) > 1 else float("inf"),
-            "generators": gens}
+        gens.append(
+            {"L": L / scale, "c": c / scale, "kind": kind, "c_dir": (c / (cnorm + 1e-12)) if cnorm > 1e-6 else c}
+        )
+    return {
+        "singular_values": S_asc,
+        "n_symmetries": n_sym,
+        "gap_ratio": float(S_asc[1] / (S_asc[0] + 1e-12)) if len(S_asc) > 1 else float("inf"),
+        "generators": gens,
+    }
 
 
 # ---- named generator bank for identification (2D and 3D common Lie generators) -------------
@@ -191,7 +196,7 @@ def generator_bank(n):
     if n == 2:
         bank["rotation"] = np.array([[0, -1], [1, 0]], float)
         bank["scaling"] = np.eye(2)
-        bank["squeeze"] = np.array([[1, 0], [0, -1]], float)   # area-preserving squeeze
+        bank["squeeze"] = np.array([[1, 0], [0, -1]], float)  # area-preserving squeeze
         bank["shear_x"] = np.array([[0, 1], [0, 0]], float)
     elif n == 3:
         bank["rot_xy"] = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 0]], float)
