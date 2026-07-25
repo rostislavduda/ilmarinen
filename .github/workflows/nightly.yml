@@ -88,3 +88,48 @@ jobs:
 
       - name: Integrity check
         run: python -m ilmarinen._selfcheck
+
+  docker-build-cuda:
+    # Validate the CUDA image builds and imports. Building needs no GPU; the import
+    # check runs on the CPU runner (CUDA-enabled torch imports fine without a GPU).
+    name: docker build (cuda)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build CUDA image
+        run: docker build -f Dockerfile.cuda -t ilmarinen:cuda .
+
+      - name: Import check (CPU host)
+        run: docker run --rm ilmarinen:cuda
+
+  gpu-device-tests:
+    # DORMANT until a GPU runner is registered. Set the repo variable GPU_RUNNER to your
+    # runner label (Settings > Secrets and variables > Actions > Variables) — e.g. a GitHub
+    # GPU larger-runner label, or a self-hosted label — and this job runs the device-matrix
+    # test on real CUDA hardware (the "cuda" parametrization then appears). Until then the
+    # `if` guard skips it.
+    name: gpu device tests
+    if: ${{ vars.GPU_RUNNER != '' }}
+    runs-on: ${{ vars.GPU_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies (CUDA torch)
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cu124
+          pip install "numpy>=1.26,<3" "scipy>=1.11" "tqdm>=4.60"
+          pip install -r requirements-dev.txt
+
+      - name: Device matrix on GPU
+        run: |
+          python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
+          python -m pytest tests_unit/test_device_matrix.py -v

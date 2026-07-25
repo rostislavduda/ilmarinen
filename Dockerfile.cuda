@@ -1,0 +1,24 @@
+# GPU (CUDA) image for ilmarinen.
+#   docker build -f Dockerfile.cuda -t ilmarinen:cuda .
+#   docker run --gpus all --rm ilmarinen:cuda            # needs host NVIDIA driver + nvidia-container-toolkit
+#   docker run --gpus all --rm ilmarinen:cuda python -c "import torch; print(torch.cuda.is_available())"
+#
+# CUDA-enabled torch is pulled from the PyTorch cu124 wheel index; the wheels bundle
+# the CUDA runtime libraries (via the nvidia-*-cu12 deps), so no separate CUDA base
+# image is required and the build itself needs no GPU. Dataset extras are omitted
+# (core image: import ilmarinen, build an AllGraph, run a fit) — matching Dockerfile.
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# CUDA torch first (large layer, cached across rebuilds of the package).
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu124
+
+# Remaining core runtime.
+RUN pip install --no-cache-dir "numpy>=1.26,<3" "scipy>=1.11" "tqdm>=4.60"
+
+# The package (deps already satisfied above).
+COPY . .
+RUN pip install --no-cache-dir --no-deps .
+
+CMD ["python", "-m", "ilmarinen._selfcheck"]
