@@ -3,6 +3,7 @@
 [![CI](https://github.com/rostislavduda/ilmarinen/actions/workflows/ci.yml/badge.svg)](https://github.com/rostislavduda/ilmarinen/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/rostislavduda/ilmarinen/branch/main/graph/badge.svg)](https://codecov.io/gh/rostislavduda/ilmarinen)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21542050.svg)](https://doi.org/10.5281/zenodo.21542050)
 
 `ilmarinen` selects a neural architecture — its computational *contract* (arena), its primitive
 operations, and its width and depth — for a dataset, by minimizing a single description-length
