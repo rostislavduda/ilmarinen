@@ -1881,10 +1881,33 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             return ceiling if ceiling > 0 else 0  # 0 -> uncapped
         return int(self.epochs)
 
-    def _snapshot_if_best(self, net, stopper, best_state):
+    def _restore_best_allowed(self, va_idx):
+        """Whether best-weights restore may run for this fit.
+
+        It requires a HELD-OUT monitor. Selecting the best epoch by TRAIN loss is not a weak signal, it is an
+        actively harmful one: the lowest train loss is by construction the most overfit checkpoint, so
+        restore-best on a train monitor picks the worst-generalizing weights the run produced. Measured on
+        Darcy2D, whose 104-sample training split cannot spare a val set (see _AUTO_VAL_MIN): at a 1000-epoch
+        cap it scored field-R2 0.805, and at 5000 epochs with train-monitored restore-best it collapsed to
+        -1.14, i.e. worse than predicting the mean. So when no val split exists we keep the LAST epoch's
+        weights (the prior behaviour) and say so, rather than silently selecting for overfit."""
+        if not getattr(self, "auto_epoch_restore_best", False):
+            return False
+        if va_idx is None:
+            if not getattr(self, "_warned_restore_best", False):
+                self._warned_restore_best = True
+                self._log(
+                    "[AllGraph] auto_epoch_restore_best IGNORED: no held-out monitor for this dataset, and the "
+                    "best TRAIN loss is the most overfit epoch -- keeping the last epoch's weights instead"
+                )
+            return False
+        return True
+
+    def _snapshot_if_best(self, net, stopper, best_state, allowed=True):
         """Return an updated best-weights snapshot. Call right AFTER stopper.step(), which sets improved_raw.
-        Kept on CPU so a long fit does not pin a second model's worth of accelerator memory."""
-        if not getattr(self, "auto_epoch_restore_best", False) or stopper is None or not stopper.improved_raw:
+        Kept on CPU so a long fit does not pin a second model's worth of accelerator memory. `allowed` comes
+        from _restore_best_allowed -- a train-loss monitor must not drive checkpoint selection."""
+        if not allowed or stopper is None or not stopper.improved_raw:
             return best_state
         return {k: v.detach().to("cpu").clone() for k, v in net.state_dict().items()}
 
@@ -1920,12 +1943,28 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
     def _metric_monitor_active(self, stopper, va_idx, val_score):
         """Whether this loop should stop on the held-out SCORE rather than the loss. Needs all three: the
         metric criterion requested, a real val split to score on, and a contract that supplied a scorer.
-        Records the monitor that will actually be used, so the result reports what ran rather than what was
-        asked for."""
-        active = stopper is not None and self._use_metric_criterion() and va_idx is not None and val_score is not None
-        if stopper is not None:
-            self._last_auto_monitor = "val_metric" if active else self._last_auto_monitor
-        return active
+        A requested-but-unavailable metric criterion RAISES rather than quietly degrading to a loss
+        criterion. Silent degradation is how a 5000-epoch Darcy2D run ended up train-loss-monitored and
+        scoring field-R2 -1.14 while having been launched as a strict validation-accuracy run: the caller
+        asked for a stopping rule that never applied, and only the telemetry field revealed it afterwards.
+        Pass auto_epoch_criterion='loss' to opt into loss monitoring deliberately."""
+        if stopper is None or not self._use_metric_criterion():
+            return False
+        if va_idx is None:
+            raise ValueError(
+                "auto_epoch_criterion='metric' needs a held-out validation split, but this dataset is too "
+                f"small to spare one (needs >= {self._AUTO_VAL_MIN} val samples at <= "
+                f"{self._AUTO_VAL_MAXFRAC:.0%} of the training data; see AllGraph._auto_val_split), so there "
+                "is no validation score to stop on. Use auto_epoch_criterion='loss', or exclude this dataset."
+            )
+        if val_score is None:
+            raise ValueError(
+                f"auto_epoch_criterion='metric' is unsupported for the '{self.contract}' contract in this "
+                "regime: no held-out scorer is available (the streaming and forward-only paths would have to "
+                "re-read the source). Use auto_epoch_criterion='loss'."
+            )
+        self._last_auto_monitor = "val_metric"
+        return True
 
     def _eval_mode_score(self, net, val_score, va_idx):
         """Held-out score in EVAL mode (batchnorm/dropout off), with the net restored to train mode after --
@@ -3015,6 +3054,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         auto_epoch_criterion='metric'. Falls back to loss monitoring when absent or when there is no val
         split, so a contract that cannot score a subset keeps working."""
         use_metric = self._metric_monitor_active(stopper, va_idx, val_score)
+        keep_best = self._restore_best_allowed(va_idx)
         track = stopper is not None and va_idx is None
         depth = self._prefetch_depth() if prefetch is not None else 0
         best_state, done = None, False
@@ -3047,7 +3087,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                     else:
                         m = float(run / max(nb, 1))
                     fired = stopper.step(m)  # sets improved_raw -- snapshot BEFORE acting on the stop
-                    best_state = self._snapshot_if_best(net, stopper, best_state)
+                    best_state = self._snapshot_if_best(net, stopper, best_state, keep_best)
                     if fired:
                         done = True
                         break
@@ -3200,7 +3240,10 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                         else float(state["run"] / max(state["nb"], 1))
                     )
                     fired = stopper.step(m)
-                    best_state = self._snapshot_if_best(net, stopper, best_state)
+                    # use_val is this regime's held-out monitor (a hash split, not va_idx)
+                    best_state = self._snapshot_if_best(
+                        net, stopper, best_state, self._restore_best_allowed(use_val or None)
+                    )
                     if fired:
                         done = True
                         break

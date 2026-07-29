@@ -189,6 +189,96 @@ class TestMetricCriterionFit:
         assert mg.fit(_seq(n=600), task="classification")["auto_epoch_monitor"] == "val"
 
 
+class TestMonitorGuards:
+    """Guards on what may drive checkpointing and stopping (fast + smoke).
+
+    Both come from a real failure: a 5000-epoch Darcy2D run under the 'metric' criterion silently
+    train-loss-monitored (its 104-sample training split cannot spare a val set) AND restored the best train
+    loss -- by construction the most overfit epoch. It scored field-R2 -1.14, down from 0.805 at a
+    1000-epoch cap, while having been launched as a strict validation-accuracy run."""
+
+    def test_restore_best_refuses_a_train_only_monitor(self):
+        """T-EX-52: with no held-out split, restore-best must NOT select a checkpoint. The lowest train loss
+        is the most overfit epoch, so restoring it is worse than keeping the last."""
+        mg = _mg(auto_epoch="train", auto_epoch_restore_best=True)
+        assert mg._restore_best_allowed(None) is False
+        assert mg._restore_best_allowed(np.arange(20)) is True
+
+    def test_restore_best_off_stays_off(self):
+        """T-EX-53: the gate never turns restore-best ON for someone who did not ask for it."""
+        mg = _mg(auto_epoch="val", auto_epoch_restore_best=False)
+        assert mg._restore_best_allowed(np.arange(20)) is False
+
+    def test_snapshot_respects_the_gate(self):
+        """T-EX-54: a disallowed snapshot leaves the previous best_state untouched."""
+        mg = _mg(auto_epoch="train", auto_epoch_restore_best=True)
+        s = _EarlyStopper()
+        s.step(1.0)  # improved_raw True
+        assert mg._snapshot_if_best(torch.nn.Linear(2, 1), s, None, allowed=False) is None
+        assert mg._snapshot_if_best(torch.nn.Linear(2, 1), s, None, allowed=True) is not None
+
+    def test_metric_criterion_raises_without_a_val_split(self):
+        """T-EX-55: asking for the metric criterion where no val split can exist is an ERROR, not a silent
+        downgrade to loss monitoring -- the caller would otherwise believe a rule applied that never did."""
+        mg = _mg(auto_epoch="val", auto_epoch_criterion="metric")
+        with pytest.raises(ValueError, match="held-out validation split"):
+            mg._metric_monitor_active(_EarlyStopper(), None, lambda idx: 0.5)
+
+    def test_metric_criterion_raises_without_a_scorer(self):
+        """T-EX-56: a contract that cannot score a held-out subset (streaming / forward-only) errors rather
+        than pretending the criterion ran."""
+        mg = _mg(auto_epoch="val", auto_epoch_criterion="metric")
+        with pytest.raises(ValueError, match="unsupported"):
+            mg._metric_monitor_active(_EarlyStopper(), np.arange(50), None)
+
+    def test_loss_criterion_never_raises(self):
+        """T-EX-57: the default criterion is unaffected by either guard."""
+        mg = _mg(auto_epoch="val")
+        assert mg._metric_monitor_active(_EarlyStopper(), None, None) is False
+        assert mg._metric_monitor_active(_EarlyStopper(), np.arange(50), None) is False
+
+
+class TestMonitorGuardsFit:
+    """The guards under a real fit (smoke)."""
+
+    pytestmark = pytest.mark.smoke
+
+    def test_small_data_metric_criterion_raises(self):
+        """T-EX-58: end-to-end, a too-small dataset refuses the metric criterion."""
+        mg = _mg(
+            epochs=6, auto_epoch="val", auto_epoch_criterion="metric", auto_epoch_min_epochs=3, auto_epoch_patience=3
+        )
+        with pytest.raises(ValueError, match="held-out validation split"):
+            mg.fit(_seq(n=60), task="classification")
+
+    def test_small_data_still_trains_under_the_loss_criterion(self):
+        """T-EX-59: the same dataset trains fine on the loss criterion, with restore-best suppressed and the
+        train monitor reported."""
+        mg = _mg(
+            epochs=6,
+            auto_epoch="val",
+            auto_epoch_restore_best=True,
+            auto_epoch_min_epochs=3,
+            auto_epoch_patience=3,
+        )
+        r = mg.fit(_seq(n=60), task="classification")
+        assert r["auto_epoch_monitor"] == "train"
+        assert mg._warned_restore_best is True  # suppressed, and said so
+
+    def test_ample_data_keeps_restore_best(self):
+        """T-EX-60: a real val monitor leaves restore-best enabled."""
+        mg = _mg(
+            epochs=6,
+            auto_epoch="val",
+            auto_epoch_restore_best=True,
+            auto_epoch_min_epochs=3,
+            auto_epoch_patience=3,
+        )
+        r = mg.fit(_seq(n=600), task="classification")
+        assert r["auto_epoch_monitor"] == "val"
+        assert getattr(mg, "_warned_restore_best", False) is False
+
+
 class TestDeployEpochBlocks:
     """Phase 2: the extension policy -- how a budget becomes one or more blocks (fast tier)."""
 
@@ -305,11 +395,14 @@ class TestRestoreBest:
     pytestmark = pytest.mark.smoke
 
     def test_restores_the_best_epoch_weights(self):
-        """T-EX-17: with restore_best on, the deployed net is the best-monitored epoch's, not the last.
+        """T-EX-17: with restore_best on AND a held-out monitor, the deployed net is the best-monitored
+        epoch's, not the last.
 
-        Driven directly through _run_epochs with a scripted loss whose minimum is early and which then
-        gets worse, so 'last' and 'best' are unambiguously different nets."""
-        mg = _mg(epochs=6, auto_epoch="train", auto_epoch_restore_best=True)
+        Driven directly through _run_epochs with a scripted monitored value whose minimum is early and which
+        then gets worse, so 'last' and 'best' are unambiguously different nets. A non-None va_idx is required:
+        restore-best is deliberately suppressed on a train-only monitor, since the lowest TRAIN loss is the
+        most overfit epoch (see TestMonitorGuards)."""
+        mg = _mg(epochs=6, auto_epoch="val", auto_epoch_restore_best=True)
         net = torch.nn.Linear(4, 1)
         opt = torch.optim.SGD(net.parameters(), lr=0.0)  # frozen: only our marker moves the weights
         losses = iter([1.0, 0.1, 0.5, 0.9, 1.5, 2.0])  # minimum at epoch 2
@@ -322,11 +415,15 @@ class TestRestoreBest:
             with torch.no_grad():  # stamp the epoch index into the weights so we can identify the restore
                 net.weight.fill_(len(marks))
             marks[len(marks)] = float(net.weight[0, 0])
-            return np.arange(1)
+            # EMPTY training permutation: no training batch runs, so the scripted sequence is consumed
+            # exactly once per epoch -- by the val monitor. (The optimizer is frozen anyway; the weight
+            # stamp above is what the restore is detected from.)
+            return np.arange(0)
 
         stopper = mg._make_stopper()
-        mg._run_epochs(net, opt, np.arange(1), None, stopper, batch_loss, 1, permute, show_progress=True)
-        # epoch 2 had the lowest loss (0.1); its weights were stamped with 1 (0-based epoch index)
+        # va_idx is a real (single-element) held-out set, so _auto_val_loss reads the scripted batch_loss
+        mg._run_epochs(net, opt, np.arange(1), np.arange(1), stopper, batch_loss, 1, permute, show_progress=True)
+        # epoch 2 had the lowest monitored value (0.1); its weights were stamped with 1 (0-based epoch index)
         assert stopper.best_epoch == 2
         assert float(net.weight[0, 0]) == pytest.approx(1.0)
 
