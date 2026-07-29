@@ -11,9 +11,9 @@ authors:
   - family-names: Duda
     given-names: Rostislav
     email: rostislav.duda@protonmail.com
-version: "2.2.0"
+version: "2.3.0"
 doi: "10.5281/zenodo.21542050"
-date-released: "2026-07-25"
+date-released: "2026-07-29"
 license: Apache-2.0
 repository-code: "https://github.com/rostislavduda/ilmarinen"
 url: "https://github.com/rostislavduda/ilmarinen"

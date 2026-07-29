@@ -121,38 +121,76 @@ class EquivariantLinear:
         self.bias_basis = equivariant_basis(triv, gens_out)
 
     def torch_module(self, dtype=None):
-        torch, nn = _import_torch()
+        return _eqlin_cls()(self.basis, self.bias_basis, self.d_in, self.d_out)
 
-        class _EqLin(nn.Module):
-            def __init__(m, basis, bias_basis, d_in, d_out):
-                super().__init__()
-                if basis:
-                    Q = np.stack(basis, 0)  # (nbasis, d_out, d_in)
-                    m.register_buffer("Q", torch.tensor(Q, dtype=torch.float32))
-                    m.theta = nn.Parameter(torch.randn(len(basis)) / np.sqrt(len(basis)))
-                else:
-                    m.register_buffer("Q", torch.zeros(1, d_out, d_in))
-                    m.theta = nn.Parameter(torch.zeros(1))
-                if bias_basis:
-                    Bb = np.stack(bias_basis, 0)[:, :, 0]  # (nbias, d_out)
-                    m.register_buffer("Bb", torch.tensor(Bb, dtype=torch.float32))
-                    m.beta = nn.Parameter(torch.zeros(len(bias_basis)))
-                else:
-                    m.register_buffer("Bb", torch.zeros(1, d_out))
-                    m.beta = nn.Parameter(torch.zeros(1))
-                m.has_bias = bool(bias_basis)
 
-            def weight(m):
-                return torch.einsum("j,joi->oi", m.theta, m.Q)  # (d_out, d_in)
+#: cache for the equivariant-linear module class (built once, on first use).
+_EQLIN_CLS = None
 
-            def forward(m, x):  # x: (..., d_in)
-                W = m.weight()
-                out = x @ W.T
-                if m.has_bias:
-                    out = out + torch.einsum("j,jo->o", m.beta, m.Bb)
-                return out
 
-        return _EqLin(self.basis, self.bias_basis, self.d_in, self.d_out)
+def _eqlin_cls():
+    """Build (once) and return the equivariant-linear ``nn.Module`` class.
+
+    The class is cached in a module-level global, and its ``__qualname__`` rewritten to a bare name,
+    because ``torch.save`` pickles a deployed net BY CLASS PATH. Defined inline in ``torch_module`` the
+    class carried the qualname ``EquivariantLinear.torch_module.<locals>._EqLin``, which pickle cannot
+    resolve -- so saving any net containing one (every discovered-group / generated-equivariant contract)
+    raised ``AttributeError: Can't get local object``. It cannot simply be declared at module scope
+    because torch is imported lazily here (the package must import without torch present); the
+    module-level ``__getattr__`` below completes the round trip by rebuilding the class on demand when
+    ``torch.load`` looks it up in a fresh process.
+    """
+    global _EQLIN_CLS
+    if _EQLIN_CLS is not None:
+        return _EQLIN_CLS
+    torch, nn = _import_torch()
+
+    class _EqLin(nn.Module):
+        def __init__(m, basis, bias_basis, d_in, d_out):
+            super().__init__()
+            if basis:
+                Q = np.stack(basis, 0)  # (nbasis, d_out, d_in)
+                m.register_buffer("Q", torch.tensor(Q, dtype=torch.float32))
+                m.theta = nn.Parameter(torch.randn(len(basis)) / np.sqrt(len(basis)))
+            else:
+                m.register_buffer("Q", torch.zeros(1, d_out, d_in))
+                m.theta = nn.Parameter(torch.zeros(1))
+            if bias_basis:
+                Bb = np.stack(bias_basis, 0)[:, :, 0]  # (nbias, d_out)
+                m.register_buffer("Bb", torch.tensor(Bb, dtype=torch.float32))
+                m.beta = nn.Parameter(torch.zeros(len(bias_basis)))
+            else:
+                m.register_buffer("Bb", torch.zeros(1, d_out))
+                m.beta = nn.Parameter(torch.zeros(1))
+            m.has_bias = bool(bias_basis)
+
+        def weight(m):
+            return torch.einsum("j,joi->oi", m.theta, m.Q)  # (d_out, d_in)
+
+        def forward(m, x):  # x: (..., d_in)
+            W = m.weight()
+            out = x @ W.T
+            if m.has_bias:
+                out = out + torch.einsum("j,jo->o", m.beta, m.Bb)
+            return out
+
+    # present the class as a module-level name so pickle can find it again on load
+    _EqLin.__qualname__ = "_EqLin"
+    _EqLin.__module__ = __name__
+    globals()["_EqLin"] = _EqLin
+    _EQLIN_CLS = _EqLin
+    return _EqLin
+
+
+def __getattr__(name):
+    """PEP 562 hook: resolve ``_EqLin`` on demand.
+
+    ``torch.load`` looks the class up by module path in whatever process is doing the loading, which may
+    never have called ``torch_module()``. Building it here makes a saved discovered-group model loadable
+    from a cold interpreter."""
+    if name == "_EqLin":
+        return _eqlin_cls()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def group_element(gens, coeffs):

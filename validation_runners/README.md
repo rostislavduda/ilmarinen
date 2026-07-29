@@ -127,15 +127,93 @@ Two harnesses validate the whole framework (every schema) on real natural-scienc
 
 - **run_standard_validation.py** -- FULL validation for your own machine. Uses the official dataset
   PACKAGES where available (medmnist, deepchem+rdkit, jetnet, aeon) so nothing is hand-downloaded, with
-  a local-file fallback for each. Full data, proper budgets, held-out test splits, literature metrics
-  (acc / R2 / ROC-AUC). A GPU is recommended for the 3D and set-attention tasks.
+  a local-file fallback for each. Every dataset in the registry at full size, held-out test splits,
+  literature metrics (acc / R2 / ROC-AUC). A GPU is recommended for the 3D and set tasks.
     pip install torch numpy medmnist deepchem rdkit jetnet aeon
-    python run_standard_validation.py                          # every modality
-    python run_standard_validation.py --only graph,equivariant
-    python run_standard_validation.py --graph_dataset Tox21    # ESOL/Tox21/BBBP/BACE/FreeSolv/Lipo
-    python run_standard_validation.py --device cuda --set_attention   # SAB/ISAB on GPU
-    python run_standard_validation.py --device cuda --epochs_scale 2.0
+    python -m validation_runners.run_standard_validation                       # every dataset
+    python -m validation_runners.run_standard_validation --contracts graph,equivariant
+    python -m validation_runners.run_standard_validation --only ESOL,Tox21     # by DATASET name
+    python -m validation_runners.run_standard_validation --device cuda --epochs_scale 2.0
 
-  Per-modality dataset knobs: --seq_dataset, --graph_dataset, --rmd17/--rmd17_max, --jetnet_dir/
-  --jetnet_per_class, --bloodmnist, --organmnist3d. --epochs_scale multiplies all budgets;
-  --set_attention adds the O(N^2) attention set primitives (GPU recommended).
+  Dataset selection: --only / --skip take comma-separated DATASET names; --contracts takes contracts
+  (sequence, spatial, volumetric, 4d, graph, equivariant, set, operator). There is no --epochs flag:
+  each contract's budget lives in the BUDGET table at the top of the runner and --epochs_scale
+  multiplies it.
+
+  TRAINING TO CONVERGENCE. --auto_epoch {train,val} early-stops a deployed model on a plateau, and
+  --auto_epoch_extend N turns the budget from a ceiling into a first block: a model that uses its whole
+  budget WITHOUT plateauing is granted another N epochs and continues from the same weights and
+  optimizer state, repeating until it plateaus or --auto_epoch_max is reached (that ceiling matters --
+  a model that never leaves its initial loss plateau can never early-stop). --auto_epoch_restore_best
+  then returns the best-scoring epoch's weights rather than the last. Each result records
+  epochs_trained / converged, so a budget-limited number is distinguishable from a converged one.
+
+  RESULTS. The runner accumulates rows into one merge-on-write JSON
+  (--results_out, default <data-dir>/standard_val_rows.json), upserting by dataset name and flushing
+  after every dataset -- so the suite can be run in batches and an interrupted run loses nothing.
+  --save_models writes each fitted model to the package out/ folder. Render the table with:
+    python -m validation_runners.make_results_table --insert-readme
+
+- **make_results_table.py** -- renders that results JSON as the README's markdown table, grouped by
+  contract. --insert-readme splices it between the <!-- BEGIN:stdval --> / <!-- END:stdval --> markers
+  so the published table stays regenerable.
+
+## Bring your own dataset: run_kaggle_validation.py
+
+Every runner above trains on a CURATED dataset -- a registry entry whose loader already knows its target
+column, its split, and its SOTA reference. **run_kaggle_validation.py** is the opposite: it takes an
+arbitrary Kaggle handle, does the ingestion itself, and hands the result to the SAME pipeline (it imports
+add_pipeline_args / resolve_pipeline / apply_opt_preset / make_allgraph / _eval_test / record_row from
+run_standard_validation), so a Kaggle run is configured identically to a benchmark run and takes every one
+of the shared flags.
+
+    pip install "ilmarinen[kaggle]"        # kagglehub + pandas + pillow (none is needed by the rest of the
+                                           # package; all three are imported lazily, per mode)
+
+Credentials: create an API token at https://www.kaggle.com/settings/api, then either save kaggle.json to
+~/.kaggle/kaggle.json or export KAGGLE_USERNAME/KAGGLE_KEY. Downloads are cached under
+$ILMARINEN_DATA_DIR/kagglehub (--cache_dir "" restores kagglehub's own ~/.cache/kagglehub).
+
+    python validation_runners/run_kaggle_validation.py --check_auth
+
+ALWAYS --inspect FIRST. For an unfamiliar handle you do not know the file inventory, the column names, or
+which column is the target, and every guess the script makes is a heuristic. --inspect prints the file tree,
+the detected mode, a per-column profile with the verdict the encoder will apply, the target and task guesses,
+the split, the chance baseline, the routed contract, and the budget -- and trains nothing.
+
+    python validation_runners/run_kaggle_validation.py --handle uciml/iris --inspect
+    python validation_runners/run_kaggle_validation.py --handle uciml/iris --epochs 40
+
+THREE MODES, auto-detected (override with --mode):
+  tabular  a CSV/TSV/parquet -> numeric + one-hot matrix -> rank 2, which routes to the SEQUENCE contract
+  images   a class-directory tree (or train/test dirs, or a flat dir + labels CSV) -> (N,C,hw,hw) -> SPATIAL
+  npy      a .npy/.npz -> rank passed straight to the grid-rank router (2=flat .. 6=4d)
+
+    # tabular regression: MAE comes back in the original units via target_scale
+    python validation_runners/run_kaggle_validation.py --handle camnugent/california-housing-prices \
+        --target median_house_value --task regression --target_units USD
+    # a COMPETITION takes a bare slug, and pick_table skips gender_submission.csv for you
+    python validation_runners/run_kaggle_validation.py --source competition --handle titanic \
+        --table train.csv --target Survived --drop_cols Name,Ticket,Cabin
+    # images -> the spatial contract
+    python validation_runners/run_kaggle_validation.py --handle tongpython/cat-and-dog \
+        --mode images --hw 64 --per_class 400 --auto_epoch val
+    # offline / air-gapped: skip kagglehub entirely
+    python validation_runners/run_kaggle_validation.py --local_dir /path/to/extracted --inspect
+
+BUDGET. Unlike the standard runner this one DOES take --width/--depth/--epochs, because there is no tuned
+budget for a dataset nobody has seen. Left unset, it routes the data without training (a probe on
+AllGraph.route) and takes that contract's entry from the same BUDGET table; --epochs_scale still multiplies.
+
+HONESTY. A flat tabular feature vector routes to the sequence contract and is read as (n, T=n_features, C=1);
+ilmarinen is a meta-optimizer over contracts, not a tabular specialist, so **expect to lose to XGBoost on
+tabular Kaggle data** -- the point is watching routing and priced selection behave on untuned data. `chance`
+is the TRAIN-majority predictor scored on the TEST split (not 1/K), so read `skill`, not accuracy, on an
+imbalanced target. The split is ours, not the competition's hidden test set, so this is not a leaderboard
+score. Every statistic is fit on train rows only. The module docstring lists all ten caveats.
+
+RESULTS go to a SEPARATE document, <data-dir>/kaggle_val_rows.json. Do NOT feed it to
+`make_results_table --insert-readme`: that renders standard_val_rows.json into the published benchmark table
+in README.md, and an arbitrary Kaggle dataset has no business appearing there. Rows upsert by name (--name),
+so repeated invocations accumulate; each row carries a `kaggle` sub-dict recording the handle, mode, target,
+dropped columns, split sizes and route, so it is self-describing without a registry entry to look up.

@@ -57,6 +57,9 @@ coverage.xml
 # Trained models / generated output (AllGraph.save default dir + checkpoints; machine-local artifacts)
 out/
 *.pt
+
+# Validation-run artifacts (per-batch stdout logs + the batch driver; machine-local, like out/)
+logs/
 *.pth
 *.ckpt
 
