@@ -670,9 +670,27 @@ class _ContractFitMixin:
                 Xb, bb, ng = self._subbatch_sets(data, ids, cache=cache)  # already on device
                 return lf(net(Xb, bb, ng), yt_dev[ids])
 
+        def _sscore(ids):
+            """Held-out accuracy / R2 over the val sets, batched to bound the padded (b, N, F) tensor."""
+            ids = np.asarray(ids)
+            outs = []
+            for j in range(0, len(ids), 128):
+                Xb, bb, ng = self._subbatch_sets(data, ids[j : j + 128], cache=cache)
+                outs.append(net(Xb, bb, ng).cpu())
+            return self._score(torch.cat(outs), np.asarray(y)[ids], task)
+
         permute = lambda idx: idx[np.random.permutation(len(idx))]
         self._run_epochs(
-            net, opt, tr_idx, va_idx, stopper, _sloss, self._tb(self._SET_TRAIN_BATCH), permute, prefetch=prefetch
+            net,
+            opt,
+            tr_idx,
+            va_idx,
+            stopper,
+            _sloss,
+            self._tb(self._SET_TRAIN_BATCH),
+            permute,
+            prefetch=prefetch,
+            val_score=None if streaming else _sscore,
         )
         # eval
         outs = []
@@ -843,8 +861,32 @@ class _ContractFitMixin:
             def _oloss(ids):
                 return ((net(a_d[ids], x_d[ids]) - u_d[ids]) ** 2).mean()
 
+            def _oscore(ids):
+                """Held-out FIELD R2 over the val functions -- the operator analogue of accuracy (the
+                deployed metric this contract reports), mean-subtracted over the whole held-out field."""
+                ids = np.asarray(ids)
+                preds = torch.cat(
+                    [net(a_d[ids[j : j + 32]], x_d[ids[j : j + 32]]).cpu() for j in range(0, len(ids), 32)]
+                )
+                uy = u_d[ids].cpu().numpy()
+                pr = preds.numpy()
+                ss_res = ((pr - uy) ** 2).sum()
+                ss_tot = ((uy - uy.astype(np.float64).mean()) ** 2).sum()
+                return float(1.0 - ss_res / (ss_tot + 1e-12))
+
         permute = lambda idx: idx[np.random.permutation(len(idx))]
-        self._run_epochs(net, opt, tr_idx, va_idx, stopper, _oloss, self._tb(), permute, prefetch=prefetch)
+        self._run_epochs(
+            net,
+            opt,
+            tr_idx,
+            va_idx,
+            stopper,
+            _oloss,
+            self._tb(),
+            permute,
+            prefetch=prefetch,
+            val_score=None if streaming else _oscore,
+        )
         if streaming:
             r2 = self._stream_operator_eval(net, src, self._tb())  # streamed two-pass field-R2 (no full pred/u)
         else:
@@ -921,8 +963,28 @@ class _ContractFitMixin:
             def _rloss(ids):
                 return lf(self._forward_relational(net, data, ids, with_pos, cache=cache), _tgt(ids))
 
+        def _rscore(ids):
+            """Held-out accuracy / R2 over the val graphs, batched (a relational forward is per-graph)."""
+            ids = np.asarray(ids)
+            outs = [
+                self._forward_relational(net, data, ids[j : j + 64], with_pos, cache=cache).cpu()
+                for j in range(0, len(ids), 64)
+            ]
+            return self._score(torch.cat(outs), np.asarray(data.y)[ids], task)
+
         permute = lambda idx: idx[np.random.permutation(len(idx))]
-        self._run_epochs(net, opt, tr_idx, va_idx, stopper, _rloss, self._tb(), permute, prefetch=prefetch)
+        self._run_epochs(
+            net,
+            opt,
+            tr_idx,
+            va_idx,
+            stopper,
+            _rloss,
+            self._tb(),
+            permute,
+            prefetch=prefetch,
+            val_score=None if streaming else _rscore,
+        )
         outs = []
         for j in range(0, ng_total, 64):
             ids = np.arange(j, min(j + 64, ng_total))

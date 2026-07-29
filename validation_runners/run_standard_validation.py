@@ -689,6 +689,18 @@ def add_pipeline_args(ap):
         "alone would not end. 0 (default) = no ceiling.",
     )
     ap.add_argument(
+        "--auto_epoch_criterion",
+        default="loss",
+        choices=["loss", "metric"],
+        help="what the plateau test watches. 'loss' (default) = the monitored loss, with a RELATIVE "
+        "--auto_epoch_min_delta. 'metric' = the held-out SCORE (validation accuracy for classification, R2 "
+        "for regression) with an ABSOLUTE --auto_epoch_min_delta -- i.e. 'train until validation accuracy "
+        "stops changing by more than X'. The metric criterion is the honest one for classification: val "
+        "LOSS rises with model confidence while accuracy is still improving. Requires --auto_epoch val (it "
+        "needs a held-out split to score); falls back to loss otherwise, and the monitor actually used is "
+        "recorded per dataset as auto_epoch_monitor.",
+    )
+    ap.add_argument(
         "--auto_epoch_restore_best",
         action="store_true",
         help="--auto_epoch: after training, restore the weights from the epoch with the LOWEST monitored "
@@ -768,6 +780,7 @@ def make_allgraph(args, bud, device, router, tzmu, enabled_sg):
         auto_epoch_extend=getattr(args, "auto_epoch_extend", 0),
         auto_epoch_max=getattr(args, "auto_epoch_max", 0),
         auto_epoch_restore_best=getattr(args, "auto_epoch_restore_best", False),
+        auto_epoch_criterion=getattr(args, "auto_epoch_criterion", "loss"),
     )
 
 
@@ -1014,6 +1027,11 @@ def main():
                     "converged": res.get("converged"),
                     "epoch_cap": res.get("epoch_cap"),
                     "auto_epoch_monitor": res.get("auto_epoch_monitor"),
+                    # the stopping PROTOCOL this row was produced under, so a document that accumulates rows
+                    # from runs with different criteria stays self-describing rather than silently mixing them
+                    "auto_epoch_criterion": getattr(run_args, "auto_epoch_criterion", "loss"),
+                    "auto_epoch_patience": run_args.auto_epoch_patience,
+                    "auto_epoch_min_delta": run_args.auto_epoch_min_delta,
                     "field": d["field"],
                     "sota": d["sota"],
                     "seconds": round(dt, 1),
