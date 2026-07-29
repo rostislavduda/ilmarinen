@@ -47,6 +47,10 @@ timeseries = ["aeon>=0.11"]
 jets = ["h5py>=3.8", "requests>=2.28"]
 vision = ["torchvision>=0.17", "scikit-image>=0.22"]
 medmnist = ["medmnist>=3.0"]
+# Bring-your-own dataset: validation_runners/run_kaggle_validation.py. kagglehub fetches an arbitrary Kaggle
+# handle (and needs API credentials + network), pandas parses the tables, pillow decodes the images. The
+# >=0.3.10 floor rather than >=1.0 because the *_download signatures are identical across 0.3.x and 1.x.
+kaggle = ["kagglehub>=0.3.10", "pandas>=2.0", "pillow>=10.0"]
 # Convenience aggregate of every dataset/model extra above
 all = [
     "torchdiffeq>=0.2.4",
@@ -57,6 +61,9 @@ all = [
     "torchvision>=0.17",
     "scikit-image>=0.22",
     "medmnist>=3.0",
+    "kagglehub>=0.3.10",
+    "pandas>=2.0",
+    "pillow>=10.0",
 ]
 # Development / CI tooling
 dev = ["pytest>=7.0", "ruff==0.16.0", "pre-commit>=3.5"]
