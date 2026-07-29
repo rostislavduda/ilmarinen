@@ -355,37 +355,73 @@ class _EarlyStopper:
     separate from `best`: `best` is gated by min_delta (an epoch must beat it by >= 1% relative to count as
     improvement, which is right for a plateau test but wrong for checkpointing). Best-WEIGHTS restore wants
     the plain argmin, so any epoch that is the lowest seen so far sets improved_raw -- read it right after
-    .step() to decide whether to snapshot."""
+    .step() to decide whether to snapshot.
 
-    def __init__(self, min_delta=0.01, patience=4, min_epochs=5, warmup_drop=0.05):
+    MODE. The default ('min', relative delta) monitors a LOSS. Setting mode='max' with absolute=True
+    monitors a held-out SCORE instead -- validation accuracy (classification) or R2 (regression), where
+    higher is better and `min_delta` is an absolute change in the score's own units (0.005 = half an
+    accuracy point). That is the criterion you want for "train until validation accuracy stops moving":
+    val LOSS is a poor proxy for it on classification, since it RISES with model confidence while accuracy
+    is still improving (this package documents that exact failure on ItalyPowerDemand, see
+    AllGraph._auto_val_split). In 'max' mode the warmup guard keeps its INTENT -- never stop a model that
+    has not begun to fit -- but changes its test to "the score has improved on the first epoch's value at
+    some point". A fixed `+warmup_drop` threshold cannot work on a bounded score: it is unreachable for a
+    task that already starts near its ceiling (MNIST at 0.95 could never clear 0.95+0.05) while being
+    trivially met by a task with room to move. A model pinned at exactly its opening score still never
+    stops, which is the same safe fallback the loss path has."""
+
+    def __init__(self, min_delta=0.01, patience=4, min_epochs=5, warmup_drop=0.05, mode="min", absolute=False):
+        if mode not in ("min", "max"):
+            raise ValueError(f"mode must be 'min' or 'max'; got {mode!r}")
         self.min_delta = float(min_delta)
         self.patience = int(patience)
         self.min_epochs = int(min_epochs)
         self.warmup_drop = float(warmup_drop)
-        self.best = float("inf")
+        self.mode = mode
+        self.absolute = bool(absolute)
+        self.sign = -1.0 if mode == "min" else 1.0  # +1 => larger is better
+        self.best = float("inf") * self.sign * -1.0  # -inf for 'max', +inf for 'min'
         self.bad = 0
         self.epoch = 0
         self.init = None
         self.fired = False
-        self.best_raw = float("inf")
+        self.best_raw = self.best
         self.best_epoch = 0
         self.improved_raw = False
+
+    def _better(self, a, b):
+        """Is `a` better than `b`, ignoring min_delta (the plain argmin/argmax)?"""
+        return a > b if self.mode == "max" else a < b
+
+    def _beats(self, a, b):
+        """Is `a` better than `b` by at least min_delta? Relative for a loss (scale-free across CE/MSE),
+        absolute for a score (accuracy and R2 are already on a fixed 0-1 scale, so a relative threshold
+        would mean different things at 0.4 and 0.95)."""
+        if self.absolute:
+            return a > b + self.min_delta if self.mode == "max" else a < b - self.min_delta
+        return a > b * (1.0 + self.min_delta) if self.mode == "max" else a < b * (1.0 - self.min_delta)
 
     def step(self, metric):
         self.epoch += 1
         metric = float(metric)
         if self.init is None:
-            self.init = metric  # baseline loss (after the first epoch's steps)
-        self.improved_raw = metric < self.best_raw  # plain argmin -- for best-weights checkpointing
+            self.init = metric  # baseline (after the first epoch's steps)
+        self.improved_raw = self._better(metric, self.best_raw)  # plain argmin/argmax -- for checkpointing
         if self.improved_raw:
             self.best_raw = metric
             self.best_epoch = self.epoch
-        if metric < self.best * (1.0 - self.min_delta):  # a meaningful (>= min_delta relative) reduction
+        if self._beats(metric, self.best):  # a meaningful (>= min_delta) improvement
             self.best = metric
             self.bad = 0
         else:
             self.bad += 1
-        left_plateau = metric < self.init * (1.0 - self.warmup_drop)  # has the model begun to fit at all?
+        # has the model begun to fit at all? (see the WARMUP GUARD note above)
+        if self.warmup_drop <= 0:
+            left_plateau = True
+        elif self.mode == "max":
+            left_plateau = self.best_raw > self.init  # improved on the opening score at some point
+        else:
+            left_plateau = metric < self.init * (1.0 - self.warmup_drop)
         self.fired = self.epoch >= self.min_epochs and self.bad >= self.patience and left_plateau
         return self.fired
 
@@ -454,6 +490,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         auto_epoch_extend=0,
         auto_epoch_max=0,
         auto_epoch_restore_best=False,
+        auto_epoch_criterion="loss",
         stream_subsample_cap=20000,
         stream_pin_memory=None,
         stream_prefetch=False,
@@ -647,6 +684,15 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         # makes likely) can end on a worse epoch than the best one seen; this makes "train to convergence" safe
         # against late-training drift. Costs one CPU copy of the state_dict per improvement.
         self.auto_epoch_restore_best = bool(auto_epoch_restore_best)
+        # auto_epoch_criterion: what the plateau test watches. 'loss' (default) = the monitored loss, with a
+        # RELATIVE min_delta. 'metric' = the held-out SCORE (accuracy for classification, R2 for regression)
+        # with an ABSOLUTE min_delta, i.e. "stop once validation accuracy stops moving by more than X". The
+        # metric criterion is the honest one for classification -- val loss rises with confidence while
+        # accuracy still improves (see _auto_val_split) -- and needs auto_epoch='val' to have a held-out
+        # split to score on; it silently falls back to loss otherwise.
+        if auto_epoch_criterion not in ("loss", "metric"):
+            raise ValueError(f"auto_epoch_criterion must be 'loss' or 'metric'; got {auto_epoch_criterion!r}")
+        self.auto_epoch_criterion = auto_epoch_criterion
         # telemetry from the last DEPLOYED training loop, surfaced by _report: how many epochs actually ran,
         # whether the plateau test fired (vs. hitting the ceiling), the ceiling in force, and which monitor was
         # really used (auto_epoch='val' silently falls back to train-loss on small data -- see _auto_val_split).
@@ -1748,16 +1794,33 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
 
     def _make_stopper(self):
         """Return an _EarlyStopper for the DEPLOYED training loop when auto_epoch is on, else None (train the
-        full self.epochs). It monitors each epoch's mean train loss and stops when the RELATIVE reduction stays
-        below auto_epoch_min_delta for auto_epoch_patience epochs, after a min-epochs floor. Applied only to
-        the final per-model loops -- never the fixed-budget search sub-fits."""
+        full self.epochs). Applied only to the final per-model loops -- never the fixed-budget search sub-fits.
+
+        Two criteria. By default it monitors LOSS and stops when the relative reduction stays below
+        auto_epoch_min_delta for auto_epoch_patience epochs. With auto_epoch_criterion='metric' it instead
+        monitors the held-out SCORE -- validation accuracy for classification, R2 for regression -- and stops
+        when that score stops moving by more than an ABSOLUTE auto_epoch_min_delta. The metric criterion needs
+        a real val split; without one there is no held-out score to read, so it falls back to loss."""
         if not getattr(self, "auto_epoch", None):
             return None
+        if self._use_metric_criterion():
+            return _EarlyStopper(
+                min_delta=self.auto_epoch_min_delta,
+                patience=self.auto_epoch_patience,
+                min_epochs=min(self.auto_epoch_min_epochs, self.epochs),
+                mode="max",
+                absolute=True,
+            )
         return _EarlyStopper(
             min_delta=self.auto_epoch_min_delta,
             patience=self.auto_epoch_patience,
             min_epochs=min(self.auto_epoch_min_epochs, self.epochs),
         )
+
+    def _use_metric_criterion(self):
+        """Whether this fit stops on the held-out SCORE rather than the loss. Requires auto_epoch='val' --
+        the score has to be measured on data the weights did not fit, and 'train' holds nothing out."""
+        return getattr(self, "auto_epoch_criterion", "loss") == "metric" and getattr(self, "auto_epoch", None) == "val"
 
     def _deploy_epoch_blocks(self, stopper):
         """Yield (count, offset) blocks for a DEPLOYED training loop.
@@ -1853,6 +1916,26 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         perm = rng.permutation(n)
         self._last_auto_monitor = "val"
         return perm[k:], perm[:k]
+
+    def _metric_monitor_active(self, stopper, va_idx, val_score):
+        """Whether this loop should stop on the held-out SCORE rather than the loss. Needs all three: the
+        metric criterion requested, a real val split to score on, and a contract that supplied a scorer.
+        Records the monitor that will actually be used, so the result reports what ran rather than what was
+        asked for."""
+        active = stopper is not None and self._use_metric_criterion() and va_idx is not None and val_score is not None
+        if stopper is not None:
+            self._last_auto_monitor = "val_metric" if active else self._last_auto_monitor
+        return active
+
+    def _eval_mode_score(self, net, val_score, va_idx):
+        """Held-out score in EVAL mode (batchnorm/dropout off), with the net restored to train mode after --
+        mirroring _auto_val_loss, whose eval/train discipline the scored forward must match."""
+        net.eval()
+        try:
+            with torch.no_grad():
+                return float(val_score(va_idx))
+        finally:
+            net.train()
 
     def _auto_val_loss(self, net, va_idx, batch_loss, batch=64):
         """Mean loss over the held-out val indices in EVAL mode (batchnorm/dropout off). batch_loss(idx_array)
@@ -2898,7 +2981,18 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             t.join()
 
     def _run_epochs(
-        self, net, opt, tr_idx, va_idx, stopper, batch_loss, batch_size, permute, show_progress=True, prefetch=None
+        self,
+        net,
+        opt,
+        tr_idx,
+        va_idx,
+        stopper,
+        batch_loss,
+        batch_size,
+        permute,
+        show_progress=True,
+        prefetch=None,
+        val_score=None,
     ):
         """Shared minibatch training loop for every contract's deploy fit. `batch_loss(ids)` -> scalar loss (the
         contract-specific forward + target); `permute(idx)` -> one epoch's permuted index sequence (each contract
@@ -2914,7 +3008,13 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
 
         The epoch budget comes from _deploy_epoch_blocks: one block by default (identical to the old fixed
         range(self.epochs)), or successive extension blocks when the budget runs out before the plateau test
-        fires. Blocks continue from the SAME net and optimizer, so an extension costs only the extra epochs."""
+        fires. Blocks continue from the SAME net and optimizer, so an extension costs only the extra epochs.
+
+        `val_score` (optional): `val_score(idx) -> float`, the held-out SCORE (accuracy / R2, higher better)
+        over those indices. Supplied by contracts that can score a subset; used instead of the loss when
+        auto_epoch_criterion='metric'. Falls back to loss monitoring when absent or when there is no val
+        split, so a contract that cannot score a subset keeps working."""
+        use_metric = self._metric_monitor_active(stopper, va_idx, val_score)
         track = stopper is not None and va_idx is None
         depth = self._prefetch_depth() if prefetch is not None else 0
         best_state, done = None, False
@@ -2940,7 +3040,12 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                         run = loss.detach() if run is None else run + loss.detach()
                         nb += 1
                 if stopper is not None:
-                    m = self._auto_val_loss(net, va_idx, batch_loss) if va_idx is not None else float(run / max(nb, 1))
+                    if use_metric:
+                        m = self._eval_mode_score(net, val_score, va_idx)
+                    elif va_idx is not None:
+                        m = self._auto_val_loss(net, va_idx, batch_loss)
+                    else:
+                        m = float(run / max(nb, 1))
                     fired = stopper.step(m)  # sets improved_raw -- snapshot BEFORE acting on the stop
                     best_state = self._snapshot_if_best(net, stopper, best_state)
                     if fired:
@@ -2978,9 +3083,26 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                     b = torch.as_tensor(np.asarray(b), device=self.device)
                 return lf(fwd(Xd[b]), yt_dev[b])
 
+            def _dscore(b):
+                """Held-out accuracy / R2 over the val indices, batched so a large val split cannot OOM."""
+                bt = torch.as_tensor(np.asarray(b), device=self.device)
+                outs = [fwd(Xd[bt[j : j + 256]]).cpu() for j in range(0, len(bt), 256)]
+                return self._score(torch.cat(outs), np.asarray(y)[np.asarray(b)], task)
+
             # dense permutes on-device via the CPU torch RNG (identical stream to the pre-refactor loop)
             permute = lambda idx: idx[torch.randperm(len(idx)).to(self.device)]
-            return self._run_epochs(net, opt, tr_idx_dev, va_idx, stopper, _dloss, self._tb(), permute, show_progress)
+            return self._run_epochs(
+                net,
+                opt,
+                tr_idx_dev,
+                va_idx,
+                stopper,
+                _dloss,
+                self._tb(),
+                permute,
+                show_progress,
+                val_score=_dscore,
+            )
         # STREAMING BRANCH: X is a DenseSource -- fetch + H2D only the current minibatch each step, so the full
         # (n, *sample_shape) tensor is never resident. The labels stay resident (small). This is bit-for-bit
         # equivalent to the resident path: the ONLY change is dropping the trailing `.to(self.device)` on the

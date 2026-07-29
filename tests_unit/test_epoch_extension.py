@@ -78,6 +78,117 @@ class TestEarlyStopperState:
         assert s.improved_raw is False and s.best_epoch == 1
 
 
+class TestMetricCriterion:
+    """The held-out SCORE criterion: stop when validation accuracy/R2 stops moving (fast tier).
+
+    Monitoring val LOSS is a poor proxy for this on classification -- it rises with model confidence while
+    accuracy is still improving, which this package documents on ItalyPowerDemand. 'max' mode watches the
+    score directly, with an ABSOLUTE min_delta in the score's own units."""
+
+    def _s(self, **kw):
+        kw.setdefault("min_delta", 0.005)  # half an accuracy point
+        kw.setdefault("patience", 3)
+        kw.setdefault("min_epochs", 2)
+        return _EarlyStopper(mode="max", absolute=True, **kw)
+
+    def _fires_at(self, accs, **kw):
+        s, at = self._s(**kw), None
+        for i, a in enumerate(accs, 1):
+            if s.step(a) and at is None:
+                at = i
+        return at
+
+    def test_fires_once_the_score_stops_moving(self):
+        """T-EX-40: a score flat within min_delta for `patience` epochs is a plateau."""
+        assert self._fires_at([0.40, 0.55, 0.70, 0.701, 0.702, 0.703, 0.704]) == 6
+
+    def test_sub_threshold_drift_still_counts_as_flat(self):
+        """T-EX-41: improvements SMALLER than min_delta do not reset the patience counter -- that is what
+        makes the criterion 'stops changing by more than 0.5%' rather than 'stops changing at all'."""
+        assert self._fires_at([0.40, 0.55, 0.70, 0.7005, 0.7010, 0.7015]) == 6
+
+    def test_a_still_improving_model_is_never_stopped(self):
+        """T-EX-42: steady gains above min_delta keep training alive."""
+        assert self._fires_at([0.5, 0.52, 0.54, 0.56, 0.58, 0.60]) is None
+
+    def test_absolute_not_relative_delta(self):
+        """T-EX-43: accuracy and R2 are already on a fixed 0-1 scale, so the threshold is absolute -- a
+        relative one would mean something different at 0.4 than at 0.95."""
+        s = self._s(min_delta=0.005)
+        s.step(0.90)
+        s.step(0.906)  # +0.6pp absolute: counts
+        assert s.bad == 0
+        s.step(0.909)  # +0.3pp: does not
+        assert s.bad == 1
+
+    def test_warmup_guard_allows_a_high_starting_score(self):
+        """T-EX-44: the guard must not be an absolute offset above the opening score -- a task starting at
+        0.95 could never clear 0.95+warmup and would train forever."""
+        assert self._fires_at([0.95, 0.96, 0.961, 0.962, 0.963]) == 5
+
+    def test_warmup_guard_never_stops_a_model_that_never_improved(self):
+        """T-EX-45: a model pinned at its opening score has not begun to fit; it trains the full budget,
+        the same safe fallback the loss path has."""
+        assert self._fires_at([0.10] * 8) is None
+
+    def test_min_mode_is_untouched(self):
+        """T-EX-46: the default loss criterion keeps its relative-delta, lower-is-better semantics."""
+        s = _EarlyStopper(min_delta=0.01, patience=2, min_epochs=2)
+        assert s.mode == "min" and s.absolute is False
+        assert [s.step(m) for m in (1.0, 0.5, 0.4, 0.3999, 0.3998)] == [False, False, False, False, True]
+
+    def test_rejects_an_unknown_mode(self):
+        """T-EX-47: a typo'd mode fails loudly rather than silently monitoring the wrong direction."""
+        with pytest.raises(ValueError):
+            _EarlyStopper(mode="maximise")
+
+    def test_criterion_requires_a_val_split(self):
+        """T-EX-48: 'metric' needs auto_epoch='val' -- there is no held-out score to read under 'train',
+        so it degrades to the loss criterion rather than silently scoring on training data."""
+        assert _mg(auto_epoch="val", auto_epoch_criterion="metric")._use_metric_criterion() is True
+        assert _mg(auto_epoch="train", auto_epoch_criterion="metric")._use_metric_criterion() is False
+        assert _mg(auto_epoch="val", auto_epoch_criterion="loss")._use_metric_criterion() is False
+
+    def test_stopper_is_built_in_max_mode_for_the_metric_criterion(self):
+        """T-EX-49: the criterion selects the stopper's direction and delta semantics."""
+        s = _mg(auto_epoch="val", auto_epoch_criterion="metric")._make_stopper()
+        assert s.mode == "max" and s.absolute is True
+        s = _mg(auto_epoch="val")._make_stopper()
+        assert s.mode == "min" and s.absolute is False
+
+    def test_rejects_an_unknown_criterion(self):
+        with pytest.raises(ValueError):
+            _mg(auto_epoch_criterion="accuracy")
+
+
+class TestMetricCriterionFit:
+    """The metric criterion drives a real fit and reports the monitor it used (smoke)."""
+
+    pytestmark = pytest.mark.smoke
+
+    def test_fit_reports_the_val_metric_monitor(self):
+        """T-EX-50: a fit stopped on the held-out score records `val_metric`, so the published protocol
+        says what was actually monitored."""
+        mg = _mg(
+            epochs=10,
+            auto_epoch="val",
+            auto_epoch_criterion="metric",
+            auto_epoch_min_delta=0.005,
+            auto_epoch_patience=4,
+            auto_epoch_min_epochs=4,
+            auto_epoch_extend=10,
+            auto_epoch_max=60,
+        )
+        r = mg.fit(_seq(n=600), task="classification")
+        assert r["auto_epoch_monitor"] == "val_metric"
+        assert r["epochs_trained"] >= 4
+
+    def test_loss_criterion_still_reports_val(self):
+        """T-EX-51: the default path is unchanged and still reports the loss monitor."""
+        mg = _mg(epochs=8, auto_epoch="val", auto_epoch_patience=3, auto_epoch_min_epochs=3)
+        assert mg.fit(_seq(n=600), task="classification")["auto_epoch_monitor"] == "val"
+
+
 class TestDeployEpochBlocks:
     """Phase 2: the extension policy -- how a budget becomes one or more blocks (fast tier)."""
 
