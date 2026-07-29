@@ -349,7 +349,10 @@ class _ContractFitMixin:
         readout = nn.Sequential(
             nn.Linear(n_inv, self._SKEW_READOUT_HIDDEN), nn.Tanh(), nn.Linear(self._SKEW_READOUT_HIDDEN, n_out)
         ).to(self.device)
-        params = list(attn.parameters()) + list(readout.parameters())
+        # Bundle the two trained modules up front (this becomes self.net below) so the deployed loop can carry a
+        # stopper and a best-weights snapshot like every other contract -- both need one state_dict to act on.
+        bundle = nn.ModuleDict({"attn": attn, "readout": readout})
+        params = list(bundle.parameters())
         opt = torch.optim.Adam(params, lr=max(self.lr, self._SKEW_LR_FLOOR), weight_decay=self._wd())
 
         # takes the datum's ARRAYS (not an index into the training `data`) so the same closure scores NEW
@@ -376,20 +379,40 @@ class _ContractFitMixin:
         # MINIBATCH (matching _fit_generated_equivariant): stacking datum_out over the WHOLE dataset per epoch
         # builds one autograd graph spanning all n samples, so peak memory scaled with dataset size (OOM on
         # large point clouds); 32-sample batches bound it.
-        for _ in self._epoch_iter():
-            perm = idx[np.random.permutation(len(idx))]
-            for j in range(0, len(perm), self._tb()):
-                ids = perm[j : j + 32]
-                opt.zero_grad()
-                outs = torch.stack([datum_out(i) for i in ids])
-                tgt = y_target[ids]
-                if task != "classification":
-                    outs = outs.squeeze(-1)  # (b,1)->(b,) so MSELoss doesn't broadcast
-                    loss = lf(outs, tgt)
-                else:
-                    loss = lf(outs, tgt.long())
-                loss.backward()
-                opt.step()
+        # This is a DEPLOYED fit, so it honors auto_epoch (plateau stop) and the epoch-extension policy. There
+        # is no held-out monitor on this path -- the invariants are computed per-datum from a python list, not a
+        # random-access tensor -- so it monitors the epoch-mean TRAIN loss and records that as the monitor used.
+        stopper = self._make_stopper()
+        if stopper is not None:
+            self._last_auto_monitor = "train"
+        best_state, done = None, False
+        for count, offset in self._deploy_epoch_blocks(stopper):
+            for _ in self._epoch_iter(count=count, offset=offset):
+                perm = idx[np.random.permutation(len(idx))]
+                run, nb = 0.0, 0
+                for j in range(0, len(perm), self._tb()):
+                    ids = perm[j : j + 32]
+                    opt.zero_grad()
+                    outs = torch.stack([datum_out(i) for i in ids])
+                    tgt = y_target[ids]
+                    if task != "classification":
+                        outs = outs.squeeze(-1)  # (b,1)->(b,) so MSELoss doesn't broadcast
+                        loss = lf(outs, tgt)
+                    else:
+                        loss = lf(outs, tgt.long())
+                    loss.backward()
+                    opt.step()
+                    run += float(loss.detach())
+                    nb += 1
+                if stopper is not None:
+                    fired = stopper.step(run / max(nb, 1))
+                    best_state = self._snapshot_if_best(bundle, stopper, best_state)
+                    if fired:
+                        done = True
+                        break
+            if done:
+                break
+        self._finish_deploy_epochs(bundle, stopper, best_state, self._epoch_cap())
         with torch.no_grad():
             outs = torch.cat(
                 [torch.stack([datum_out(i) for i in idx[j : j + 64]]).cpu() for j in range(0, len(idx), 64)]
@@ -400,12 +423,12 @@ class _ContractFitMixin:
         # nn.ModuleDict (not a plain dict): keeps the ["attn"]/["readout"] access while exposing
         # .parameters()/.eval() like every other contract's deployed net -- a plain dict has neither, so the
         # runners' param count and the predict() path raised AttributeError on this contract.
-        self.net = nn.ModuleDict({"attn": attn, "readout": readout})
+        self.net = bundle
         self._log(
             f"[AllGraph] generated {gname} contract (learned-attention {'skew' if is_sp else 'volume'} "
             f"invariants): score={val:.3f}"
         )
-        return {"value": val, "contract": "generated_equivariant", "group": gname}
+        return self._with_epoch_telemetry({"value": val, "contract": "generated_equivariant", "group": gname})
 
     def _fit_generated_equivariant(self, data, task, n_out, primitives):
         """Fit a GENERATED G-equivariant contract (Phase 2): build an EMLP net equivariant to the group in
@@ -450,7 +473,10 @@ class _ContractFitMixin:
         readout = nn.Sequential(
             nn.Linear(2 * n_inv, self._SKEW_READOUT_HIDDEN), nn.Tanh(), nn.Linear(self._SKEW_READOUT_HIDDEN, n_out)
         ).to(self.device)
-        params = list(node_map.parameters()) + list(readout.parameters())
+        # Bundle both trained modules up front (this becomes self.net below) so the deployed loop can carry a
+        # stopper and a best-weights snapshot like every other contract -- both need one state_dict to act on.
+        bundle = nn.ModuleDict({"node_map": node_map, "readout": readout})
+        params = list(bundle.parameters())
         opt = torch.optim.Adam(params, lr=self.lr, weight_decay=self._wd())
         lf = nn.CrossEntropyLoss() if task == "classification" else nn.MSELoss()
         y = np.asarray(data.y)
@@ -487,19 +513,40 @@ class _ContractFitMixin:
         self._geq_forward = one_out
         self._geq_modules = [node_map, readout]
 
-        for _ in self._epoch_iter():
-            np.random.shuffle(idx)
-            for j in range(0, len(idx), self._tb()):
-                ids = idx[j : j + 32]
-                opt.zero_grad()
-                out = torch.stack([datum_out(i) for i in ids], 0)
-                target = (
-                    yt[ids].long().to(self.device)
-                    if task == "classification"
-                    else yt[ids].float().unsqueeze(1).to(self.device)
-                )
-                lf(out, target).backward()
-                opt.step()
+        # DEPLOYED fit: honors auto_epoch (plateau stop) and the epoch-extension policy. No held-out monitor on
+        # this path (per-datum forwards over a python list, not random-access tensors), so it monitors the
+        # epoch-mean TRAIN loss and records that as the monitor actually used.
+        stopper = self._make_stopper()
+        if stopper is not None:
+            self._last_auto_monitor = "train"
+        best_state, done = None, False
+        for count, offset in self._deploy_epoch_blocks(stopper):
+            for _ in self._epoch_iter(count=count, offset=offset):
+                np.random.shuffle(idx)
+                run, nb = 0.0, 0
+                for j in range(0, len(idx), self._tb()):
+                    ids = idx[j : j + 32]
+                    opt.zero_grad()
+                    out = torch.stack([datum_out(i) for i in ids], 0)
+                    target = (
+                        yt[ids].long().to(self.device)
+                        if task == "classification"
+                        else yt[ids].float().unsqueeze(1).to(self.device)
+                    )
+                    loss = lf(out, target)
+                    loss.backward()
+                    opt.step()
+                    run += float(loss.detach())
+                    nb += 1
+                if stopper is not None:
+                    fired = stopper.step(run / max(nb, 1))
+                    best_state = self._snapshot_if_best(bundle, stopper, best_state)
+                    if fired:
+                        done = True
+                        break
+            if done:
+                break
+        self._finish_deploy_epochs(bundle, stopper, best_state, self._epoch_cap())
         outs = []
         with torch.no_grad():
             for i in range(n):
@@ -507,10 +554,10 @@ class _ContractFitMixin:
         pred = torch.cat(outs)
         # deploy BOTH trained modules as self.net (an nn.Module container, so .parameters() /
         # .eval() work as for every other contract and the param count includes the readout head).
-        res = self._eval(nn.ModuleDict({"node_map": node_map, "readout": readout}), pred, y, task)
+        res = self._eval(bundle, pred, y, task)
         res["contract"] = "generated_equivariant"
         res["group_generators"] = len(gens)
-        return res
+        return self._with_epoch_telemetry(res)
 
     def forward_generated_equivariant(self, data):
         """Forward pass of a fitted 'generated_equivariant' contract on NEW data, returning the raw output

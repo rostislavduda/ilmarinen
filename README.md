@@ -161,6 +161,170 @@ python -m validation_runners.run_quick_validation --report_llc --report_ledger -
 Both runners expose every opt-in flag (`--help` lists them). `studies/` holds the standalone study
 reproducers.
 
+The standard runner accumulates its results into one merge-on-write JSON
+(`$ILMARINEN_DATA_DIR/standard_val_rows.json`), so the suite can be run in batches — each `--contracts`
+invocation upserts its rows into the same document, and rows are flushed after every dataset.
+`validation_runners/make_results_table.py` renders that document as the table below.
+
+### Bring your own dataset (Kaggle)
+
+The runners above train on the curated registry. `run_kaggle_validation.py` instead takes an **arbitrary
+Kaggle handle**, ingests it, and hands the result to the *same* pipeline — it imports the shared flags,
+model construction, and evaluation from `run_standard_validation`, so it is configured identically:
+
+```bash
+pip install "ilmarinen[kaggle]"          # kagglehub + pandas + pillow (lazy, per mode)
+
+# ALWAYS inspect first: files, per-column verdicts, target/task guesses, split, chance, route — no training
+python validation_runners/run_kaggle_validation.py --handle uciml/iris --inspect
+python validation_runners/run_kaggle_validation.py --handle uciml/iris --epochs 40
+python validation_runners/run_kaggle_validation.py --local_dir /path/to/extracted   # offline, no Kaggle
+```
+
+Three auto-detected modes: a **table** (numeric + one-hot matrix → rank 2 → the `sequence` contract), an
+**image class-directory tree** (→ `(N,C,hw,hw)` → `spatial`), or a raw **`.npy`/`.npz`** (rank 2–6 passed
+straight to the grid-rank router). The split is drawn first and every statistic — imputation median,
+z-score, one-hot levels, label map, per-channel image stats — is fit on the train rows only.
+
+Read `skill`, not accuracy: `chance` is the *train-majority* predictor scored on the test split. And note
+that a flat tabular vector is read as a length-`n_features` sequence — ilmarinen is a meta-optimizer over
+computational contracts, not a tabular specialist, so **expect gradient boosting to win on tabular Kaggle
+data**. The module docstring lists all the caveats. Kaggle rows are written to a separate
+`kaggle_val_rows.json` and never enter the benchmark table below.
+
+## Standard validation suite — results
+
+Every dataset in the registry, at **full size** (`reduced=False`: the model trains on the entire train
+split and is scored on the entire held-out test split), routed and sized by the meta-optimizer itself —
+no per-dataset hand-tuning. The architecture column is what the priced-selection ladder *chose*; the
+parameter count is the deployed net after sparse selection.
+
+Protocol:
+
+- **Selection.** `--select sparse` (sparsity-priced mixture, `--sparsity_mu 0.3`) with
+  `--select_size variable` (variable-width-per-layer + emergent depth), on top of `--preset opt` — the
+  data-size-robust per-contract processing flags from the flag search. Passing `--select sparse`
+  explicitly keeps the sparse readout everywhere, including on the operator contract where `opt` would
+  otherwise select the Gibbs readout.
+- **Training length.** Each deployed model starts on the contract's 100-epoch budget and is granted a
+  further 100 epochs whenever it exhausts that budget *without* meeting the convergence criterion,
+  continuing from the same weights and optimizer state, up to a 1000-epoch ceiling. Convergence is the
+  plateau test: the monitored loss failing to improve by ≥1% relative for 10 consecutive epochs
+  (`--auto_epoch val --auto_epoch_patience 10 --auto_epoch_min_epochs 10`), after which the
+  best-scoring epoch's weights are restored (`--auto_epoch_restore_best`). A row daggered in the epochs
+  column hit the ceiling instead and is therefore budget-limited, not converged.
+- **Monitor caveat.** `--auto_epoch val` holds out ~15% of the training data, but only when that leaves
+  a reliable monitor (≥50 held-out samples at ≤35% of the data); smaller datasets fall back to
+  monitoring training loss automatically. The per-dataset monitor actually used is recorded as
+  `auto_epoch_monitor` in the results JSON.
+- **Skill** is the cross-dataset comparable axis: `(acc − chance)/(1 − chance)` for classification, `R²`
+  for regression, AUC where the dataset's headline metric is AUC.
+- SOTA references are the registry's own per-dataset citations, abridged to their headline figure; the
+  full strings live in `ilmarinen/core/dataset_registry.py` and `extended_datasets.py`. They come from
+  the literature on each dataset, not from re-runs here, and the comparison is *not* like-for-like on
+  budget: these are single-seed, single-configuration runs of a general meta-optimizer against
+  per-dataset specialist architectures.
+
+<!-- BEGIN:stdval -->
+
+**`sequence`** -- 1D series (UCR/UEA, epidemiological, tabular)
+
+| dataset | metric | ilmarinen | SOTA reference | skill | architecture | params | epochs |
+|---|---|---|---|---|---|---|---|
+| ItalyPowerDemand | acc | 0.9660 | ~0.97 (ROCKET/InceptionTime) | +0.9320 | `conv→norm` | 7,054 | 1000† |
+| ECG5000 | acc | 0.9287 | ~0.94-0.95 (ResNet/InceptionTime/TCN) | +0.9108 | `gated→norm→dilconv` | 25,786 | 47 |
+| GunPoint | acc | 0.9467 | ~0.99 (HIVE-COTE/ROCKET) | +0.8933 | `attention→dense→attention` | 60,673 | 45 |
+| Superconductivity | R2 | 0.8089 | ~0.92 (XGBoost, Hamidieh 2018) | +0.8089 | `attention→dense→plain` | 114,862 | 20 |
+| BasicMotions | acc | 0.8000 | ~1.0 (ROCKET/multivariate) | +0.7333 | `attention→attention→attention` | 19,577 | 546 |
+| ACSF1 | acc | 0.5600 | ~0.88 (ROCKET/MultiRocket) | +0.5111 | `conv→dense→conv` | 299,111 | 58 |
+| EnglandCovid | R2 | 0.4337 | n/a (no canonical value; MSE ~0.5-0.9 z-scored, lag-dependent in follow-ups) | +0.4337 | `conv→dense→dense` | 94,646 | 1000† |
+| OSULeaf | acc | 0.4876 | ~0.97 (HIVE-COTE 2.0), ~0.96 (MultiRocket), ~0.94 (ROCKET) | +0.3851 | `lstm→spectral→attention` | 40,879 | 66 |
+| Chickenpox | R2 | 0.3109 | ~0 (recurrent GNNs ~ mean predictor; MSE ~1.1 on z-scored targets, PyG-Temporal) | +0.3109 | `conv→dense→dense→gated` | 400,793 | 22 |
+
+**`spatial`** -- 2D grids (images)
+
+| dataset | metric | ilmarinen | SOTA reference | skill | architecture | params | epochs |
+|---|---|---|---|---|---|---|---|
+| MNIST | acc | 0.9918 | ~0.99+ (any CNN) | +0.9909 | `pointwise→atrous→atrous` | 297,759 | 21 |
+| BloodMNIST | acc | 0.9421 <br><sub>ROC-AUC 0.9967</sub> | ~0.958 (ResNet-18@28), ~0.966 (AutoML) | +0.9339 | `pointwise→pointwise→atrous` | 298,269 | 20 |
+| MNISTAngle | R2 | 0.7875 | n/a (semi-synthetic; -> high for a CNN reading digit orientation) | +0.7875 | `pointwise→pointwise→norm` | 297,462 | 15 |
+
+**`volumetric`** -- 3D grids (medical volumes)
+
+| dataset | metric | ilmarinen | SOTA reference | skill | architecture | params | epochs |
+|---|---|---|---|---|---|---|---|
+| DiffusionBlob3D | R2 | 0.9700 | n/a (synthetic-from-solver; -> 1 for a sufficient 3D conv) | +0.9700 | `norm→conv3d→conv_dw` | 93,144 | 24 |
+| OrganMNIST3D | acc | 0.9279 <br><sub>ROC-AUC 0.9958</sub> | ~0.907 (ResNet-18+3D; MedMNIST v2 benchmark best) | +0.9207 | `norm→conv_dw→conv_dw` | 121,498 | 40 |
+| VesselMNIST3D | ROC-AUC | 0.6781 <br><sub>acc 0.8770</sub> | ~0.87 (ResNet-18+3D), ~0.93 (best, ACS conv) | +0.6781 | `norm→conv_dw→conv_dw` | 121,345 | 31 |
+| SynapseMNIST3D | ROC-AUC | 0.5083 <br><sub>acc 0.6875</sub> | ~0.82 (ResNet-18+3D), ~0.85 (best, ResNet-50+3D) | +0.5083 | `norm→conv_dw→conv_dw` | 121,345 | 23 |
+
+**`4d`** -- 3D+time grids (solver-generated fields)
+
+| dataset | metric | ilmarinen | SOTA reference | skill | architecture | params | epochs |
+|---|---|---|---|---|---|---|---|
+| AdvectionDiffusion4D | acc | 1.0000 | n/a (synthetic-from-solver; -> 1 for a sufficient 4d model) | +1.0000 | `norm→conv4d→conv4d` | 35,010 | 46 |
+| HeatDiffusion3D | R2 | 0.9680 | n/a (synthetic-from-solver; -> 1 for a sufficient 4d model) | +0.9680 | `pointwise→conv4d→conv4d` | 46,902 | 72 |
+
+**`graph`** -- molecular and social graphs
+
+| dataset | metric | ilmarinen | SOTA reference | skill | architecture | params | epochs |
+|---|---|---|---|---|---|---|---|
+| Tox21 | ROC-AUC | 0.8037 <br><sub>acc 0.9682</sub> | ~0.75-0.83 (GNN) | +0.8037 | `gat→gcn→gin` | 88,423 | 44 |
+| ESOL | MAE[log mol/L] ↓ | 0.6648 <br><sub>R2 0.7854</sub> | ~0.40-0.45 log mol/L (D-MPNN/best GNN, random split) | +0.7854 | `gat→gcn→gcn` | 210,636 | 67 |
+| IMDB-BINARY | acc | 0.7350 | ~0.70-0.76 (GIN / graph-kernel SOTA) | +0.4700 | `gat→gcn→gcn→gcn` | 142,942 | 15 |
+
+**`equivariant`** -- E(3)/SO(3) point clouds (quantum chemistry, shapes)
+
+| dataset | metric | ilmarinen | SOTA reference | skill | architecture | params | epochs |
+|---|---|---|---|---|---|---|---|
+| QM9 ‡ | MAE[meV] ↓ | 101331.5391 <br><sub>R2 0.9835</sub> | ~5-15 meV (SchNet/PaiNN/DimeNet) | +0.9835 | `e_norm→e_painn→e_norm` | 24,985 | 51 |
+| QM7 | MAE[kcal/mol] ↓ | 31.0945 <br><sub>R2 0.9655</sub> | < 1 kcal/mol = chemical accuracy (SchNet/PaiNN) | +0.9655 | `e_norm→e_norm→e_gate` | 17,426 | 157 |
+| rMD17-ethanol | MAE[kcal/mol] ↓ | 0.7139 <br><sub>R2 0.9491</sub> | ~0.009 kcal/mol (~0.4 meV) | +0.9491 | `e_norm→e_painn→e_gate` | 34,877 | 72 |
+| rMD17-aspirin | MAE[kcal/mol] ↓ | 3.8499 <br><sub>R2 0.3897</sub> | ~0.05 kcal/mol (~2.2 meV) | +0.3897 | `e_gate→e_painn→e_gate` | 34,877 | 51 |
+| ModelNet10 | acc | 0.3877 | ~0.93-0.95 (PointNet++/DGCNN) | +0.3196 | `e_norm→e_painn→e_gate` | 35,110 | 70 |
+
+**`set`** -- permutation-invariant sets (particle physics)
+
+| dataset | metric | ilmarinen | SOTA reference | skill | architecture | params | epochs |
+|---|---|---|---|---|---|---|---|
+| JetMass | R2 | 0.9994 | ~0.9+ (EFN/Deep Sets; mass is a smooth permutation-invariant set function) | +0.9994 | `norm→deepsets→deepsets→element_mlp` | 90,203 | 24 |
+| JetNet | acc | 0.7349 <br><sub>ROC-AUC 0.9254</sub> | ~0.78-0.82 (JEDI-net/PELICAN, 5-class) | +0.6686 | `norm→deepsets→element_mlp` | 78,071 | 26 |
+| TopTagging | acc | 0.7220 <br><sub>1/eB@eS0.3 11.95, 1/eB@eS0.5 6.032, ROC-AUC 0.7928</sub> | ~0.93 / AUC ~0.98 | +0.4410 | `norm→deepsets→deepsets` | 80,523 | 96 |
+
+**`operator`** -- function -> function on a grid (PDE surrogates)
+
+| dataset | metric | ilmarinen | SOTA reference | skill | architecture | params | epochs |
+|---|---|---|---|---|---|---|---|
+| Wave2D | field_R2 | 0.9996 | ~0.99 (FNO-class) | +0.9996 | `local→local→local` | 5,048,349 | 50 |
+| Burgers1D | field_R2 | 0.9971 | ~0.999 (FNO) | +0.9971 | `local→local→deeponet` | 195,909 | 59 |
+| Darcy2D | field_R2 | 0.8049 | ~0.999 (FNO) | +0.8049 | `local→local→deeponet` | 5,048,349 | 1000† |
+
+**`generated_equivariant`** -- a contract GENERATED for a group the symmetry front-end discovered, rather than one of the eight built-ins (reached under `--discover extended`)
+
+| dataset | metric | ilmarinen | SOTA reference | skill | architecture | params | epochs |
+|---|---|---|---|---|---|---|---|
+| JetMassLorentz | R2 | 1.0000 | n/a (synthetic demonstrator; -> ~1.0 for an adequate set regressor) | +1.0000 | EMLP (discovered group) | 7,180 | 51 |
+
+↓ lower is better (a physical-unit error); every other metric is higher-is-better.
+‡ **QM9** -- the loader regresses raw U0 TOTAL energy (z-scored, rescaled to meV), whereas the quoted ~5-15 meV literature figure is for ATOMIZATION energy -- the standard QM9 target, obtained after subtracting atomic reference energies. The two are not comparable; read the R2 instead.
+† training stopped at the epoch ceiling rather than on the convergence criterion -- these numbers are budget-limited, not converged.
+
+<!-- END:stdval -->
+
+Reproduce (the suite is run in per-contract batches; results merge into one document):
+
+```bash
+export ILMARINEN_DATA_DIR=$PWD/ilmarinen_data
+for C in 4d operator graph spatial volumetric set equivariant sequence; do
+  python -m validation_runners.run_standard_validation \
+    --preset opt --select sparse --sparsity_mu 0.3 --select_size variable \
+    --auto_epoch val --auto_epoch_patience 10 --auto_epoch_min_epochs 10 \
+    --auto_epoch_extend 100 --auto_epoch_max 1000 --auto_epoch_restore_best \
+    --save_models --contracts "$C"
+done
+python -m validation_runners.make_results_table --insert-readme
+```
+
 ## Tests
 
 ```bash

@@ -346,7 +346,16 @@ class _EarlyStopper:
     sequence task can sit at a flat constant-prediction plateau for many epochs BEFORE it begins to fit; the
     plain patience test reads that flat stretch as convergence and freezes the collapse. Requiring the model
     to first leave the baseline plateau prevents stopping pre-learning; a model that never leaves it simply
-    trains the full budget (the safe fallback)."""
+    trains the full budget (the safe fallback).
+
+    `fired` records whether the plateau test ever tripped, so a caller can distinguish "converged" from
+    "ran out of budget" -- the signal the epoch-EXTENSION policy (see AllGraph._deploy_epoch_blocks) needs.
+
+    `best_raw`/`best_epoch`/`improved_raw` track the TRUE argmin of the monitored metric, deliberately
+    separate from `best`: `best` is gated by min_delta (an epoch must beat it by >= 1% relative to count as
+    improvement, which is right for a plateau test but wrong for checkpointing). Best-WEIGHTS restore wants
+    the plain argmin, so any epoch that is the lowest seen so far sets improved_raw -- read it right after
+    .step() to decide whether to snapshot."""
 
     def __init__(self, min_delta=0.01, patience=4, min_epochs=5, warmup_drop=0.05):
         self.min_delta = float(min_delta)
@@ -357,19 +366,28 @@ class _EarlyStopper:
         self.bad = 0
         self.epoch = 0
         self.init = None
+        self.fired = False
+        self.best_raw = float("inf")
+        self.best_epoch = 0
+        self.improved_raw = False
 
     def step(self, metric):
         self.epoch += 1
         metric = float(metric)
         if self.init is None:
             self.init = metric  # baseline loss (after the first epoch's steps)
+        self.improved_raw = metric < self.best_raw  # plain argmin -- for best-weights checkpointing
+        if self.improved_raw:
+            self.best_raw = metric
+            self.best_epoch = self.epoch
         if metric < self.best * (1.0 - self.min_delta):  # a meaningful (>= min_delta relative) reduction
             self.best = metric
             self.bad = 0
         else:
             self.bad += 1
         left_plateau = metric < self.init * (1.0 - self.warmup_drop)  # has the model begun to fit at all?
-        return self.epoch >= self.min_epochs and self.bad >= self.patience and left_plateau
+        self.fired = self.epoch >= self.min_epochs and self.bad >= self.patience and left_plateau
+        return self.fired
 
 
 # --------------------------------------------------------------------------- the AllGraph
@@ -433,6 +451,9 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         auto_epoch_patience=4,
         auto_epoch_min_delta=0.01,
         auto_epoch_min_epochs=5,
+        auto_epoch_extend=0,
+        auto_epoch_max=0,
+        auto_epoch_restore_best=False,
         stream_subsample_cap=20000,
         stream_pin_memory=None,
         stream_prefetch=False,
@@ -612,6 +633,27 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         self.auto_epoch_patience = auto_epoch_patience
         self.auto_epoch_min_delta = auto_epoch_min_delta
         self.auto_epoch_min_epochs = auto_epoch_min_epochs
+        # auto_epoch_extend / auto_epoch_max: turn self.epochs from a hard CEILING into a first BLOCK. When the
+        # deployed loop exhausts its budget WITHOUT the plateau test firing, the model is still learning and the
+        # cap -- not convergence -- ended training; grant another auto_epoch_extend epochs and continue from the
+        # same weights + optimizer state (a true continuation, not a refit). auto_epoch_max is the hard ceiling
+        # that guarantees termination: a model that never leaves its warmup plateau can never early-stop (see
+        # _EarlyStopper's warmup guard), so an unbounded extension would never end. 0 = off / no ceiling.
+        # Requires auto_epoch (no stopper -> no convergence signal -> nothing to extend on).
+        self.auto_epoch_extend = int(auto_epoch_extend or 0)
+        self.auto_epoch_max = int(auto_epoch_max or 0)
+        # auto_epoch_restore_best: after the deployed fit, restore the weights from the epoch with the LOWEST
+        # monitored loss instead of keeping the last epoch's. Training far past the plateau (which extension
+        # makes likely) can end on a worse epoch than the best one seen; this makes "train to convergence" safe
+        # against late-training drift. Costs one CPU copy of the state_dict per improvement.
+        self.auto_epoch_restore_best = bool(auto_epoch_restore_best)
+        # telemetry from the last DEPLOYED training loop, surfaced by _report: how many epochs actually ran,
+        # whether the plateau test fired (vs. hitting the ceiling), the ceiling in force, and which monitor was
+        # really used (auto_epoch='val' silently falls back to train-loss on small data -- see _auto_val_split).
+        self._last_epochs_trained = None
+        self._last_converged = None
+        self._last_epoch_cap = None
+        self._last_auto_monitor = None
         # opt-in dataset streaming (see core/allgraph_streaming.py). Both are INERT unless the data is built
         # with AllData.dense_stream: stream_subsample_cap bounds the resident subsample drawn once from the
         # source for any search/selection sub-fit; stream_pin_memory (None -> auto: pin only on CUDA) enables
@@ -1717,6 +1759,72 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             min_epochs=min(self.auto_epoch_min_epochs, self.epochs),
         )
 
+    def _deploy_epoch_blocks(self, stopper):
+        """Yield (count, offset) blocks for a DEPLOYED training loop.
+
+        Without extension this yields exactly one block -- (self.epochs, 0) -- so the loop is byte-identical
+        to iterating range(self.epochs). With auto_epoch_extend > 0 it keeps yielding further blocks of that
+        size while the stopper has NOT fired, i.e. while the model is still learning and only the budget
+        stopped it, up to the auto_epoch_max ceiling (0 = uncapped). Extension needs a stopper: with no
+        convergence signal there is nothing to decide on, so it is a no-op when auto_epoch is off.
+
+        This mirrors the width/depth ceiling-extension guards in allgraph_selection (grow the budget while it
+        is still binding, stop once it is not) rather than hard-coding a larger number.
+        """
+        yield int(self.epochs), 0
+        step = int(getattr(self, "auto_epoch_extend", 0) or 0)
+        if stopper is None or step <= 0:
+            return
+        ceiling = int(getattr(self, "auto_epoch_max", 0) or 0)
+        done = int(self.epochs)
+        while not stopper.fired and (ceiling <= 0 or done < ceiling):
+            count = step if ceiling <= 0 else min(step, ceiling - done)
+            if count <= 0:
+                return
+            self._log(
+                f"[AllGraph] auto_epoch: {done} epochs used without a plateau -- extending by {count} "
+                f"(ceiling {ceiling or 'none'})"
+            )
+            yield count, done
+            done += count
+
+    def _finish_deploy_epochs(self, net, stopper, best_state, cap):
+        """Close out a deployed training loop: restore the best-monitored weights if we checkpointed any, and
+        record the epoch telemetry that _report surfaces. `cap` is the ceiling actually in force."""
+        if best_state is not None:
+            net.load_state_dict(best_state)
+            self._log(f"[AllGraph] auto_epoch: restored best-epoch weights (epoch {stopper.best_epoch})")
+        self._last_epochs_trained = int(stopper.epoch) if stopper is not None else int(self.epochs)
+        self._last_converged = bool(stopper.fired) if stopper is not None else None
+        self._last_epoch_cap = int(cap)
+        return net
+
+    def _with_epoch_telemetry(self, r):
+        """Fold the last deployed loop's epoch telemetry into a result dict, in place. `converged` says whether
+        training ended because the plateau test fired (True) or because it exhausted its budget (False) -- the
+        distinction that tells you whether a reported number is convergence-limited or budget-limited. All keys
+        are omitted when auto_epoch is off, since nothing measured them."""
+        if getattr(self, "_last_epochs_trained", None) is not None:
+            r["epochs_trained"] = self._last_epochs_trained
+            r["converged"] = self._last_converged
+            r["epoch_cap"] = self._last_epoch_cap
+            r["auto_epoch_monitor"] = self._last_auto_monitor
+        return r
+
+    def _epoch_cap(self):
+        """The largest budget this fit may reach: the extension ceiling when extending, else self.epochs."""
+        if getattr(self, "auto_epoch", None) and int(getattr(self, "auto_epoch_extend", 0) or 0) > 0:
+            ceiling = int(getattr(self, "auto_epoch_max", 0) or 0)
+            return ceiling if ceiling > 0 else 0  # 0 -> uncapped
+        return int(self.epochs)
+
+    def _snapshot_if_best(self, net, stopper, best_state):
+        """Return an updated best-weights snapshot. Call right AFTER stopper.step(), which sets improved_raw.
+        Kept on CPU so a long fit does not pin a second model's worth of accelerator memory."""
+        if not getattr(self, "auto_epoch_restore_best", False) or stopper is None or not stopper.improved_raw:
+            return best_state
+        return {k: v.detach().to("cpu").clone() for k, v in net.state_dict().items()}
+
     #: auto_epoch=='val' holds out max(15%, _AUTO_VAL_MIN) samples as the monitor, but only if that still
     #: leaves enough to train on (val <= _AUTO_VAL_MAXFRAC of the data). Below that the held-out set is too
     #: small to be a reliable early-stop signal -- val loss on a handful of samples is noisy and, for
@@ -1731,6 +1839,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         samples. Returns val_idx=None (train on everything, monitor TRAIN loss) for 'train'/off, or when the
         data is too small to spare a reliable val set -- see the class note above."""
         if getattr(self, "auto_epoch", None) != "val":
+            self._last_auto_monitor = "train" if getattr(self, "auto_epoch", None) else None
             return np.arange(n), None
         k = max(int(0.15 * n), self._AUTO_VAL_MIN)
         if k > int(self._AUTO_VAL_MAXFRAC * n):  # can't hold out a reliable monitor without gutting training
@@ -1738,9 +1847,11 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                 f"[AllGraph] auto_epoch=val: n={n} too small for a reliable held-out monitor "
                 f"(needs >= {self._AUTO_VAL_MIN} val samples); monitoring TRAIN loss instead"
             )
+            self._last_auto_monitor = "train"  # the requested 'val' silently degraded -- record what ran
             return np.arange(n), None
         rng = np.random.RandomState(self.seed + 7)
         perm = rng.permutation(n)
+        self._last_auto_monitor = "val"
         return perm[k:], perm[:k]
 
     def _auto_val_loss(self, net, va_idx, batch_loss, batch=64):
@@ -1755,12 +1866,17 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         net.train()
         return tot / max(nb, 1)
 
-    def _epoch_iter(self, active=True):
-        """Iterate the training epochs (range(self.epochs)), wrapped in a live tqdm progress bar when
-        self.progress is on AND this is a deployed-model training loop (active=True). Internal search/
-        bake-off sub-fits pass active=False so only the final per-model training shows a bar. Falls back to a
-        plain range when progress is off or tqdm is unavailable, so nothing else changes."""
-        rng = range(self.epochs)
+    def _epoch_iter(self, active=True, count=None, offset=0):
+        """Iterate the training epochs, wrapped in a live tqdm progress bar when self.progress is on AND this
+        is a deployed-model training loop (active=True). Internal search/bake-off sub-fits pass active=False so
+        only the final per-model training shows a bar. Falls back to a plain range when progress is off or tqdm
+        is unavailable, so nothing else changes.
+
+        Defaults to range(self.epochs). `count`/`offset` let an EXTENSION block iterate its own slice
+        (range(offset, offset+count)) with its own bar, labeled '+N' so the extra epochs are visible as such;
+        the yielded values stay absolute epoch indices, which _train_dense_iter uses to seed its shuffle."""
+        n = int(self.epochs if count is None else count)
+        rng = range(int(offset), int(offset) + n)
         if not (active and getattr(self, "progress", False)):
             return rng
         try:
@@ -1769,6 +1885,8 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             return rng
         desc = getattr(self, "progress_desc", None)
         label = f"{desc} [{self.contract}]" if (desc and self.contract) else (desc or self.contract or "model")
+        if offset:
+            label = f"{label} +{n}"
         return tqdm(rng, desc=f"  training {label}", leave=False, unit="ep", dynamic_ncols=True)
 
     def fit(
@@ -1814,6 +1932,8 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
              dict gains 'ipr' (effective #primitives) and 'sparsity_mu'."""
         torch.manual_seed(self.seed)
         np.random.seed(self.seed)
+        # clear the previous fit's epoch telemetry so a REUSED AllGraph cannot report stale epoch counts
+        self._last_epochs_trained = self._last_converged = self._last_epoch_cap = self._last_auto_monitor = None
         self.select = select
         self._fc_cache = {"node": {}, "pos": {}, "edge": {}}  # fresh per-fit (static-per-graph tensor cache)
         self._subsample_cache = None  # the per-fit resident selection subsample (streaming; drawn once)
@@ -1888,6 +2008,10 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             result["sparsity_mu"] = float(self.sparsity_mu)
             result["effective_num_primitives"] = round(ipr, 2)
             self._log(f"[AllGraph] sparse: effective #primitives (IPR)={ipr:.2f} at mu={self.sparsity_mu}")
+        # Epoch telemetry, applied here rather than only in _report: not every contract routes its result
+        # through _report (the operator contract, for one, builds its dict inline), and this is the single
+        # point every contract's result passes through.
+        result = self._with_epoch_telemetry(result)
         # STAGE 4 -- OBSERVABLES: opt-in diagnostic read-outs (reuse computed quantities; change nothing).
         result = self._attach_diagnostics(result, data, task)
         # Retain the minimal inference context so predict()/save() can replay the EXACT deployed forward
@@ -2786,33 +2910,46 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         `prefetch` (optional): a (fetch, compute) pair for async input prefetch. When supplied AND the prefetch
         depth is > 0, each batch's RNG-free fetch runs a few batches ahead on a worker thread and `compute(ids,
         payload)` runs the device-move + forward + loss on the main thread -- bit-identical to the inline path
-        (which is `batch_loss = lambda ids: compute(ids, fetch(ids))`). The val path always uses batch_loss."""
+        (which is `batch_loss = lambda ids: compute(ids, fetch(ids))`). The val path always uses batch_loss.
+
+        The epoch budget comes from _deploy_epoch_blocks: one block by default (identical to the old fixed
+        range(self.epochs)), or successive extension blocks when the budget runs out before the plateau test
+        fires. Blocks continue from the SAME net and optimizer, so an extension costs only the extra epochs."""
         track = stopper is not None and va_idx is None
         depth = self._prefetch_depth() if prefetch is not None else 0
-        for _ in self._epoch_iter(show_progress):
-            pm = permute(tr_idx)  # RNG draw on the MAIN thread, BEFORE any fetch
-            run, nb = None, 0
-            if depth > 0:
-                fetch, compute = prefetch
-                batches = self._prefetch_batches(pm, batch_size, fetch, depth)
-            else:
-                batches = ((pm[j : j + batch_size], None) for j in range(0, len(pm), batch_size))
-            for ids, payload in batches:
-                opt.zero_grad()
-                loss = (compute(ids, payload) if depth > 0 else batch_loss(ids)) + self._alpha_penalty(net)
-                loss.backward()
-                # Skip a non-finite update instead of corrupting the weights: deep stacks over long sequences
-                # can transiently blow a batch to inf/NaN; keeping the last finite weights lets training
-                # continue on the well-behaved batches rather than poisoning every downstream step.
-                if self._grads_finite(net):
-                    opt.step()
-                if track:
-                    run = loss.detach() if run is None else run + loss.detach()
-                    nb += 1
-            if stopper is not None:
-                m = self._auto_val_loss(net, va_idx, batch_loss) if va_idx is not None else float(run / max(nb, 1))
-                if stopper.step(m):
-                    break
+        best_state, done = None, False
+        for count, offset in self._deploy_epoch_blocks(stopper):
+            for _ in self._epoch_iter(show_progress, count=count, offset=offset):
+                pm = permute(tr_idx)  # RNG draw on the MAIN thread, BEFORE any fetch
+                run, nb = None, 0
+                if depth > 0:
+                    fetch, compute = prefetch
+                    batches = self._prefetch_batches(pm, batch_size, fetch, depth)
+                else:
+                    batches = ((pm[j : j + batch_size], None) for j in range(0, len(pm), batch_size))
+                for ids, payload in batches:
+                    opt.zero_grad()
+                    loss = (compute(ids, payload) if depth > 0 else batch_loss(ids)) + self._alpha_penalty(net)
+                    loss.backward()
+                    # Skip a non-finite update instead of corrupting the weights: deep stacks over long sequences
+                    # can transiently blow a batch to inf/NaN; keeping the last finite weights lets training
+                    # continue on the well-behaved batches rather than poisoning every downstream step.
+                    if self._grads_finite(net):
+                        opt.step()
+                    if track:
+                        run = loss.detach() if run is None else run + loss.detach()
+                        nb += 1
+                if stopper is not None:
+                    m = self._auto_val_loss(net, va_idx, batch_loss) if va_idx is not None else float(run / max(nb, 1))
+                    fired = stopper.step(m)  # sets improved_raw -- snapshot BEFORE acting on the stop
+                    best_state = self._snapshot_if_best(net, stopper, best_state)
+                    if fired:
+                        done = True
+                        break
+            if done:
+                break
+        if show_progress:
+            self._finish_deploy_epochs(net, stopper, best_state, self._epoch_cap())
         return net
 
     def _train_dense(self, net, X, y, task, forward=None, show_progress=False):
@@ -2885,6 +3022,8 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
         lf = nn.CrossEntropyLoss() if task == "classification" else nn.MSELoss()
         use_val = show_progress and getattr(self, "auto_epoch", None) == "val"
         stopper = self._make_stopper() if show_progress else None
+        if show_progress and stopper is not None:  # the hash split always yields a monitor here (no size guard)
+            self._last_auto_monitor = "val" if use_val else "train"
         if show_progress:
             self._break_alpha_symmetry(net)
         bs, B = self._tb(), max(1, self.stream_shuffle_buffer)
@@ -2906,37 +3045,47 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
                 state["run"] = loss.detach() if state["run"] is None else state["run"] + loss.detach()
                 state["nb"] += 1
 
-        for epoch in self._epoch_iter(show_progress):
-            rng = np.random.RandomState(self.seed + _ITER_SHUFFLE_SEED + (epoch if isinstance(epoch, int) else 0))
-            buf, pending, state = [], [], {"run": None, "nb": 0}
+        best_state, done = None, False
+        for count, offset in self._deploy_epoch_blocks(stopper):
+            for epoch in self._epoch_iter(show_progress, count=count, offset=offset):
+                # epoch is the ABSOLUTE index across blocks, so an extension never replays a shuffle order
+                rng = np.random.RandomState(self.seed + _ITER_SHUFFLE_SEED + (epoch if isinstance(epoch, int) else 0))
+                buf, pending, state = [], [], {"run": None, "nb": 0}
 
-            def _emit(sample, pending=pending, state=state):  # bind this epoch's buffer/state
-                pending.append(sample)
-                if len(pending) >= bs:
-                    _step(pending, state)
-                    pending.clear()
+                def _emit(sample, pending=pending, state=state):  # bind this epoch's buffer/state
+                    pending.append(sample)
+                    if len(pending) >= bs:
+                        _step(pending, state)
+                        pending.clear()
 
-            for sid, x, y in source:
-                if use_val and self._iter_val_member(sid):
-                    continue  # val samples never train
-                if len(buf) < B:
-                    buf.append((x, y))
-                else:
-                    j = int(rng.randint(len(buf)))  # emit a random buffered sample, replace with the new one
-                    _emit(buf[j])
-                    buf[j] = (x, y)
-            for j in rng.permutation(len(buf)):  # drain the buffer in seeded order
-                _emit(buf[int(j)])
-            if pending:
-                _step(pending, state)  # flush the last partial batch
-            if stopper is not None:
-                m = (
-                    self._iter_val_loss(net, source, lf, fwd, task)
-                    if use_val
-                    else float(state["run"] / max(state["nb"], 1))
-                )
-                if stopper.step(m):
-                    break
+                for sid, x, y in source:
+                    if use_val and self._iter_val_member(sid):
+                        continue  # val samples never train
+                    if len(buf) < B:
+                        buf.append((x, y))
+                    else:
+                        j = int(rng.randint(len(buf)))  # emit a random buffered sample, replace with the new one
+                        _emit(buf[j])
+                        buf[j] = (x, y)
+                for j in rng.permutation(len(buf)):  # drain the buffer in seeded order
+                    _emit(buf[int(j)])
+                if pending:
+                    _step(pending, state)  # flush the last partial batch
+                if stopper is not None:
+                    m = (
+                        self._iter_val_loss(net, source, lf, fwd, task)
+                        if use_val
+                        else float(state["run"] / max(state["nb"], 1))
+                    )
+                    fired = stopper.step(m)
+                    best_state = self._snapshot_if_best(net, stopper, best_state)
+                    if fired:
+                        done = True
+                        break
+            if done:
+                break
+        if show_progress:
+            self._finish_deploy_epochs(net, stopper, best_state, self._epoch_cap())
         return net
 
     def _iter_val_loss(self, net, source, lf, fwd, task, bs=64):
@@ -3005,6 +3154,7 @@ class AllGraph(_ContractFitMixin, _ReportsMixin, _PersistenceMixin, _SizeSelecti
             "value": float(value),
             "route": self.route_detail,
         }
+        self._with_epoch_telemetry(r)
         if extra:
             r.update(extra)
         self._log(f"[AllGraph] {self.contract}: {metric}={value:.4f}  arch={arch}")

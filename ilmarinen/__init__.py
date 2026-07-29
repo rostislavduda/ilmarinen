@@ -125,7 +125,7 @@ def __dir__():  # keep the deprecated names discoverable (and visible to test_ap
     return sorted(list(globals()) + list(_LEGACY_EXPORTS))
 
 
-__version__ = "2.2.0"
+__version__ = "2.3.0"
 
 __all__ = [
     # primary API

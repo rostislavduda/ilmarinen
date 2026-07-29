@@ -30,9 +30,12 @@ USAGE:
 
 import argparse
 import gc
+import json
 import os
+import subprocess
 import sys
 import time
+from datetime import UTC, datetime
 
 import numpy as np
 import torch
@@ -41,6 +44,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")  # let unsupported MPS ops fall back to CPU
 from ilmarinen.core.allgraph import AllGraph
 from ilmarinen.core.dataset_registry import full_suite
+from ilmarinen.core.paths import cache_path
 
 # full-data budgets (width, depth, epochs) per contract. Epoch budget is a uniform 100 for every contract
 # (a common cap); pair with --auto_epoch to stop early once a model's training plateaus.
@@ -54,6 +58,76 @@ BUDGET = {
     "set": dict(width=64, depth=2, epochs=100),
     "operator": dict(width=24, depth=3, epochs=100),
 }
+
+# --------------------------------------------------------------------------- results store
+# The full suite is large enough that it is normally run in BATCHES (--contracts / --only), so results are
+# kept in one merge-on-write JSON document rather than a per-invocation dump: each run upserts its rows by
+# dataset name into whatever is already there. That is what lets eight separate batch commands accumulate
+# into a single table. Rows are also flushed after EVERY dataset, not at the end -- these runs are hours
+# long, and an interrupt or an OOM must not discard the datasets that already finished.
+#
+# Layout: {"meta": {...}, "rows": {<dataset>: {...}}}. `meta.runs` appends one record per invocation
+# (command line, device, versions, timestamp) so a published table is traceable to exactly what produced it.
+
+
+def _git_sha():
+    """Short HEAD sha for provenance, or None outside a git checkout."""
+    try:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        out = subprocess.run(
+            ["git", "-C", root, "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=5
+        )
+        return out.stdout.strip() or None
+    except Exception:
+        return None
+
+
+def load_results(path):
+    """Read the merge-on-write results document, or an empty one if it does not exist / is unreadable."""
+    try:
+        with open(path) as fh:
+            doc = json.load(fh)
+        if isinstance(doc, dict) and "rows" in doc:
+            return doc
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"[results] could not read {path} ({type(e).__name__}); starting a fresh document")
+    return {"meta": {"runs": []}, "rows": {}}
+
+
+def save_results(path, doc):
+    """Write the results document atomically (tmp + replace), so an interrupt mid-write cannot truncate a
+    file that already holds hours of completed runs."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
+    tmp = f"{path}.tmp"
+    with open(tmp, "w") as fh:
+        json.dump(doc, fh, indent=1, sort_keys=True, default=float)
+    os.replace(tmp, path)
+
+
+def _now():
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def record_row(doc, path, name, row):
+    """Upsert one dataset's row and flush. Keyed by dataset name, so re-running a batch REPLACES that
+    dataset's row and leaves every other batch's rows intact."""
+    row["timestamp"] = _now()
+    doc["rows"][name] = row
+    save_results(path, doc)
+
+
+def _stub_row(name, expected_contract, status, note):
+    """A row for a dataset that never produced a number (missing package, absent data, or a raised fit).
+    Recorded rather than dropped so the rendered table shows the gap instead of quietly omitting it."""
+    return {
+        "name": name,
+        "expected_contract": expected_contract,
+        "contract": None,
+        "status": status,
+        "note": note[:300],
+    }
 
 
 def resolve_device(pref):
@@ -597,6 +671,31 @@ def add_pipeline_args(ap):
         help="--auto_epoch: minimum epochs to train before early stopping is allowed (default 5)",
     )
     ap.add_argument(
+        "--auto_epoch_extend",
+        type=int,
+        default=0,
+        help="--auto_epoch: turn the epoch budget from a CEILING into a first block. When a deployed model "
+        "uses its whole budget WITHOUT the plateau test firing, it was stopped by the cap and not by "
+        "convergence, so grant it this many more epochs and continue from the same weights + optimizer "
+        "state (a true continuation, not a refit -- the epochs already trained are not redone). Repeats "
+        "until the model plateaus or --auto_epoch_max is reached. 0 (default) = off, budget is a hard cap.",
+    )
+    ap.add_argument(
+        "--auto_epoch_max",
+        type=int,
+        default=0,
+        help="--auto_epoch_extend: hard ceiling on the extended budget. Needed for termination -- a model "
+        "that never leaves its initial loss plateau can never early-stop (the warmup guard), so extension "
+        "alone would not end. 0 (default) = no ceiling.",
+    )
+    ap.add_argument(
+        "--auto_epoch_restore_best",
+        action="store_true",
+        help="--auto_epoch: after training, restore the weights from the epoch with the LOWEST monitored "
+        "loss instead of keeping the last epoch's. Training well past the plateau (which --auto_epoch_extend "
+        "makes likely) can end on a worse epoch than the best one seen. Off by default.",
+    )
+    ap.add_argument(
         "--save_models",
         action="store_true",
         help="after each dataset's fit, save the trained model to the package out/ folder as "
@@ -666,6 +765,9 @@ def make_allgraph(args, bud, device, router, tzmu, enabled_sg):
         auto_epoch_patience=args.auto_epoch_patience,
         auto_epoch_min_delta=args.auto_epoch_min_delta,
         auto_epoch_min_epochs=args.auto_epoch_min_epochs,
+        auto_epoch_extend=getattr(args, "auto_epoch_extend", 0),
+        auto_epoch_max=getattr(args, "auto_epoch_max", 0),
+        auto_epoch_restore_best=getattr(args, "auto_epoch_restore_best", False),
     )
 
 
@@ -735,9 +837,35 @@ def main():
     ap.add_argument(
         "--contracts", dest="contracts", default=None, help="comma-separated contracts (a.k.a. contracts) to include"
     )
+    ap.add_argument(
+        "--results_out",
+        default=None,
+        help="path of the merge-on-write results JSON (default: <data-dir>/standard_val_rows.json). Each run "
+        "upserts its rows by dataset name into whatever is already there, so separate --contracts batches "
+        "accumulate into one document; rows are flushed after every dataset. Feed it to "
+        "validation_runners/make_results_table.py to render the markdown table.",
+    )
+    ap.add_argument(
+        "--results_reset",
+        action="store_true",
+        help="start the results document from scratch instead of merging into the existing one.",
+    )
     add_pipeline_args(ap)
     args = ap.parse_args()
     device, router, tzmu, enabled_sg = resolve_pipeline(args, ap)
+
+    results_path = args.results_out or cache_path("standard_val_rows.json")
+    doc = {"meta": {"runs": []}, "rows": {}} if args.results_reset else load_results(results_path)
+    doc["meta"].setdefault("runs", []).append(
+        {
+            "command": " ".join(sys.argv),
+            "device": str(device),
+            "started": _now(),
+            "git_sha": _git_sha(),
+            "ilmarinen_version": getattr(__import__("ilmarinen"), "__version__", None),
+            "torch_version": torch.__version__,
+        }
+    )
 
     # every dataset (core registry + extended scientific datasets) is included by default; use --only/--skip
     # to run a subset.
@@ -773,10 +901,15 @@ def main():
             loaded.append((name, expected_mod, d))
         except ImportError as e:
             print(f"[{expected_mod:11}] {name:16} SKIP -- missing package: {str(e)[:40]}")
+            record_row(doc, results_path, name, _stub_row(name, expected_mod, "skip", f"missing package: {e}"))
         except FileNotFoundError as e:
             print(f"[{expected_mod:11}] {name:16} SKIP -- data not found: {str(e)[:40]}")
+            record_row(doc, results_path, name, _stub_row(name, expected_mod, "skip", f"data not found: {e}"))
         except Exception as e:
             print(f"[{expected_mod:11}] {name:16} ERROR (load) -- {type(e).__name__}: {str(e)[:45]}")
+            record_row(
+                doc, results_path, name, _stub_row(name, expected_mod, "error", f"load: {type(e).__name__}: {e}")
+            )
     # smallest datasets first, so the fastest results appear before the large ones
     loaded.sort(key=lambda t: _train_size(t[2]))
 
@@ -838,11 +971,59 @@ def main():
                 f"arch=[{arch}]{tag} params={params:>8} {dt:.0f}s"
             )
             print(f"{'':13} {'':16} field={d['field']:24} SOTA: {d['sota']}")
+            # Saving must never cost us the measurement. Some contracts hold modules that torch.save cannot
+            # pickle (the discovered-group EMLP builds its layer class inside a function), and a raised save
+            # used to propagate to the outer handler -- which overwrote a finished row with an error stub and
+            # discarded hours of training. Degrade to saved_model=null + a note instead.
+            saved, save_error = None, None
             if args.save_models:
-                saved = mg.save(stem=name)  # <dataset>_<timestamp>.pt in the package out/ folder
-                print(f"{'':13} {'':16} saved model -> {saved}")
+                try:
+                    saved = mg.save(stem=name)  # <dataset>_<timestamp>.pt in the package out/ folder
+                    print(f"{'':13} {'':16} saved model -> {saved}")
+                except Exception as se:
+                    save_error = f"{type(se).__name__}: {se}"
+                    print(f"{'':13} {'':16} SAVE FAILED (result kept) -- {save_error[:70]}")
+            if res.get("converged") is False:
+                print(f"{'':13} {'':16} NOT CONVERGED -- hit the {res.get('epoch_cap')}-epoch ceiling")
+            record_row(
+                doc,
+                results_path,
+                name,
+                {
+                    "name": name,
+                    "status": "ok",
+                    "contract": mg.contract,
+                    "expected_contract": expected_mod,
+                    "task": d["task"],
+                    "metric": metric,
+                    "value": float(value),
+                    "extra": {n: float(v) for n, v in extra},
+                    "skill": float(skill),
+                    "chance": float(chance),
+                    "arch": arch,
+                    "ipr": float(res["ipr"]) if "ipr" in res else None,
+                    # discovered-group contracts have no alpha cells, so `arch` above is "?"; record what
+                    # the group actually was instead -- that IS the architecture on this path.
+                    "group": res.get("group"),
+                    "group_generators": res.get("group_generators"),
+                    "params": int(params),
+                    "width": int(mg.width),
+                    "depth": int(mg.depth),
+                    # epoch telemetry: converged=False means the ceiling stopped it, not the plateau test
+                    "epochs_trained": res.get("epochs_trained"),
+                    "converged": res.get("converged"),
+                    "epoch_cap": res.get("epoch_cap"),
+                    "auto_epoch_monitor": res.get("auto_epoch_monitor"),
+                    "field": d["field"],
+                    "sota": d["sota"],
+                    "seconds": round(dt, 1),
+                    "saved_model": saved,
+                    "save_error": save_error,
+                },
+            )
         except Exception as e:
             print(f"[{expected_mod:11}] {name:16} ERROR -- {type(e).__name__}: {str(e)[:55]}")
+            record_row(doc, results_path, name, _stub_row(name, expected_mod, "error", f"{type(e).__name__}: {e}"))
         finally:
             # RELEASE MEMORY BETWEEN DATASETS. Apple Silicon uses UNIFIED memory (CPU+GPU share one pool), so a
             # prior fit's retained tensors starve the next model -- observed as a large slowdown across the
@@ -856,6 +1037,14 @@ def main():
                     torch.mps.empty_cache()
                 except Exception:
                     pass
+    print("=" * 100)
+    rows = doc["rows"]
+    ok = [r for r in rows.values() if r.get("status") == "ok"]
+    unconverged = [r["name"] for r in ok if r.get("converged") is False]
+    print(f"results -> {results_path}  ({len(ok)} ok / {len(rows)} datasets recorded across all batches)")
+    if unconverged:
+        print(f"hit the epoch ceiling without converging: {', '.join(sorted(unconverged))}")
+    print("render the table with: python -m validation_runners.make_results_table --insert-readme")
     print("=" * 100)
 
 
