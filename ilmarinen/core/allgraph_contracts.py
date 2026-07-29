@@ -406,7 +406,9 @@ class _ContractFitMixin:
                     nb += 1
                 if stopper is not None:
                     fired = stopper.step(run / max(nb, 1))
-                    best_state = self._snapshot_if_best(bundle, stopper, best_state)
+                    # TRAIN-loss monitor (no held-out split on this path), so restore-best must not select
+                    # on it -- the lowest train loss is the most overfit epoch. See _restore_best_allowed.
+                    best_state = self._snapshot_if_best(bundle, stopper, best_state, self._restore_best_allowed(None))
                     if fired:
                         done = True
                         break
@@ -540,7 +542,9 @@ class _ContractFitMixin:
                     nb += 1
                 if stopper is not None:
                     fired = stopper.step(run / max(nb, 1))
-                    best_state = self._snapshot_if_best(bundle, stopper, best_state)
+                    # TRAIN-loss monitor (no held-out split on this path), so restore-best must not select
+                    # on it -- the lowest train loss is the most overfit epoch. See _restore_best_allowed.
+                    best_state = self._snapshot_if_best(bundle, stopper, best_state, self._restore_best_allowed(None))
                     if fired:
                         done = True
                         break
