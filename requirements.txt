@@ -53,6 +53,15 @@ medmnist>=3.0
 # pyarrow: OPTIONAL -- Cell Painting metadata tables -- core/cellpainting.py. Usually pulled transitively by
 # jump-portrait; listed for the explicit cell-painting extra.
 # pyarrow>=14.0
+# kagglehub + pandas + pillow: OPTIONAL -- fetch an ARBITRARY Kaggle dataset and run it through the whole
+# pipeline (validation_runners/run_kaggle_validation.py). Not installed by default: kagglehub needs Kaggle
+# API credentials and network access, and none of the three is used by any registry dataset. pandas parses
+# the tables (tabular mode), pillow decodes the images (image mode); the npy/npz mode needs neither. The
+# runner imports all three lazily and fails with an install hint only when you actually reach that mode.
+# Equivalent to:  pip install "ilmarinen[kaggle]"
+# kagglehub>=0.3.10
+# pandas>=2.0
+# pillow>=10.0
 
 # ---- REPORTING / BUILD EXTRAS (only for the schematic + PDF tooling; not needed to use the package) ----
 # cairosvg>=2.7   # render the AllGraph SVG schematic to PNG

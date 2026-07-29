@@ -29,7 +29,12 @@ import time
 import numpy as np
 import torch
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(_HERE))  # repo root -> import ilmarinen
+# ...and THIS directory, so the sibling-module import below also resolves under
+# `python -m validation_runners.run_cellpainting_validation`: under -m, sys.path[0] is the CWD rather than
+# the script's own directory, so the repo-root insert alone is not enough.
+sys.path.insert(0, _HERE)
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 # inherit the standard suite's shared pipeline machinery (identical flags + model construction)
