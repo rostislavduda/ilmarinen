@@ -630,6 +630,119 @@ class TestRunnerContract:
         assert rkv.row_name(_args(handle="uciml/iris", name="custom")) == "custom"
 
 
+# =========================================================================== the rendered README table
+class TestKaggleResultsTable:
+    """make_results_table.py --kaggle renders the SEPARATE kaggle results document into its own README
+    region. These pin the parts that would otherwise publish a misleading claim."""
+
+    def _row(self, **kw):
+        base = {
+            "name": "Demo",
+            "status": "ok",
+            "task": "classification",
+            "contract": "spatial",
+            "metric": "acc",
+            "value": 0.9,
+            "extra": {},
+            "skill": 0.8,
+            "chance": 0.5,
+            "arch": "conv2d",
+            "params": 1234,
+            "width": 32,
+            "depth": 2,
+            "epochs_trained": 100,
+            "epoch_cap": 100,
+            "converged": None,
+            "kaggle": {
+                "handle": "owner/slug",
+                "source": "dataset",
+                "mode": "images",
+                "hw": 64,
+                "gray": True,
+                "per_class": None,
+                "n_train": 5600,
+                "n_test": 1600,
+                "n_features": 4096,
+            },
+        }
+        base.update(kw)
+        return {"meta": {"runs": []}, "rows": {base["name"]: base}}
+
+    def test_marks_an_untested_convergence_distinctly_from_a_failed_one(self):
+        """T-KG-26: `converged` is None when --auto_epoch was never set, which is the DEFAULT for an ad-hoc
+        run. Reusing the benchmark table's dagger would assert 'stopped at the ceiling without converging'
+        -- a claim about something that was not measured. Three states, three renderings."""
+        import make_results_table as mrt
+
+        assert mrt.kaggle_epochs({"epochs_trained": 40, "converged": True}) == "40"
+        assert mrt.kaggle_epochs({"epochs_trained": 40, "converged": False}) == "40†"
+        assert mrt.kaggle_epochs({"epochs_trained": 40, "converged": None}) == "40*"
+        assert mrt.kaggle_epochs({"epochs_trained": None}) == "-"
+
+    def test_every_marker_used_in_the_table_has_a_footnote(self):
+        """T-KG-27: an unexplained symbol in a published table is worse than no symbol. Whichever marker the
+        epoch column emits, its legend must be present."""
+        import make_results_table as mrt
+
+        for conv, marker in ((False, "†"), (None, "*")):
+            table = mrt.render_kaggle(self._row(converged=conv))
+            assert marker in table
+            legend = [ln for ln in table.splitlines() if ln.lstrip("\\").startswith(marker)]
+            assert legend, f"marker {marker!r} appears with no footnote explaining it"
+        # ...and a converged row emits neither marker, so neither legend should appear
+        clean = mrt.render_kaggle(self._row(converged=True, epochs_trained=40))
+        assert "40 |" in clean and "†" not in clean and "\\*" not in clean
+
+    def test_dataset_links_to_kaggle_and_local_runs_do_not(self):
+        import make_results_table as mrt
+
+        assert "https://www.kaggle.com/datasets/owner/slug" in mrt.render_kaggle(self._row())
+        local = self._row(kaggle={"mode": "npy", "n_train": 8, "n_test": 2, "n_features": 4})
+        assert "https://www.kaggle.com" not in mrt.render_kaggle(local)
+
+    def test_competition_handles_get_the_competitions_url(self):
+        import make_results_table as mrt
+
+        row = self._row(kaggle={"handle": "titanic", "source": "competition", "mode": "tabular"})
+        assert "https://www.kaggle.com/competitions/titanic" in mrt.render_kaggle(row)
+
+    def test_image_shape_is_reconstructed_from_hw_and_gray(self):
+        """The row records hw + gray rather than the tensor shape, so the cell has to rebuild it."""
+        import make_results_table as mrt
+
+        assert "1x64x64" in mrt.render_kaggle(self._row())
+        rgb = self._row(kaggle={**self._row()["rows"]["Demo"]["kaggle"], "gray": False})
+        assert "3x64x64" in mrt.render_kaggle(rgb)
+
+    def test_all_images_run_is_reported_as_such(self):
+        """per_class=None means every image was used; rendering a blank there would look like an omission."""
+        import make_results_table as mrt
+
+        assert "all images" in mrt.render_kaggle(self._row())
+
+    def test_empty_document_renders_a_placeholder_not_a_broken_table(self):
+        import make_results_table as mrt
+
+        assert "No Kaggle datasets recorded yet" in mrt.render_kaggle({"meta": {}, "rows": {}})
+
+    def test_failed_row_is_listed_rather_than_silently_dropped(self):
+        import make_results_table as mrt
+
+        doc = self._row()
+        doc["rows"]["Broken"] = {"name": "Broken", "status": "error", "note": "ingest: KeyError: nope"}
+        table = mrt.render_kaggle(doc)
+        assert "Attempted and not measured" in table and "Broken" in table and "KeyError" in table
+
+    def test_kaggle_and_benchmark_tables_use_distinct_markers(self):
+        """T-KG-28: the two regions must not collide, or one --insert-readme would overwrite the other."""
+        import make_results_table as mrt
+
+        assert mrt.KAGGLE_BEGIN != mrt.BEGIN and mrt.KAGGLE_END != mrt.END
+        readme = open(os.path.join(os.path.dirname(os.path.dirname(mrt.__file__)), "README.md")).read()
+        for marker in (mrt.BEGIN, mrt.END, mrt.KAGGLE_BEGIN, mrt.KAGGLE_END):
+            assert readme.count(marker) == 1, f"{marker} must appear exactly once in README.md"
+
+
 # =========================================================================== end-to-end (smoke)
 @pytest.mark.smoke
 class TestEndToEnd:

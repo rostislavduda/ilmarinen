@@ -1402,7 +1402,19 @@ def main():
         print(f"\n[{name}] INGEST FAILED -- {type(e).__name__}: {e}\n")
         record_row(doc, results_path, name, _stub_row(name, None, "error", f"ingest: {type(e).__name__}: {e}"))
         return 1
-    d["meta"].update({"handle": args.handle, "source": args.source, "root": root, "mode": mode, "mode_reason": why})
+    # Record the invoking command ON THE ROW, not just in meta.runs. An ad-hoc dataset's settings are
+    # per-dataset and hand-picked, so a row that cannot say how it was produced is not reproducible -- and
+    # meta.runs accumulates across invocations, so it cannot be attributed back to a specific row.
+    d["meta"].update(
+        {
+            "handle": args.handle,
+            "source": args.source,
+            "root": root,
+            "mode": mode,
+            "mode_reason": why,
+            "command": " ".join(sys.argv),
+        }
+    )
 
     t0, mg = time.time(), None
     try:

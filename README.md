@@ -245,18 +245,18 @@ Protocol:
 
 | dataset | metric | ilmarinen | SOTA reference | skill | architecture | params | epochs |
 |---|---|---|---|---|---|---|---|
-| MNIST | acc | 0.9918 | ~0.99+ (any CNN) | +0.9909 | `pointwise→atrous→atrous` | 297,759 | 21 |
-| BloodMNIST | acc | 0.9421 <br><sub>ROC-AUC 0.9967</sub> | ~0.958 (ResNet-18@28), ~0.966 (AutoML) | +0.9339 | `pointwise→pointwise→atrous` | 298,269 | 20 |
-| MNISTAngle | R2 | 0.7875 | n/a (semi-synthetic; -> high for a CNN reading digit orientation) | +0.7875 | `pointwise→pointwise→norm` | 297,462 | 15 |
+| MNIST | acc | 0.9917 | ~0.99+ (any CNN) | +0.9908 | `pointwise→atrous→atrous` | 297,759 | 21 |
+| BloodMNIST | acc | 0.9068 <br><sub>ROC-AUC 0.9946</sub> | ~0.958 (ResNet-18@28), ~0.966 (AutoML) | +0.8934 | `pointwise→pointwise→atrous` | 298,269 | 20 |
+| MNISTAngle | R2 | 0.7909 | n/a (semi-synthetic; -> high for a CNN reading digit orientation) | +0.7909 | `pointwise→pointwise→norm` | 297,462 | 15 |
 
 **`volumetric`** -- 3D grids (medical volumes)
 
 | dataset | metric | ilmarinen | SOTA reference | skill | architecture | params | epochs |
 |---|---|---|---|---|---|---|---|
-| DiffusionBlob3D | R2 | 0.9700 | n/a (synthetic-from-solver; -> 1 for a sufficient 3D conv) | +0.9700 | `norm→conv3d→conv_dw` | 93,144 | 24 |
-| OrganMNIST3D | acc | 0.9279 <br><sub>ROC-AUC 0.9958</sub> | ~0.907 (ResNet-18+3D; MedMNIST v2 benchmark best) | +0.9207 | `norm→conv_dw→conv_dw` | 121,498 | 40 |
-| VesselMNIST3D | ROC-AUC | 0.6781 <br><sub>acc 0.8770</sub> | ~0.87 (ResNet-18+3D), ~0.93 (best, ACS conv) | +0.6781 | `norm→conv_dw→conv_dw` | 121,345 | 31 |
-| SynapseMNIST3D | ROC-AUC | 0.5083 <br><sub>acc 0.6875</sub> | ~0.82 (ResNet-18+3D), ~0.85 (best, ResNet-50+3D) | +0.5083 | `norm→conv_dw→conv_dw` | 121,345 | 23 |
+| DiffusionBlob3D | R2 | 0.9892 | n/a (synthetic-from-solver; -> 1 for a sufficient 3D conv) | +0.9892 | `norm→conv3d→conv_dw` | 93,144 | 24 |
+| OrganMNIST3D | acc | 0.9361 <br><sub>ROC-AUC 0.9964</sub> | ~0.907 (ResNet-18+3D; MedMNIST v2 benchmark best) | +0.9297 | `norm→conv_dw→conv_dw` | 121,498 | 40 |
+| VesselMNIST3D | ROC-AUC | 0.8990 <br><sub>acc 0.9241</sub> | ~0.87 (ResNet-18+3D), ~0.93 (best, ACS conv) | +0.8990 | `norm→conv_dw→conv_dw` | 121,345 | 31 |
+| SynapseMNIST3D | ROC-AUC | 0.7573 <br><sub>acc 0.7699</sub> | ~0.82 (ResNet-18+3D), ~0.85 (best, ResNet-50+3D) | +0.7573 | `norm→conv_dw→conv_dw` | 121,345 | 23 |
 
 **`4d`** -- 3D+time grids (solver-generated fields)
 
@@ -324,6 +324,64 @@ for C in 4d operator graph spatial volumetric set equivariant sequence; do
 done
 python -m validation_runners.make_results_table --insert-readme
 ```
+
+## Bring-your-own-dataset results (Kaggle)
+
+Datasets fetched from Kaggle with `run_kaggle_validation.py` and run through the same pipeline. **This is
+not a benchmark suite and these are not leaderboard scores.** Every entry above is a registry dataset with
+a fixed loader, a literature reference, and one uniform protocol; every entry *here* is a dataset chosen
+ad hoc, ingested by heuristic, and split by us rather than by the competition. Read this table as evidence
+about how routing and priced selection behave on data nobody tuned them for — not as a claim to be
+competitive on it.
+
+`chance` is the accuracy of the **train-majority-class** predictor measured on the test split, and
+`skill = (acc − chance)/(1 − chance)`, so a model that only learned the majority class scores 0.
+
+These runs use the **same pipeline settings as the benchmark suite above** — `--preset opt --select sparse
+--sparsity_mu 0.3 --select_size variable` with the `--auto_epoch val` convergence criterion — so the model
+selection is directly comparable; only the data and the per-dataset ingest flags differ. Width, depth and
+epoch count in the table are therefore what the selector *chose*, not what was requested. The per-run notes
+below list only the ingest flags that differ; each row's exact invoking command is recorded in
+`kaggle_val_rows.json` under `kaggle.command`.
+
+<!-- BEGIN:kaggleval -->
+
+| dataset | task | ingest -> contract | ilmarinen | chance | skill | architecture | params | epochs | train/test |
+|---|---|---|---|---|---|---|---|---|---|
+| [BloodCells](https://www.kaggle.com/datasets/paultimothymooney/blood-cells) | classification | `images` -> `spatial` | 0.8010 | 0.2509 | +0.7343 | `conv_dw→pointwise→atrous` | 298,137 | 42 | 9,957/2,487<br><sub>3x64x64</sub> |
+| [BrainTumorMRI](https://www.kaggle.com/datasets/masoudnickparvar/brain-tumor-mri-dataset) | classification | `images` -> `spatial` | 0.7887 | 0.2500 | +0.7183 | `conv_dw→pointwise→norm` | 297,561 | 29 | 5,600/1,600<br><sub>1x64x64</sub> |
+| [ChestXrayPneumonia](https://www.kaggle.com/datasets/paultimothymooney/chest-xray-pneumonia) | classification | `images` -> `spatial` | 0.8798 | 0.6250 | +0.6795 | `pointwise→pointwise→norm→conv_dw` | 396,510 | 36 | 5,216/624<br><sub>1x64x64</sub> |
+
+Settings per run (everything else is the shared pipeline default):
+
+- **BloodCells** -- `--mode images`, `--hw 64`, `--per_class 0` (all images), `--auto_epoch val`, `--select sparse`, selected width 32, depth 3, stopped at 42 of a 1000-epoch ceiling, the dataset's own dataset2-master/dataset2-master/images/TRAIN / dataset2-master/dataset2-master/images/TEST directories
+- **BrainTumorMRI** -- `--mode images`, `--hw 64` `--gray`, `--per_class 0` (all images), `--auto_epoch val`, `--select sparse`, selected width 32, depth 3, stopped at 29 of a 1000-epoch ceiling, the dataset's own Training / Testing directories
+- **ChestXrayPneumonia** -- `--mode images`, `--hw 64` `--gray`, `--per_class 0` (all images), `--auto_epoch val`, `--select sparse`, selected width 32, depth 4, stopped at 36 of a 1000-epoch ceiling, the dataset's own chest_xray/train / chest_xray/test directories
+
+<!-- END:kaggleval -->
+
+Reproduce, then regenerate this table (needs Kaggle credentials — see
+`validation_runners/README.md`):
+
+```bash
+export ILMARINEN_DATA_DIR=$PWD/ilmarinen_data
+
+# ALWAYS inspect first: file inventory, per-column verdicts, target/task guesses, split, chance, route
+python validation_runners/run_kaggle_validation.py --handle <owner/slug> --inspect
+
+# then fit, with the benchmark suite's pipeline flags plus this dataset's ingest flags
+python validation_runners/run_kaggle_validation.py --handle <owner/slug> \
+  <ingest flags from the list above, e.g. --mode images --gray --hw 64 --per_class 0> \
+  --preset opt --select sparse --sparsity_mu 0.3 --select_size variable \
+  --auto_epoch val --auto_epoch_patience 10 --auto_epoch_min_epochs 10 \
+  --auto_epoch_extend 100 --auto_epoch_max 1000 --auto_epoch_restore_best \
+  --save_models --name <RowName>
+
+python -m validation_runners.make_results_table --kaggle --insert-readme
+```
+
+Rows live in `$ILMARINEN_DATA_DIR/kaggle_val_rows.json`, a separate document from the benchmark suite's,
+so an ad-hoc dataset can never leak into the table above.
 
 ## Tests
 
