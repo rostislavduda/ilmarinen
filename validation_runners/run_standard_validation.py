@@ -228,6 +228,18 @@ def _eval_test(
     net = mg.net
     mod = mg.contract
     dev = mg.device
+    # EVAL MODE, not just no_grad. Several schemas carry BatchNorm (the `norm` primitive, and the spatial/
+    # volumetric stems), and a module left in TRAIN mode normalizes each eval minibatch by that minibatch's
+    # OWN statistics instead of the running averages -- so the reported score depends on how the test split
+    # happens to be ordered. On a class-ordered test split (common: UCR splits, MedMNIST, and any
+    # class-directory image tree) a 256-sample batch is nearly one class, BatchNorm centres away the very
+    # between-class signal being classified, and the score collapses. Measured on a 4-class MRI model:
+    # 0.4800 in train mode on a class-ordered split vs 0.8656 in eval mode, with eval mode correctly
+    # batch-order invariant. `AllGraph._forward_new` (predict/load) has always called this; the runner did
+    # not, so the two disagreed on the same weights. Also stops BatchNorm's running buffers being updated
+    # from TEST data -- which train-mode forwards do even under no_grad, since the buffer write is not an
+    # autograd op.
+    net.eval()
     if getattr(mg, "_canonicalization_applied", False) and mod not in ("sequence", "spatial", "volumetric", "4d"):
         test = mg.apply_canonicalization(test)
     y = np.asarray(test.y)

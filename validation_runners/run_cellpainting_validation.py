@@ -48,6 +48,11 @@ def _embeddings(mg, X, batch=128):
     on the final Linear head's INPUT. Falls back to the logits if the net exposes no single Linear head."""
     net = mg.net
     dev = mg.device
+    # EVAL MODE, not just no_grad -- this suite routes to the spatial schema, which carries BatchNorm. Left in
+    # train mode, BatchNorm would normalize each batch by its OWN statistics rather than the running averages,
+    # making the embedding (and therefore the retrieval mAP) depend on how the fields happen to be batched,
+    # and updating the running buffers from held-out data as a side effect. Same fix as _eval_test.
+    net.eval()
     cap = {}
     head = getattr(net, "head", None)
     handle = None
@@ -142,6 +147,7 @@ def main():
     emb = _embeddings(mg, Xte)
     mapv = retrieval_map(emb, yte)
     # classification accuracy as a secondary reference
+    mg.net.eval()  # as in _embeddings: BatchNorm must use running stats, not per-batch ones
     with torch.no_grad():
         logits = torch.cat([mg.net(Xte[j : j + 128].to(mg.device)).cpu() for j in range(0, len(Xte), 128)])
     acc = float((logits.argmax(1).numpy() == yte).mean())
