@@ -66,7 +66,7 @@ all = [
     "pillow>=10.0",
 ]
 # Development / CI tooling
-dev = ["pytest>=7.0", "ruff==0.16.0", "pre-commit>=3.5"]
+dev = ["pytest>=7.0", "ruff==0.16.1", "pre-commit>=3.5"]
 
 [project.urls]
 Homepage = "https://github.com/rostislavduda/ilmarinen"
